@@ -347,7 +347,7 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
     // Calculate total number of vertices per layer
     const verticesPerLayer = width * height;
     
-    // Add faces for top surface - CORRECTED WINDING ORDER
+    // Add faces for top surface
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const topLeft = y * width + x + 1;  // +1 because OBJ indices start at 1
@@ -361,7 +361,7 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       }
     }
     
-    // Add faces for bottom surface - CORRECTED WINDING ORDER
+    // Add faces for bottom surface
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const topLeft = y * width + x + 1 + verticesPerLayer;
@@ -375,7 +375,7 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       }
     }
     
-    // Add side walls - CORRECTED WINDING ORDER
+    // Add side walls with consistent winding order - FIXED NORMALS
     // Front edge (y=0)
     for (let x = 0; x < width - 1; x++) {
       const topLeft = x + 1;
@@ -383,8 +383,9 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const bottomLeft = topLeft + verticesPerLayer;
       const bottomRight = topRight + verticesPerLayer;
       
-      objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
-      objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
+      // Reversed winding order for correct outward-facing normals
+      objContent += `f ${topRight} ${topLeft} ${bottomRight}\n`;
+      objContent += `f ${bottomRight} ${topLeft} ${bottomLeft}\n`;
     }
     
     // Back edge (y=height-1)
@@ -394,8 +395,9 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const bottomLeft = topLeft + verticesPerLayer;
       const bottomRight = topRight + verticesPerLayer;
       
-      objContent += `f ${topRight} ${topLeft} ${bottomRight}\n`;
-      objContent += `f ${bottomRight} ${topLeft} ${bottomLeft}\n`;
+      // Reversed winding order for correct outward-facing normals
+      objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
+      objContent += `f ${bottomLeft} ${topRight} ${bottomRight}\n`;
     }
     
     // Left edge (x=0)
@@ -405,8 +407,9 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const topLeftBottom = topLeft + verticesPerLayer;
       const bottomLeftBottom = bottomLeft + verticesPerLayer;
       
+      // Reversed winding order for correct outward-facing normals
       objContent += `f ${topLeft} ${bottomLeft} ${topLeftBottom}\n`;
-      objContent += `f ${bottomLeft} ${bottomLeftBottom} ${topLeftBottom}\n`;
+      objContent += `f ${topLeftBottom} ${bottomLeft} ${bottomLeftBottom}\n`;
     }
     
     // Right edge (x=width-1)
@@ -416,10 +419,11 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const topRightBottom = topRight + verticesPerLayer;
       const bottomRightBottom = bottomRight + verticesPerLayer;
       
+      // Reversed winding order for correct outward-facing normals
       objContent += `f ${bottomRight} ${topRight} ${bottomRightBottom}\n`;
       objContent += `f ${bottomRightBottom} ${topRight} ${topRightBottom}\n`;
     }
-    
+
     return objContent;
   };
   
