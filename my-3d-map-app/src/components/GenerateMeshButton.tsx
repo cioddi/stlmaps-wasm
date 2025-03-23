@@ -347,7 +347,7 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
     // Calculate total number of vertices per layer
     const verticesPerLayer = width * height;
     
-    // Add faces for top surface
+    // Add faces for top surface - CORRECTED WINDING ORDER
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const topLeft = y * width + x + 1;  // +1 because OBJ indices start at 1
@@ -356,12 +356,12 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
         const bottomRight = bottomLeft + 1;
         
         // Two triangles per grid cell for the top surface
-        objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
-        objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
+        objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
+        objContent += `f ${bottomLeft} ${topRight} ${bottomRight}\n`;
       }
     }
     
-    // Add faces for bottom surface (inverted orientation)
+    // Add faces for bottom surface - CORRECTED WINDING ORDER
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const topLeft = y * width + x + 1 + verticesPerLayer;
@@ -370,12 +370,12 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
         const bottomRight = bottomLeft + 1;
         
         // Two triangles per grid cell for the bottom (inverted)
-        objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
-        objContent += `f ${topRight} ${bottomRight} ${bottomLeft}\n`;
+        objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
+        objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
       }
     }
     
-    // Add side walls
+    // Add side walls - CORRECTED WINDING ORDER
     // Front edge (y=0)
     for (let x = 0; x < width - 1; x++) {
       const topLeft = x + 1;
@@ -383,8 +383,8 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const bottomLeft = topLeft + verticesPerLayer;
       const bottomRight = topRight + verticesPerLayer;
       
-      objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
-      objContent += `f ${bottomLeft} ${topRight} ${bottomRight}\n`;
+      objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
+      objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
     }
     
     // Back edge (y=height-1)
@@ -394,8 +394,8 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const bottomLeft = topLeft + verticesPerLayer;
       const bottomRight = topRight + verticesPerLayer;
       
-      objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
-      objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
+      objContent += `f ${topRight} ${topLeft} ${bottomRight}\n`;
+      objContent += `f ${bottomRight} ${topLeft} ${bottomLeft}\n`;
     }
     
     // Left edge (x=0)
@@ -405,8 +405,8 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const topLeftBottom = topLeft + verticesPerLayer;
       const bottomLeftBottom = bottomLeft + verticesPerLayer;
       
-      objContent += `f ${topLeft} ${topLeftBottom} ${bottomLeft}\n`;
-      objContent += `f ${bottomLeft} ${topLeftBottom} ${bottomLeftBottom}\n`;
+      objContent += `f ${topLeft} ${bottomLeft} ${topLeftBottom}\n`;
+      objContent += `f ${bottomLeft} ${bottomLeftBottom} ${topLeftBottom}\n`;
     }
     
     // Right edge (x=width-1)
@@ -416,8 +416,8 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
       const topRightBottom = topRight + verticesPerLayer;
       const bottomRightBottom = bottomRight + verticesPerLayer;
       
-      objContent += `f ${topRight} ${bottomRight} ${topRightBottom}\n`;
-      objContent += `f ${topRightBottom} ${bottomRight} ${bottomRightBottom}\n`;
+      objContent += `f ${bottomRight} ${topRight} ${bottomRightBottom}\n`;
+      objContent += `f ${bottomRightBottom} ${topRight} ${topRightBottom}\n`;
     }
     
     return objContent;
