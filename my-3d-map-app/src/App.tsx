@@ -8,20 +8,10 @@ import {
   CssBaseline,
 } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
-import PdfPreview, { PdfPreviewOptions } from "./components/PdfPreview";
+import BboxSelector from "./components/BboxSelector";
 
 const App: React.FC = () => {
   const bboxRef = useRef<GeoJSON.Feature | undefined>(undefined);
-  const [pdfPreviewOptions, setPdfPreviewOptions] = useState<PdfPreviewOptions>(
-    {
-      center: [13.404954, 52.520008],
-      scale: [1, 1],
-      rotate: 0,
-      orientation: "portrait",
-      width: 800,
-      height: 800,
-    }
-  );
   const [downloadUrl, setDownloadUrl] = useState<string>("");
 
   const generate3DModel = async () => {
@@ -65,10 +55,16 @@ f 1 2 3 4
               "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
           }}
         />
-        <PdfPreview
+        <BboxSelector
           geojsonRef={bboxRef}
-          options={pdfPreviewOptions}
-          setOptions={setPdfPreviewOptions}
+          options={{
+            center: [13.404954, 52.520008],
+            scale: [1, 1],
+            rotate: 0,
+            orientation: "portrait",
+            width: 800,
+            height: 800,
+          }}
         />
         <div style={{ marginTop: "1rem" }}>
           <Button variant="contained" color="primary" onClick={generate3DModel}>
