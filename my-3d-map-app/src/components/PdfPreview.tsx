@@ -91,8 +91,6 @@ export default function PdfPreview(props: Props) {
 	const targetRef = useRef<HTMLDivElement>(null);
 	const fixedScaleRef = useRef<number | null>(null);
 	const moveableRef = useRef<Moveable>(null);
-	const mapContainerRef = useRef<HTMLDivElement>(document.querySelector('.mapContainer'));
-	//const [transform, setTransform] = useState('translate(452.111px, 15.6148px)');
 	const mapHook = useMap({
 		mapId: props.mapId,
 	});
@@ -263,7 +261,7 @@ export default function PdfPreview(props: Props) {
 		transformOrigin,
 	]);
 
-	return mapContainerRef.current ? ReactDOM.createPortal(
+	return mapHook?.map?.map?._canvas?.parentNode?.parentNode ? ReactDOM.createPortal(
 		<>
 			<div
 				className="target"
@@ -331,6 +329,6 @@ export default function PdfPreview(props: Props) {
 				}}
 			/>
 		</>,
-		mapContainerRef.current
+		mapHook.map.map._canvas.parentNode.parentElement as HTMLElement
 	):<></>;
 }
