@@ -72,9 +72,14 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
         const ambientLight = new THREE.AmbientLight(0x404040);
         scene.add(ambientLight);
         
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
         directionalLight.position.set(1, 1, 1);
         scene.add(directionalLight);
+        
+        // Add second directional light from another angle for better illumination
+        const secondaryLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        secondaryLight.position.set(-1, 0.5, -1);
+        scene.add(secondaryLight);
         
         const width = containerRef.current.clientWidth;
         const height = containerRef.current.clientHeight;
@@ -87,23 +92,74 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
         
         // Setup camera
         const camera = new THREE.PerspectiveCamera(
-          75,
+          50, // Reduced FOV for better perspective
           width / height,
           0.1,
-          1000
+          2000
         );
         camera.position.z = 5;
         
-        // Setup renderer
-        rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
+        // Setup renderer with better shadow settings
+        rendererRef.current = new THREE.WebGLRenderer({ 
+          antialias: true,
+          alpha: true 
+        });
         rendererRef.current.setSize(width, height);
+        rendererRef.current.setPixelRatio(window.devicePixelRatio);
+        rendererRef.current.shadowMap.enabled = true;
+        rendererRef.current.shadowMap.type = THREE.PCFSoftShadowMap; // Better shadow quality
         containerRef.current.appendChild(rendererRef.current.domElement);
         
-        // Add orbit controls
+        // Add orbit controls with better settings
         const controls = new OrbitControls(camera, rendererRef.current.domElement);
         controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = true;
+        controls.minDistance = 0.5; // Reduced to allow closer zooming
+        controls.maxDistance = 20;
         
         console.log("Parsing OBJ data", objData.substring(0, 100) + "...");
+
+        // Set up a ground plane to receive shadows
+        const groundGeometry = new THREE.PlaneGeometry(100, 100);
+        const groundMaterial = new THREE.MeshStandardMaterial({ 
+          color: 0xcccccc,
+          roughness: 0.8,
+          metalness: 0.2,
+          side: THREE.DoubleSide
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = Math.PI * -0.5;
+        ground.position.y = -2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        
+        // Set up better directional light for shadows
+        const shadowLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        shadowLight.position.set(5, 10, 7);
+        shadowLight.castShadow = true;
+        shadowLight.shadow.mapSize.width = 1024;
+        shadowLight.shadow.mapSize.height = 1024;
+        shadowLight.shadow.camera.near = 0.5;
+        shadowLight.shadow.camera.far = 50;
+        shadowLight.shadow.camera.left = -10;
+        shadowLight.shadow.camera.right = 10;
+        shadowLight.shadow.camera.top = 10;
+        shadowLight.shadow.camera.bottom = -10;
+        scene.add(shadowLight);
+
+        // Create a better gradient texture - brown to green
+        const vertexTexture = new THREE.DataTexture(
+          new Uint8Array([
+            139, 69, 19, 255,    // Brown at bottom/back
+            100, 140, 100, 255,  // Darker green
+            150, 180, 150, 255,  // Medium green
+            200, 220, 200, 255,  // Light green
+            255, 255, 255, 255   // White at top/front
+          ]),
+          1, 5, THREE.RGBAFormat
+        );
+        vertexTexture.needsUpdate = true;
         
         // Load OBJ model
         const loader = new OBJLoader();
@@ -112,21 +168,107 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
           const objModel = loader.parse(objData);
           console.log("OBJ parsed successfully", objModel);
           
+          // Calculate global bounding box
+          const globalBox = new THREE.Box3().setFromObject(objModel);
+          const globalMin = globalBox.min;
+          const globalMax = globalBox.max;
+          
+          objModel.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              // Create material with improved gradient based on view direction
+              child.material = new THREE.MeshStandardMaterial({
+                roughness: 0.7,
+                metalness: 0.1,
+                onBeforeCompile: (shader) => {
+                  shader.uniforms.minZ = { value: globalMin.z };
+                  shader.uniforms.maxZ = { value: globalMax.z };
+                  shader.uniforms.minY = { value: globalMin.y };
+                  shader.uniforms.maxY = { value: globalMax.y };
+                  shader.uniforms.gradientMap = { value: vertexTexture };
+                  
+                  // Add custom vertex shader code for gradient
+                  shader.vertexShader = shader.vertexShader.replace(
+                    '#include <common>',
+                    `#include <common>
+                    varying float vGradient;
+                    uniform float minZ;
+                    uniform float maxZ;
+                    uniform float minY;
+                    uniform float maxY;`
+                  );
+                  
+                  shader.vertexShader = shader.vertexShader.replace(
+                    '#include <begin_vertex>',
+                    `#include <begin_vertex>
+                    // Use only Z for a clean back-to-front gradient
+                    float normalizedZ = (position.z - minZ) / (maxZ - minZ);
+                    vGradient = normalizedZ;`
+                  );
+                  
+                  // Add custom fragment shader code for gradient
+                  shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <common>',
+                    `#include <common>
+                    varying float vGradient;
+                    uniform sampler2D gradientMap;`
+                  );
+                  
+                  shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <color_fragment>',
+                    `#include <color_fragment>
+                    vec4 gradColor = texture2D(gradientMap, vec2(0.5, vGradient));
+                    diffuseColor.rgb = gradColor.rgb;`
+                  );
+                }
+              });
+              
+              // Enable shadows on the mesh
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          
           // Center the object
           const box = new THREE.Box3().setFromObject(objModel);
           const center = box.getCenter(new THREE.Vector3());
-          
           objModel.position.sub(center);
+          
+          // Position slightly above the ground
+          objModel.position.y = box.getSize(new THREE.Vector3()).y / 2;
+          
           scene.add(objModel);
           
-          // Adjust camera to fit the object
-          const size = box.getSize(new THREE.Vector3());
-          const maxDim = Math.max(size.x, size.y, size.z);
-          const fov = camera.fov * (Math.PI / 180);
-          const cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
+          // Create a helper function to properly fit the camera to the object
+          const fitCameraToObject = (camera: THREE.PerspectiveCamera, object: THREE.Object3D, padding = 1.5) => {
+            const boundingBox = new THREE.Box3().setFromObject(object);
+            
+            const center = boundingBox.getCenter(new THREE.Vector3());
+            const size = boundingBox.getSize(new THREE.Vector3());
+            
+            // Get the max side of the bounding box
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            
+            // Calculate the required distance
+            let cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
+            cameraZ *= padding; // Add padding for rotation
+            
+            // Set camera position - adjusted for better viewing angle
+            camera.position.set(center.x, center.y + (size.y / 3), center.z + cameraZ);
+            camera.lookAt(center);
+            
+            // Update camera near and far planes to ensure the object remains visible
+            camera.near = cameraZ / 100;
+            camera.far = cameraZ * 100;
+            camera.updateProjectionMatrix();
+            
+            // Update controls target
+            controls.target.copy(center);
+            controls.update();
+          };
           
-          camera.position.z = cameraZ * 1.5; // Add margin
-          camera.updateProjectionMatrix();
+          // Apply camera fitting with generous padding
+          fitCameraToObject(camera, objModel, 2.2); // Increased padding for better rotation view
           
           // Animation loop
           const animate = () => {

@@ -7,6 +7,8 @@ import {
   Box,
 } from "@mui/material";
 import ModelPreview from "./ModelPreview";
+import Pbf from 'pbf';
+import { VectorTile } from '@mapbox/vector-tile';
 
 // Define interfaces for our data structures
 interface GridSize {
@@ -45,6 +47,24 @@ interface ElevationProcessingResult {
 
 interface GenerateMeshButtonProps {
   bboxRef: RefObject<GeoJSONFeature>;
+}
+
+// Add new interfaces for building data
+interface BuildingFeature {
+  geometry: {
+    coordinates: number[][][];  // Polygon coordinates
+    type: string;
+  };
+  properties: {
+    render_height?: number;  // Height data
+    height?: number;         // Alternative height property
+  };
+}
+
+interface BuildingData {
+  footprint: number[][];  // Simplified to single polygon ring
+  height: number;
+  baseElevation: number;  // Elevation at building position
 }
 
 export const GenerateMeshButton = function ({
@@ -192,98 +212,574 @@ export const GenerateMeshButton = function ({
 
     return objContent;
   };
-  const generate3DModel = async (): Promise<void> => {
-    if (!bboxRef.current) return;
-    console.log("Generating 3D model for:", bboxRef.current);
-    setGenerating(true);
 
-    try {
-      // Extract bbox coordinates from the feature
-      const feature = bboxRef.current;
+// Modify generate3DModel function to include buildings
+const generate3DModel = async (): Promise<void> => {
+  if (!bboxRef.current) return;
+  console.log("Generating 3D model for:", bboxRef.current);
+  setGenerating(true);
 
-      if (!feature.geometry || feature.geometry.type !== "Polygon") {
-        console.error("Invalid geometry: expected a Polygon");
-        setGenerating(false);
-        return;
-      }
+  try {
+    // Extract bbox coordinates from the feature
+    const feature = bboxRef.current;
 
-      const coordinates = feature.geometry.coordinates[0]; // First ring of the polygon
-
-      // Find min/max coordinates
-      let minLng = Infinity,
-        minLat = Infinity,
-        maxLng = -Infinity,
-        maxLat = -Infinity;
-      coordinates.forEach((coord: number[]) => {
-        const [lng, lat] = coord;
-        minLng = Math.min(minLng, lng);
-        minLat = Math.min(minLat, lat);
-        maxLng = Math.max(maxLng, lng);
-        maxLat = Math.max(maxLat, lat);
-      });
-
-      // Find appropriate zoom level where we get at most 4 tiles
-      // Start with maximum supported zoom level (12)
-      let zoom = 12;
-      while (zoom > 0) {
-        const tileCount = calculateTileCount(
-          minLng,
-          minLat,
-          maxLng,
-          maxLat,
-          zoom
-        );
-        if (tileCount <= 4) break;
-        zoom--;
-      }
-
-      console.log(`Using zoom level ${zoom} for the 3D model`);
-
-      // Get tile coordinates
-      const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-      console.log(`Downloading ${tiles.length} tiles`);
-
-      // Download tile data
-      const tileData = await Promise.all(
-        tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
-      );
-
-      // Process elevation data to create a grid
-      const { elevationGrid, gridSize } = processElevationData(
-        tileData,
-        tiles,
-        minLng,
-        minLat,
-        maxLng,
-        maxLat
-      );
-
-      // Generate OBJ model from elevation grid
-      const objData = generateObjFromElevation(
-        elevationGrid,
-        gridSize,
-        minLng,
-        minLat,
-        maxLng,
-        maxLat
-      );
-
-      // Store obj data for preview
-      setObjData(objData);
-
-      // Create download
-      const blob = new Blob([objData], { type: "text/plain" });
-      setDownloadUrl(URL.createObjectURL(blob));
-      console.log("3D model generated successfully");
-
-      // Open the preview
-      setPreviewOpen(true);
-    } catch (error) {
-      console.error("Error generating 3D model:", error);
-    } finally {
+    if (!feature.geometry || feature.geometry.type !== "Polygon") {
+      console.error("Invalid geometry: expected a Polygon");
       setGenerating(false);
+      return;
     }
-  };
+
+    const coordinates = feature.geometry.coordinates[0]; // First ring of the polygon
+
+    // Find min/max coordinates
+    let minLng = Infinity,
+      minLat = Infinity,
+      maxLng = -Infinity,
+      maxLat = -Infinity;
+    coordinates.forEach((coord: number[]) => {
+      const [lng, lat] = coord;
+      minLng = Math.min(minLng, lng);
+      minLat = Math.min(minLat, lat);
+      maxLng = Math.max(maxLng, lng);
+      maxLat = Math.max(maxLat, lat);
+    });
+
+    // Find appropriate zoom level where we get at most 4 tiles
+    // Start with maximum supported zoom level (12)
+    let zoom = 12;
+    while (zoom > 0) {
+      const tileCount = calculateTileCount(
+        minLng,
+        minLat,
+        maxLng,
+        maxLat,
+        zoom
+      );
+      if (tileCount <= 4) break;
+      zoom--;
+    }
+
+    console.log(`Using zoom level ${zoom} for the 3D model`);
+
+    // Get tile coordinates
+    const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
+    console.log(`Downloading ${tiles.length} tiles`);
+
+    // Download tile data
+    const tileData = await Promise.all(
+      tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
+    );
+
+    // Process elevation data to create a grid
+    const { elevationGrid, gridSize } = processElevationData(
+      tileData,
+      tiles,
+      minLng,
+      minLat,
+      maxLng,
+      maxLat
+    );
+
+    // Fetch building data - use zoom level + 2 for buildings to get more detail
+    const buildingZoom = Math.min(zoom + 2, 14);
+    console.log(`Fetching buildings at zoom level ${buildingZoom}`);
+    const buildingFeatures = await fetchBuildingData(
+      minLng,
+      minLat,
+      maxLng,
+      maxLat,
+      buildingZoom
+    );
+
+    // Process building data
+    const buildings = processBuildings(
+      buildingFeatures,
+      elevationGrid,
+      gridSize,
+      minLng,
+      minLat,
+      maxLng,
+      maxLat
+    );
+
+    // Generate OBJ model from elevation grid and buildings
+    const objData = generateObjFromElevationWithBuildings(
+      elevationGrid,
+      gridSize,
+      buildings,
+      minLng,
+      minLat,
+      maxLng,
+      maxLat
+    );
+
+    // Store obj data for preview
+    setObjData(objData);
+
+    // Create download
+    const blob = new Blob([objData], { type: "text/plain" });
+    setDownloadUrl(URL.createObjectURL(blob));
+    console.log("3D model generated successfully");
+
+    // Open the preview
+    setPreviewOpen(true);
+  } catch (error) {
+    console.error("Error generating 3D model:", error);
+  } finally {
+    setGenerating(false);
+  }
+};
+
+// Function to fetch building data from vector tiles
+const fetchBuildingData = async (
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  zoom: number
+): Promise<BuildingFeature[]> => {
+  // Get tiles that cover the bounding box
+  const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
+  console.log(`Fetching building data from ${tiles.length} tiles`);
+
+  const buildingFeatures: BuildingFeature[] = [];
+  
+  try {
+    // Get the current map style to extract building layer source
+    const map = document._map;
+    if (!map) {
+      console.error("Map instance not found");
+      return buildingFeatures;
+    }
+    
+    // Find building source from map style
+    const style = map.getStyle();
+    let buildingSource = null;
+    let buildingSourceLayer = null;
+    
+    // Find a layer containing buildings
+    for (const layerId in style.layers) {
+      const layer = style.layers[layerId];
+      if (layer.id.toLowerCase().includes('building') || 
+          (layer['source-layer'] && layer['source-layer'].toLowerCase().includes('building'))) {
+        buildingSource = layer.source;
+        buildingSourceLayer = layer['source-layer'];
+        break;
+      }
+    }
+    
+    if (!buildingSource || !buildingSourceLayer) {
+      console.warn("Could not find building source layer in map style");
+      // Fallback to OpenMapTiles source
+      buildingSource = 'openmaptiles';
+      buildingSourceLayer = 'building';
+    }
+    
+    // Get source URL template
+    const sourceInfo = style.sources[buildingSource];
+    if (!sourceInfo || !sourceInfo.tiles) {
+      console.warn("Building source doesn't have tile URLs");
+      return buildingFeatures;
+    }
+    
+    const tileUrlTemplate = sourceInfo.tiles[0];
+    
+    await Promise.all(
+      tiles.map(async (tile) => {
+        // Replace placeholders in URL template with tile coordinates
+        const url = tileUrlTemplate
+          .replace('{z}', tile.z.toString())
+          .replace('{x}', tile.x.toString())
+          .replace('{y}', tile.y.toString());
+        
+        console.log(`Fetching buildings from: ${url}`);
+        
+        try {
+          const response = await fetch(url);
+          
+          if (!response.ok) {
+            console.warn(`Failed to fetch building tile: ${response.status}`);
+            return;
+          }
+          
+          const arrayBuffer = await response.arrayBuffer();
+          
+          // Parse MVT tile
+          const vectorTile = parseVectorTile(arrayBuffer);
+          
+          // Extract building features
+          const buildings = extractBuildingsFromVectorTile(
+            vectorTile,
+            tile,
+            buildingSourceLayer
+          );
+          
+          // Add to collection
+          buildingFeatures.push(...buildings);
+        } catch (error) {
+          console.error(`Error fetching building tile ${tile.z}/${tile.x}/${tile.y}:`, error);
+        }
+      })
+    );
+    
+    console.log(`Found ${buildingFeatures.length} buildings`);
+    return buildingFeatures;
+  } catch (error) {
+    console.error("Error fetching building data:", error);
+    return [];
+  }
+};
+
+// Function to parse MVT
+const parseVectorTile = (arrayBuffer: ArrayBuffer): any => {
+  try {
+    // Create a vector tile from the buffer
+    const pbf = new Pbf(arrayBuffer);
+    const vectorTile = new VectorTile(pbf);
+    return vectorTile;
+  } catch (error) {
+    console.error("Error parsing vector tile:", error);
+    return {};
+  }
+};
+
+// Function to extract buildings from vector tile
+const extractBuildingsFromVectorTile = (
+  vectorTile: any, 
+  tile: Tile, 
+  sourceLayer: string
+): BuildingFeature[] => {
+  const features: BuildingFeature[] = [];
+  
+  try {
+    // Check if the tile has the building layer
+    if (!vectorTile.layers || !vectorTile.layers[sourceLayer]) {
+      return features;
+    }
+    
+    const buildingLayer = vectorTile.layers[sourceLayer];
+    const tileSize = 4096; // Standard MVT tile size
+    
+    // Iterate through building features in this layer
+    for (let i = 0; i < buildingLayer.length; i++) {
+      const feature = buildingLayer.feature(i);
+      const geomType = feature.type;
+      
+      // We only want polygons for buildings
+      if (geomType !== 3) continue;
+      
+      // Get the geometry as GeoJSON
+      const geojson = feature.toGeoJSON(tile.x, tile.y, tile.z);
+      
+      // Only process if we have polygon geometry
+      if (geojson.geometry.type !== 'Polygon' && geojson.geometry.type !== 'MultiPolygon') {
+        continue;
+      }
+      
+      // For MultiPolygon, we treat each polygon as a separate building
+      if (geojson.geometry.type === 'MultiPolygon') {
+        geojson.geometry.coordinates.forEach(polygonCoords => {
+          features.push({
+            geometry: {
+              type: 'Polygon',
+              coordinates: polygonCoords
+            },
+            properties: {
+              render_height: feature.properties.render_height || feature.properties.height,
+              height: feature.properties.height || feature.properties.render_height || 5
+            }
+          });
+        });
+      } else {
+        // Single polygon
+        features.push({
+          geometry: {
+            type: 'Polygon',
+            coordinates: geojson.geometry.coordinates
+          },
+          properties: {
+            render_height: feature.properties.render_height || feature.properties.height,
+            height: feature.properties.height || feature.properties.render_height || 5
+          }
+        });
+      }
+    }
+    
+    return features;
+  } catch (error) {
+    console.error("Error extracting buildings from vector tile:", error);
+    return [];
+  }
+};
+
+// Alternative implementation for direct building fetch if the map instance doesn't expose the needed APIs
+const fetchBuildingDataDirect = async (
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  zoom: number
+): Promise<BuildingFeature[]> => {
+  // Get tiles that cover the bounding box
+  const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
+  console.log(`Fetching building data from ${tiles.length} tiles using direct method`);
+
+  const buildingFeatures: BuildingFeature[] = [];
+  
+  try {
+    // Use OpenMapTiles or OSM vector tile source
+    const baseUrl = "https://api.maptiler.com/tiles/v3";
+    const apiKey = "YOUR_API_KEY"; // Replace with your actual API key or get from environment
+    
+    await Promise.all(
+      tiles.map(async (tile) => {
+        const url = `${baseUrl}/${tile.z}/${tile.x}/${tile.y}.pbf?key=${apiKey}`;
+        
+        console.log(`Fetching buildings from: ${url}`);
+        
+        try {
+          const response = await fetch(url);
+          
+          if (!response.ok) {
+            console.warn(`Failed to fetch building tile: ${response.status}`);
+            return;
+          }
+          
+          const arrayBuffer = await response.arrayBuffer();
+          const vectorTile = parseVectorTile(arrayBuffer);
+          
+          // Building layer name in OpenMapTiles
+          const buildings = extractBuildingsFromVectorTile(
+            vectorTile,
+            tile,
+            "building"
+          );
+          
+          // Add to collection
+          buildingFeatures.push(...buildings);
+        } catch (error) {
+          console.error(`Error fetching building tile ${tile.z}/${tile.x}/${tile.y}:`, error);
+        }
+      })
+    );
+    
+    console.log(`Found ${buildingFeatures.length} buildings`);
+    return buildingFeatures;
+  } catch (error) {
+    console.error("Error fetching building data:", error);
+    return [];
+  }
+};
+
+// Process building data to map to the terrain
+const processBuildings = (
+  buildingFeatures: BuildingFeature[],
+  elevationGrid: number[][],
+  gridSize: GridSize,
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number
+): BuildingData[] => {
+  const buildings: BuildingData[] = [];
+  const { width, height } = gridSize;
+  
+  buildingFeatures.forEach((feature) => {
+    if (feature.geometry.type !== "Polygon") return;
+    
+    // Get the building footprint (first ring of the polygon)
+    const footprint = feature.geometry.coordinates[0];
+    
+    // Check if the building is within our bounds
+    let isInBounds = false;
+    for (const point of footprint) {
+      const [lng, lat] = point;
+      if (
+        lng >= minLng && lng <= maxLng &&
+        lat >= minLat && lat <= maxLat
+      ) {
+        isInBounds = true;
+        break;
+      }
+    }
+    
+    if (!isInBounds) return;
+    
+    // Get building height from properties
+    let buildingHeight = feature.properties.render_height || feature.properties.height || 5; // Default 5m
+    
+    // Get base elevation by sampling the elevation at the center of the building
+    const centroid = calculateCentroid(footprint);
+    const [centroidLng, centroidLat] = centroid;
+    
+    // Convert to grid coordinates
+    const gridX = Math.floor(((centroidLng - minLng) / (maxLng - minLng)) * (width - 1));
+    const gridY = Math.floor(((centroidLat - minLat) / (maxLat - minLat)) * (height - 1));
+    
+    // Get base elevation from the grid (with bounds checking)
+    let baseElevation = 0;
+    if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
+      baseElevation = elevationGrid[gridY][gridX];
+    } else {
+      // If out of bounds, approximate based on nearby points
+      const nearestX = Math.max(0, Math.min(width - 1, gridX));
+      const nearestY = Math.max(0, Math.min(height - 1, gridY));
+      baseElevation = elevationGrid[nearestY][nearestX];
+    }
+    
+    // Add the building with its height and base elevation
+    buildings.push({
+      footprint,
+      height: buildingHeight,
+      baseElevation
+    });
+  });
+  
+  console.log(`Processed ${buildings.length} buildings for 3D model`);
+  return buildings;
+};
+
+// Helper to calculate centroid of a polygon
+const calculateCentroid = (points: number[][]): number[] => {
+  let sumX = 0;
+  let sumY = 0;
+  
+  for (const point of points) {
+    sumX += point[0];
+    sumY += point[1];
+  }
+  
+  return [sumX / points.length, sumY / points.length];
+};
+
+// Generate OBJ with buildings
+const generateObjFromElevationWithBuildings = (
+  elevationGrid: number[][],
+  gridSize: GridSize,
+  buildings: BuildingData[],
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number
+): string => {
+  // Start with the terrain
+  const objContent = generateObjFromElevation(
+    elevationGrid,
+    gridSize,
+    minLng,
+    minLat,
+    maxLng,
+    maxLat
+  );
+  
+  // If no buildings, return just the terrain
+  if (buildings.length === 0) {
+    return objContent;
+  }
+  
+  // Count vertices in the terrain to know the offset
+  const terrainVertexCount = countVerticesInObj(objContent);
+  
+  // Add buildings to the OBJ content
+  let buildingsObjContent = "\n# Building models\n";
+  
+  buildings.forEach((building, index) => {
+    buildingsObjContent += `# Building ${index + 1}\n`;
+    buildingsObjContent += generateBuildingObj(
+      building,
+      terrainVertexCount + getBuildingVertexOffset(buildings, index),
+      verticalExaggeration
+    );
+  });
+  
+  return objContent + buildingsObjContent;
+};
+
+// Count vertices in OBJ content
+const countVerticesInObj = (objContent: string): number => {
+  const lines = objContent.split('\n');
+  let count = 0;
+  
+  for (const line of lines) {
+    if (line.startsWith('v ')) {
+      count++;
+    }
+  }
+  
+  return count;
+};
+
+// Calculate vertex offset for a building
+const getBuildingVertexOffset = (buildings: BuildingData[], currentIndex: number): number => {
+  let offset = 0;
+  
+  for (let i = 0; i < currentIndex; i++) {
+    // Each building adds vertices for its footprint (top + bottom) and walls
+    const footprintPoints = buildings[i].footprint.length;
+    offset += footprintPoints * 2 + footprintPoints * 2; // Top + bottom + walls
+  }
+  
+  return offset;
+};
+
+// Generate OBJ content for a building
+const generateBuildingObj = (
+  building: BuildingData,
+  vertexOffset: number,
+  verticalExaggeration: number
+): string => {
+  let objContent = '';
+  const { footprint, height, baseElevation } = building;
+  
+  // Calculate exaggerated heights
+  const baseZ = baseElevation * verticalExaggeration;
+  const topZ = baseZ + height * verticalExaggeration;
+  
+  // Add vertices for the top of the building
+  for (const point of footprint) {
+    const [lng, lat] = point;
+    objContent += `v ${lng} ${lat} ${topZ}\n`;
+  }
+  
+  // Add vertices for the bottom of the building
+  for (const point of footprint) {
+    const [lng, lat] = point;
+    objContent += `v ${lng} ${lat} ${baseZ}\n`;
+  }
+  
+  const footprintSize = footprint.length;
+  
+  // Add the top face (ccw for correct normals)
+  objContent += "f";
+  for (let i = 0; i < footprintSize; i++) {
+    objContent += ` ${vertexOffset + i + 1}`;
+  }
+  objContent += "\n";
+  
+  // Add the bottom face (cw for correct normals)
+  objContent += "f";
+  for (let i = footprintSize - 1; i >= 0; i--) {
+    objContent += ` ${vertexOffset + footprintSize + i + 1}`;
+  }
+  objContent += "\n";
+  
+  // Add the side faces (walls)
+  for (let i = 0; i < footprintSize; i++) {
+    const nextI = (i + 1) % footprintSize;
+    
+    // Define the four corners of this wall face
+    const topLeft = vertexOffset + i + 1;
+    const topRight = vertexOffset + nextI + 1;
+    const bottomLeft = vertexOffset + footprintSize + i + 1;
+    const bottomRight = vertexOffset + footprintSize + nextI + 1;
+    
+    // Create two triangles for the wall face
+    objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
+    objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
+  }
+  
+  return objContent;
+};
 
   // Helper function to calculate the number of tiles at a given zoom level
   const calculateTileCount = (
