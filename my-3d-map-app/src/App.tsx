@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, Suspense } from "react";
 import {
   AppBar,
   Toolbar,
@@ -6,30 +6,15 @@ import {
   Button,
   Container,
   CssBaseline,
+  CircularProgress,
 } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import BboxSelector from "./components/BboxSelector";
+import ModelPreview from "./components/ModelPreview";
+import { GenerateMeshButton } from "./components/GenerateMeshButton";
 
 const App: React.FC = () => {
   const bboxRef = useRef<GeoJSON.Feature | undefined>(undefined);
-  const [downloadUrl, setDownloadUrl] = useState<string>("");
-
-  const generate3DModel = async () => {
-    if (!bboxRef.current) return;
-    console.log(bboxRef.current);
-
-    const mockOBJ = `# Mock OBJ
-o bounding_box
-v 0 0 0
-v 1 0 0
-v 1 1 0
-v 0 1 0
-f 1 2 3 4
-`;
-
-    const blob = new Blob([mockOBJ], { type: "text/plain" });
-    setDownloadUrl(URL.createObjectURL(blob));
-  };
 
   return (
     <>
@@ -49,8 +34,8 @@ f 1 2 3 4
             right: 0,
           }}
           options={{
-            center: [13.404954, 52.520008],
-            zoom: 14,
+            center: [11.310180118044855, 47.55592195900479],
+            zoom: 9,
             style:
               "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
           }}
@@ -58,29 +43,15 @@ f 1 2 3 4
         <BboxSelector
           geojsonRef={bboxRef}
           options={{
-            center: [13.404954, 52.520008],
+            center: [11.310180118044855, 47.55592195900479],
             scale: [1, 1],
             rotate: 0,
             orientation: "portrait",
-            width: 800,
-            height: 800,
+            width: 40000,
+            height: 40000,
           }}
         />
-        <div style={{ marginTop: "1rem" }}>
-          <Button variant="contained" color="primary" onClick={generate3DModel}>
-            Generate 3D Model
-          </Button>
-          {downloadUrl && (
-            <Button
-              variant="outlined"
-              style={{ marginLeft: "1rem" }}
-              href={downloadUrl}
-              download="model.obj"
-            >
-              Download OBJ
-            </Button>
-          )}
-        </div>
+        <GenerateMeshButton bboxRef={bboxRef} />
       </Container>
     </>
   );
