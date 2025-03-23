@@ -115,8 +115,8 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
         controls.screenSpacePanning = true;
-        controls.minDistance = 0.5; // Reduced to allow closer zooming
-        controls.maxDistance = 20;
+        controls.minDistance = 0.1; // Further reduced to allow very close zooming
+        controls.maxDistance = 50;   // Increased for more zoom out range
         
         console.log("Parsing OBJ data", objData.substring(0, 100) + "...");
 
@@ -257,8 +257,8 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
             camera.position.set(center.x, center.y + (size.y / 3), center.z + cameraZ);
             camera.lookAt(center);
             
-            // Update camera near and far planes to ensure the object remains visible
-            camera.near = cameraZ / 100;
+            // Update camera near and far planes to ensure the object remains visible during close zooming
+            camera.near = 0.01; // Set very close near plane
             camera.far = cameraZ * 100;
             camera.updateProjectionMatrix();
             
