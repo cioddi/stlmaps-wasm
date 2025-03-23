@@ -1,7 +1,10 @@
-import { useState, Suspense, RefObject } from "react";
+import { useState, Suspense, RefObject, ChangeEvent } from "react";
 import {
   Button,
   CircularProgress,
+  Slider,
+  Typography,
+  Box,
 } from "@mui/material";
 import ModelPreview from "./ModelPreview";
 
@@ -49,6 +52,7 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
   const [objData, setObjData] = useState<string>("");
   const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
+  const [verticalExaggeration, setVerticalExaggeration] = useState<number>(0.00006);
 
   const generate3DModel = async (): Promise<void> => {
     if (!bboxRef.current) return;
@@ -300,24 +304,50 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
     let objContent = "# OBJ file generated from elevation data\n";
     objContent += "# Bounds: " + [minLng, minLat, maxLng, maxLat].join(", ") + "\n";
     
-    // Add vertices
+    // Add vertices for top surface
     const { width, height } = gridSize;
     const scaleX = (maxLng - minLng) / (width - 1);
     const scaleY = (maxLat - minLat) / (height - 1);
-    const verticalScale = 0.001; // Scale factor for vertical dimension
     
+    // Find min elevation for base
+    let minElevation = Infinity;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        minElevation = Math.min(minElevation, elevationGrid[y][x]);
+      }
+    }
+    
+    // Set base elevation to be a fixed distance below the minimum elevation
+    const baseOffset = 100; // meters below the minimum elevation
+    const baseElevation = (minElevation - baseOffset) * verticalExaggeration;
+    
+    // Add top surface vertices
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const lng = minLng + x * scaleX;
         const lat = minLat + y * scaleY;
-        const elevation = elevationGrid[y][x] * verticalScale;
+        const elevation = elevationGrid[y][x] * verticalExaggeration;
         
         // OBJ format: v x y z
         objContent += `v ${lng} ${lat} ${elevation}\n`;
       }
     }
     
-    // Add faces (triangles)
+    // Add bottom surface vertices
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const lng = minLng + x * scaleX;
+        const lat = minLat + y * scaleY;
+        
+        // OBJ format: v x y z
+        objContent += `v ${lng} ${lat} ${baseElevation}\n`;
+      }
+    }
+    
+    // Calculate total number of vertices per layer
+    const verticesPerLayer = width * height;
+    
+    // Add faces for top surface
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const topLeft = y * width + x + 1;  // +1 because OBJ indices start at 1
@@ -325,13 +355,76 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
         const bottomLeft = (y + 1) * width + x + 1;
         const bottomRight = bottomLeft + 1;
         
-        // Two triangles per grid cell
+        // Two triangles per grid cell for the top surface
         objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
         objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
       }
     }
     
+    // Add faces for bottom surface (inverted orientation)
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const topLeft = y * width + x + 1 + verticesPerLayer;
+        const topRight = topLeft + 1;
+        const bottomLeft = (y + 1) * width + x + 1 + verticesPerLayer;
+        const bottomRight = bottomLeft + 1;
+        
+        // Two triangles per grid cell for the bottom (inverted)
+        objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
+        objContent += `f ${topRight} ${bottomRight} ${bottomLeft}\n`;
+      }
+    }
+    
+    // Add side walls
+    // Front edge (y=0)
+    for (let x = 0; x < width - 1; x++) {
+      const topLeft = x + 1;
+      const topRight = topLeft + 1;
+      const bottomLeft = topLeft + verticesPerLayer;
+      const bottomRight = topRight + verticesPerLayer;
+      
+      objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
+      objContent += `f ${bottomLeft} ${topRight} ${bottomRight}\n`;
+    }
+    
+    // Back edge (y=height-1)
+    for (let x = 0; x < width - 1; x++) {
+      const topLeft = (height - 1) * width + x + 1;
+      const topRight = topLeft + 1;
+      const bottomLeft = topLeft + verticesPerLayer;
+      const bottomRight = topRight + verticesPerLayer;
+      
+      objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
+      objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
+    }
+    
+    // Left edge (x=0)
+    for (let y = 0; y < height - 1; y++) {
+      const topLeft = y * width + 1;
+      const bottomLeft = (y + 1) * width + 1;
+      const topLeftBottom = topLeft + verticesPerLayer;
+      const bottomLeftBottom = bottomLeft + verticesPerLayer;
+      
+      objContent += `f ${topLeft} ${topLeftBottom} ${bottomLeft}\n`;
+      objContent += `f ${bottomLeft} ${topLeftBottom} ${bottomLeftBottom}\n`;
+    }
+    
+    // Right edge (x=width-1)
+    for (let y = 0; y < height - 1; y++) {
+      const topRight = y * width + width;
+      const bottomRight = (y + 1) * width + width;
+      const topRightBottom = topRight + verticesPerLayer;
+      const bottomRightBottom = bottomRight + verticesPerLayer;
+      
+      objContent += `f ${topRight} ${bottomRight} ${topRightBottom}\n`;
+      objContent += `f ${topRightBottom} ${bottomRight} ${bottomRightBottom}\n`;
+    }
+    
     return objContent;
+  };
+  
+  const handleExaggerationChange = (event: Event, newValue: number | number[]) => {
+    setVerticalExaggeration(newValue as number);
   };
   
   return (
@@ -342,8 +435,27 @@ function GenerateMeshButton({ bboxRef }: GenerateMeshButtonProps) {
         left: 20, 
         backgroundColor: "rgba(255,255,255,0.8)", 
         padding: "10px", 
-        borderRadius: "4px" 
+        borderRadius: "4px",
+        width: "300px" 
       }}>
+        <Box sx={{ mb: 2 }}>
+          <Typography id="vertical-exaggeration-slider" gutterBottom>
+            Vertical Exaggeration: {verticalExaggeration.toFixed(6)}
+          </Typography>
+          <Slider
+            value={verticalExaggeration}
+            onChange={handleExaggerationChange}
+            aria-labelledby="vertical-exaggeration-slider"
+            min={0.000001}
+            max={0.001}
+            step={0.00001}
+            marks={[
+              { value: 0.000001, label: 'Min' },
+              { value: 0.0001, label: 'Med' },
+              { value: 0.001, label: 'Max' }
+            ]}
+          />
+        </Box>
         <Button 
           variant="contained" 
           color="primary" 
