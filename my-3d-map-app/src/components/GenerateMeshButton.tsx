@@ -423,11 +423,7 @@ export const GenerateMeshButton = function ({
     maxLng: number,
     maxLat: number
   ): string => {
-    const {
-      objContent,
-      minElevation,
-      maxElevation,
-    } = generateObjFromElevation(
+    const { objContent, minElevation, maxElevation } = generateObjFromElevation(
       elevationGrid,
       gridSize,
       minLng,
@@ -458,8 +454,8 @@ export const GenerateMeshButton = function ({
         maxLng,
         maxLat,
         elevationGrid, // pass it
-        gridSize,      // pass it
-        minElevation,  // from the terrain
+        gridSize, // pass it
+        minElevation, // from the terrain
         maxElevation
       );
     });
@@ -550,9 +546,13 @@ export const GenerateMeshButton = function ({
       const [mx, my] = transformToMeshCoordinates(bbox, 200, 200, [lng, lat]);
 
       // Top vertex => terrainZ + (building base + height)
-      const topZ = terrainZ + (adjustedBase - minElevation) * 0.2 + effectiveHeight;
+      const topZ =
+        terrainZ + (adjustedBase - minElevation) * 0.2 + effectiveHeight;
       // Bottom vertex => terrainZ + building base, slightly subtracted to dip in
-      const bottomZ = terrainZ + (adjustedBase - minElevation) * 0.2 - BUILDING_SUBMERGE_OFFSET;
+      const bottomZ =
+        terrainZ +
+        (adjustedBase - minElevation) * 0.2 -
+        BUILDING_SUBMERGE_OFFSET;
 
       topVerts.push([mx, my, topZ]);
       bottomVerts.push([mx, my, bottomZ]);
@@ -975,6 +975,7 @@ export const GenerateMeshButton = function ({
           color="primary"
           onClick={generate3DModel}
           disabled={generating}
+          sx={{ marginBottom: "5px" }}
         >
           {generating ? <CircularProgress size={24} /> : "Generate 3D Model"}
         </Button>
@@ -982,16 +983,16 @@ export const GenerateMeshButton = function ({
           <>
             <Button
               variant="outlined"
-              style={{ marginLeft: "1rem" }}
               onClick={() => setPreviewOpen(true)}
+              sx={{ marginBottom: "5px", marginRight: "5px" }}
             >
               Preview
             </Button>
             <Button
               variant="outlined"
-              style={{ marginLeft: "1rem" }}
               href={downloadUrl}
               download="model.obj"
+              sx={{ marginBottom: "5px" }}
             >
               Download OBJ
             </Button>
@@ -1028,13 +1029,20 @@ function sampleTerrainElevationAtPoint(
   const { width, height } = gridSize;
 
   // If out of bounds, just return minElevation
-  if (lng < bbox.minLng || lng > bbox.maxLng || lat < bbox.minLat || lat > bbox.maxLat) {
+  if (
+    lng < bbox.minLng ||
+    lng > bbox.maxLng ||
+    lat < bbox.minLat ||
+    lat > bbox.maxLat
+  ) {
     return minElevation;
   }
 
   // Map (lng, lat) to [0..width-1, 0..height-1]
-  const fracX = ((lng - bbox.minLng) / (bbox.maxLng - bbox.minLng)) * (width - 1);
-  const fracY = ((lat - bbox.minLat) / (bbox.maxLat - bbox.minLat)) * (height - 1);
+  const fracX =
+    ((lng - bbox.minLng) / (bbox.maxLng - bbox.minLng)) * (width - 1);
+  const fracY =
+    ((lat - bbox.minLat) / (bbox.maxLat - bbox.minLat)) * (height - 1);
 
   const x0 = Math.floor(fracX);
   const y0 = Math.floor(fracY);
@@ -1116,13 +1124,17 @@ const generateBuildingObj = (
       200,
       [lng, lat],
       // raise by building height plus terrain
-      minElevation + (maxElevation - minElevation) * (terrainZ / (200 * 0.2)) + effectiveHeight,
+      minElevation +
+        (maxElevation - minElevation) * (terrainZ / (200 * 0.2)) +
+        effectiveHeight,
       minElevation,
       maxElevation
     );
     // Shift final Z by using the same ratio
-    const topZ = terrainZ + (effectiveHeight / (200 * 0.2));
-    objContent += `v ${tx.toFixed(4)} ${ty.toFixed(4)} ${(topZ - BUILDING_SUBMERGE_OFFSET).toFixed(4)}\n`;
+    const topZ = terrainZ + effectiveHeight / (200 * 0.2);
+    objContent += `v ${tx.toFixed(4)} ${ty.toFixed(4)} ${(
+      topZ - BUILDING_SUBMERGE_OFFSET
+    ).toFixed(4)}\n`;
   }
 
   // Then bottom vertices
