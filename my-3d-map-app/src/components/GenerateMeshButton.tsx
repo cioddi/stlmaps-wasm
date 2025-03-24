@@ -490,7 +490,7 @@ export const GenerateMeshButton = function ({
 
   // Example multiplier for building height
   // Increase or adjust to match your desired scale
-  const SCALE_FACTOR = 500;
+  const SCALE_FACTOR = 300;
 
   // Generate OBJ content for a building
   const generateBuildingObj = (
