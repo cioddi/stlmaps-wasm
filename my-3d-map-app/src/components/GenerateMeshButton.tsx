@@ -501,7 +501,6 @@ export const GenerateMeshButton = function ({
     let objContent = "";
     const { footprint, height, baseElevation } = building;
 
-    // Add a group for this building
     objContent += "g building\n";
 
     if (
@@ -588,30 +587,30 @@ export const GenerateMeshButton = function ({
     const topIndexOffset = vertexOffset;
     const bottomIndexOffset = vertexOffset + addedTopVertices.length;
 
-    // Top face
+    // Flip winding for top face
     objContent += "f";
-    for (let i = 0; i < addedTopVertices.length; i++) {
+    for (let i = validPoints.length - 1; i >= 0; i--) {
       objContent += ` ${topIndexOffset + i + 1}`;
     }
     objContent += "\n";
 
-    // Bottom face
+    // Flip winding for bottom face
     objContent += "f";
-    for (let i = addedBottomVertices.length - 1; i >= 0; i--) {
+    for (let i = 0; i < validPoints.length; i++) {
       objContent += ` ${bottomIndexOffset + i + 1}`;
     }
     objContent += "\n";
 
-    // Side faces
-    const count = addedTopVertices.length;
-    for (let i = 0; i < count; i++) {
-      const nextI = (i + 1) % count;
+    // Flip side faces
+    for (let i = 0; i < validPoints.length; i++) {
+      const nextI = (i + 1) % validPoints.length;
       const topLeft = topIndexOffset + i + 1;
       const topRight = topIndexOffset + nextI + 1;
       const bottomLeft = bottomIndexOffset + i + 1;
       const bottomRight = bottomIndexOffset + nextI + 1;
-      objContent += `f ${topLeft} ${bottomLeft} ${topRight}\n`;
-      objContent += `f ${topRight} ${bottomLeft} ${bottomRight}\n`;
+
+      objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
+      objContent += `f ${topRight} ${bottomRight} ${bottomLeft}\n`;
     }
 
     return objContent;
