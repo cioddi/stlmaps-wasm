@@ -173,8 +173,66 @@ export const GenerateMeshButton = function ({
       }
     }
 
-    // The rest of the function continues as before...
-    // ...existing code for bottom and side surfaces...
+    // -----------------------------------------------------------
+    // 1. Add bottom faces
+    // -----------------------------------------------------------
+    for (let y = 0; y < height - 1; y++) {
+      for (let x = 0; x < width - 1; x++) {
+        const offset = verticesPerLayer; // bottom layer offset
+        const btl = offset + (y * width + x + 1);
+        const btr = btl + 1;
+        const bbl = offset + ((y + 1) * width + x + 1);
+        const bbr = bbl + 1;
+
+        // Flip face winding for the bottom
+        objContent += `f ${btl} ${bbl} ${btr}\n`;
+        objContent += `f ${bbl} ${bbr} ${btr}\n`;
+      }
+    }
+
+    // -----------------------------------------------------------
+    // 2. Add side faces around the mesh perimeter
+    // -----------------------------------------------------------
+    for (let y = 0; y < height - 1; y++) {
+      // Left edge
+      const topLeft1 = y * width + 1;
+      const topLeft2 = (y + 1) * width + 1;
+      const botLeft1 = verticesPerLayer + topLeft1;
+      const botLeft2 = verticesPerLayer + topLeft2;
+      // Flipped order:
+      objContent += `f ${topLeft1} ${topLeft2} ${botLeft1}\n`;
+      objContent += `f ${topLeft2} ${botLeft2} ${botLeft1}\n`;
+
+      // Right edge
+      const topRight1 = y * width + width;
+      const topRight2 = (y + 1) * width + width;
+      const botRight1 = verticesPerLayer + topRight1;
+      const botRight2 = verticesPerLayer + topRight2;
+      // Flip normals
+      objContent += `f ${topRight1} ${botRight1} ${topRight2}\n`;
+      objContent += `f ${topRight2} ${botRight1} ${botRight2}\n`;
+    }
+
+    // For edges parallel to the x-axis, flip the face definitions:
+    for (let x = 0; x < width - 1; x++) {
+      // Top edge
+      const topEdge1 = x + 1;
+      const topEdge2 = x + 2;
+      const botEdge1 = verticesPerLayer + topEdge1;
+      const botEdge2 = verticesPerLayer + topEdge2;
+      // Flip normals to match the y-axis edges
+      objContent += `f ${topEdge1} ${botEdge1} ${topEdge2}\n`;
+      objContent += `f ${topEdge2} ${botEdge1} ${botEdge2}\n`;
+
+      // Bottom edge
+      const topBottom1 = (height - 1) * width + x + 1;
+      const topBottom2 = topBottom1 + 1;
+      const botBottom1 = verticesPerLayer + topBottom1;
+      const botBottom2 = verticesPerLayer + topBottom2;
+      // Flip normals to match the y-axis edges
+      objContent += `f ${topBottom1} ${topBottom2} ${botBottom1}\n`;
+      objContent += `f ${topBottom2} ${botBottom2} ${botBottom1}\n`;
+    }
 
     return objContent;
   };
@@ -916,8 +974,8 @@ export const GenerateMeshButton = function ({
             value={verticalExaggeration}
             onChange={handleExaggerationChange}
             aria-labelledby="vertical-exaggeration-slider"
-            min={0.000001}
-            max={0.001}
+            min={0.01}
+            max={1.0}
             step={0.00001}
             marks={[
               { value: 0.000001, label: "Min" },
