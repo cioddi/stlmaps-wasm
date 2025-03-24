@@ -80,6 +80,9 @@ export const GenerateMeshButton = function ({
     objContent +=
       "# Bounds: " + [minLng, minLat, maxLng, maxLat].join(", ") + "\n";
 
+    // Add a group for the terrain
+    objContent += "g terrain\n";
+
     // Define standardized mesh dimensions
     const meshWidth = 200;
     const meshHeight = 200;
@@ -477,13 +480,11 @@ export const GenerateMeshButton = function ({
     currentIndex: number
   ): number => {
     let offset = 0;
-
     for (let i = 0; i < currentIndex; i++) {
-      // Each building adds vertices for its footprint (top + bottom) and walls
       const footprintPoints = buildings[i].footprint.length;
-      offset += footprintPoints * 2 + footprintPoints * 2; // Top + bottom + walls
+      // Changed: remove the extra "* 2" to fix vertex indexing
+      offset += footprintPoints * 2;
     }
-
     return offset;
   };
 
@@ -499,6 +500,9 @@ export const GenerateMeshButton = function ({
   ): string => {
     let objContent = "";
     const { footprint, height, baseElevation } = building;
+
+    // Add a group for this building
+    objContent += "g building\n";
 
     if (
       !footprint ||
