@@ -488,6 +488,10 @@ export const GenerateMeshButton = function ({
     return offset;
   };
 
+  // Example multiplier for building height
+  // Increase or adjust to match your desired scale
+  const SCALE_FACTOR = 500;
+
   // Generate OBJ content for a building
   const generateBuildingObj = (
     building: BuildingData,
@@ -499,93 +503,72 @@ export const GenerateMeshButton = function ({
     maxLat: number
   ): string => {
     let objContent = "";
-    const { footprint, height, baseElevation } = building;
+    const { footprint, height, baseElevation, renderMinHeight } = building;
+
+    let adjustedBase = baseElevation;
+    if (renderMinHeight !== undefined && !isNaN(renderMinHeight)) {
+      adjustedBase += renderMinHeight;
+    }
+
+    // Multiply building.height by SCALE_FACTOR to get more visible extrusion
+    const effectiveHeight = height * SCALE_FACTOR * verticalExaggeration;
 
     objContent += "g building\n";
 
     if (
       !footprint ||
       footprint.length < 3 ||
-      isNaN(height) ||
-      isNaN(baseElevation)
+      isNaN(effectiveHeight) ||
+      isNaN(adjustedBase)
     ) {
       return "";
     }
 
-    // Define standardized mesh dimensions
     const meshWidth = 200;
     const meshHeight = 200;
     const bbox = { minLng, minLat, maxLng, maxLat };
-
-    // Find elevation range for scaling
-    // This should match the range used in the terrain generation
-    let minElevation = Infinity;
-    let maxElevation = -Infinity;
-
-    // Use a reasonable estimation if we don't have the exact values
-    minElevation = baseElevation - 100;
-    maxElevation = baseElevation + 500;
-
-    // Transform footprint to mesh coordinates
+    const minElevation = adjustedBase - 100;
+    const maxElevation = adjustedBase + 500;
     const validPoints = footprint
       .filter(([lng, lat]) => isFinite(lng) && isFinite(lat))
       .map(([lng, lat]) =>
         transformToMeshCoordinates(bbox, meshWidth, meshHeight, [lng, lat])
       );
 
-    if (validPoints.length < 3) {
-      return "";
-    }
+    if (validPoints.length < 3) return "";
 
-    // Calculate top elevation (baseElevation + building height)
-    const topElevation = baseElevation + height;
+    const topElevation = adjustedBase + effectiveHeight;
 
-    const addedTopVertices: number[] = [];
+    // Top face
     for (let i = 0; i < validPoints.length; i++) {
-      const [x, y] = validPoints[i];
-      // Add z-coordinate for top of building
-      const [transformedX, transformedY, transformedZ] =
-        transformToMeshCoordinates(
-          bbox,
-          meshWidth,
-          meshHeight,
-          footprint[i],
-          topElevation,
-          minElevation,
-          maxElevation
-        );
-      objContent += `v ${transformedX.toFixed(4)} ${transformedY.toFixed(
-        4
-      )} ${transformedZ.toFixed(4)}\n`;
-      addedTopVertices.push(i);
+      const [tx, ty, _] = transformToMeshCoordinates(
+        bbox,
+        meshWidth,
+        meshHeight,
+        footprint[i],
+        topElevation,
+        minElevation,
+        maxElevation
+      );
+      objContent += `v ${tx.toFixed(4)} ${ty.toFixed(4)} ${_.toFixed(4)}\n`;
     }
 
-    const addedBottomVertices: number[] = [];
+    // Bottom face
     for (let i = 0; i < validPoints.length; i++) {
-      const [x, y] = validPoints[i];
-      // Add z-coordinate for bottom of building
-      const [transformedX, transformedY, transformedZ] =
-        transformToMeshCoordinates(
-          bbox,
-          meshWidth,
-          meshHeight,
-          footprint[i],
-          baseElevation,
-          minElevation,
-          maxElevation
-        );
-      objContent += `v ${transformedX.toFixed(4)} ${transformedY.toFixed(
-        4
-      )} ${transformedZ.toFixed(4)}\n`;
-      addedBottomVertices.push(i);
-    }
-
-    if (addedTopVertices.length < 3 || addedBottomVertices.length < 3) {
-      return "";
+      const [bx, by, _] = transformToMeshCoordinates(
+        bbox,
+        meshWidth,
+        meshHeight,
+        footprint[i],
+        adjustedBase,
+        minElevation,
+        maxElevation
+      );
+      objContent += `v ${bx.toFixed(4)} ${by.toFixed(4)} ${_.toFixed(4)}\n`;
     }
 
     const topIndexOffset = vertexOffset;
-    const bottomIndexOffset = vertexOffset + addedTopVertices.length;
+    const bottomIndexOffset = vertexOffset + validPoints.length;
 
     // Flip winding for top face
     objContent += "f";
@@ -601,7 +584,7 @@ export const GenerateMeshButton = function ({
     }
     objContent += "\n";
 
-    // Flip side faces
+    // Side faces
     for (let i = 0; i < validPoints.length; i++) {
       const nextI = (i + 1) % validPoints.length;
       const topLeft = topIndexOffset + i + 1;
