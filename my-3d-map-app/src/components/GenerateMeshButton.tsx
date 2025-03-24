@@ -75,7 +75,7 @@ export const GenerateMeshButton = function ({
     minLat: number,
     maxLng: number,
     maxLat: number
-  ): string => {
+  ): { objContent: string; minElevation: number; maxElevation: number } => {
     let objContent = "# OBJ file generated from elevation data\n";
     objContent +=
       "# Bounds: " + [minLng, minLat, maxLng, maxLat].join(", ") + "\n";
@@ -237,7 +237,7 @@ export const GenerateMeshButton = function ({
       objContent += `f ${topBottom2} ${botBottom2} ${botBottom1}\n`;
     }
 
-    return objContent;
+    return { objContent, minElevation, maxElevation };
   };
 
   // Transform WGS84 coordinates to mesh coordinates including elevation
@@ -423,8 +423,11 @@ export const GenerateMeshButton = function ({
     maxLng: number,
     maxLat: number
   ): string => {
-    // Start with the terrain
-    const objContent = generateObjFromElevation(
+    const {
+      objContent,
+      minElevation,
+      maxElevation,
+    } = generateObjFromElevation(
       elevationGrid,
       gridSize,
       minLng,
@@ -453,7 +456,11 @@ export const GenerateMeshButton = function ({
         minLng,
         minLat,
         maxLng,
-        maxLat
+        maxLat,
+        elevationGrid, // pass it
+        gridSize,      // pass it
+        minElevation,  // from the terrain
+        maxElevation
       );
     });
 
@@ -490,7 +497,7 @@ export const GenerateMeshButton = function ({
 
   // Example multiplier for building height
   // Increase or adjust to match your desired scale
-  const SCALE_FACTOR = 300;
+  const SCALE_FACTOR = 10;
 
   // Generate OBJ content for a building
   const generateBuildingObj = (
@@ -500,98 +507,91 @@ export const GenerateMeshButton = function ({
     minLng: number,
     minLat: number,
     maxLng: number,
-    maxLat: number
+    maxLat: number,
+    elevationGrid: number[][],
+    gridSize: GridSize,
+    minElevation: number,
+    maxElevation: number
   ): string => {
-    let objContent = "";
+    let objContent = "g building\n";
     const { footprint, height, baseElevation, renderMinHeight } = building;
+    if (!footprint || footprint.length < 3) return "";
+
+    // Submerge offset to ensure bottom slightly dips into terrain
+    const BUILDING_SUBMERGE_OFFSET = 2;
 
     let adjustedBase = baseElevation;
     if (renderMinHeight !== undefined && !isNaN(renderMinHeight)) {
       adjustedBase += renderMinHeight;
     }
 
-    // Multiply building.height by SCALE_FACTOR to get more visible extrusion
+    // Building extrusion
     const effectiveHeight = height * SCALE_FACTOR * verticalExaggeration;
 
-    objContent += "g building\n";
-
-    if (
-      !footprint ||
-      footprint.length < 3 ||
-      isNaN(effectiveHeight) ||
-      isNaN(adjustedBase)
-    ) {
-      return "";
-    }
-
-    const meshWidth = 200;
-    const meshHeight = 200;
+    // For each vertex, get the terrain Z from the elevationGrid, then add building offsets
     const bbox = { minLng, minLat, maxLng, maxLat };
-    const minElevation = adjustedBase - 100;
-    const maxElevation = adjustedBase + 500;
-    const validPoints = footprint
-      .filter(([lng, lat]) => isFinite(lng) && isFinite(lat))
-      .map(([lng, lat]) =>
-        transformToMeshCoordinates(bbox, meshWidth, meshHeight, [lng, lat])
-      );
 
-    if (validPoints.length < 3) return "";
+    // Collect top, bottom vertices
+    const topVerts: [number, number, number][] = [];
+    const bottomVerts: [number, number, number][] = [];
 
-    const topElevation = adjustedBase + effectiveHeight;
-
-    // Top face
-    for (let i = 0; i < validPoints.length; i++) {
-      const [tx, ty, _] = transformToMeshCoordinates(
+    footprint.forEach(([lng, lat]) => {
+      // Terrain Z in mesh coordinates
+      const terrainZ = sampleTerrainElevationAtPoint(
+        lng,
+        lat,
+        elevationGrid,
+        gridSize,
         bbox,
-        meshWidth,
-        meshHeight,
-        footprint[i],
-        topElevation,
         minElevation,
         maxElevation
       );
-      objContent += `v ${tx.toFixed(4)} ${ty.toFixed(4)} ${_.toFixed(4)}\n`;
-    }
+      // XY ignoring "elevation" so we can manually place Z:
+      const [mx, my] = transformToMeshCoordinates(bbox, 200, 200, [lng, lat]);
 
-    // Bottom face
-    for (let i = 0; i < validPoints.length; i++) {
-      const [bx, by, _] = transformToMeshCoordinates(
-        bbox,
-        meshWidth,
-        meshHeight,
-        footprint[i],
-        adjustedBase,
-        minElevation,
-        maxElevation
-      );
-      objContent += `v ${bx.toFixed(4)} ${by.toFixed(4)} ${_.toFixed(4)}\n`;
-    }
+      // Top vertex => terrainZ + (building base + height)
+      const topZ = terrainZ + (adjustedBase - minElevation) * 0.2 + effectiveHeight;
+      // Bottom vertex => terrainZ + building base, slightly subtracted to dip in
+      const bottomZ = terrainZ + (adjustedBase - minElevation) * 0.2 - BUILDING_SUBMERGE_OFFSET;
+
+      topVerts.push([mx, my, topZ]);
+      bottomVerts.push([mx, my, bottomZ]);
+    });
+
+    // Write top vertices
+    topVerts.forEach(([x, y, z]) => {
+      objContent += `v ${x.toFixed(4)} ${y.toFixed(4)} ${z.toFixed(4)}\n`;
+    });
+
+    // Write bottom vertices
+    bottomVerts.forEach(([x, y, z]) => {
+      objContent += `v ${x.toFixed(4)} ${y.toFixed(4)} ${z.toFixed(4)}\n`;
+    });
 
     const topIndexOffset = vertexOffset;
-    const bottomIndexOffset = vertexOffset + validPoints.length;
+    const bottomIndexOffset = vertexOffset + topVerts.length;
 
     // Flip winding for top face
     objContent += "f";
-    for (let i = validPoints.length - 1; i >= 0; i--) {
+    for (let i = topVerts.length - 1; i >= 0; i--) {
       objContent += ` ${topIndexOffset + i + 1}`;
     }
     objContent += "\n";
 
     // Flip winding for bottom face
     objContent += "f";
-    for (let i = 0; i < validPoints.length; i++) {
+    for (let i = 0; i < bottomVerts.length; i++) {
       objContent += ` ${bottomIndexOffset + i + 1}`;
     }
     objContent += "\n";
 
     // Side faces
-    for (let i = 0; i < validPoints.length; i++) {
-      const nextI = (i + 1) % validPoints.length;
+    for (let i = 0; i < topVerts.length; i++) {
+      const nextI = (i + 1) % topVerts.length;
       const topLeft = topIndexOffset + i + 1;
       const topRight = topIndexOffset + nextI + 1;
       const bottomLeft = bottomIndexOffset + i + 1;
       const bottomRight = bottomIndexOffset + nextI + 1;
-
       objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
       objContent += `f ${topRight} ${bottomRight} ${bottomLeft}\n`;
     }
@@ -1010,4 +1010,146 @@ export const GenerateMeshButton = function ({
       </Suspense>
     </>
   );
+};
+
+/**
+ * Sample the terrain elevation at a given lng/lat using bilinear interpolation.
+ * Returns the normalized elevation value scaled into 3D mesh coordinates.
+ */
+function sampleTerrainElevationAtPoint(
+  lng: number,
+  lat: number,
+  elevationGrid: number[][],
+  gridSize: GridSize,
+  bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
+  minElevation: number,
+  maxElevation: number
+): number {
+  const { width, height } = gridSize;
+
+  // If out of bounds, just return minElevation
+  if (lng < bbox.minLng || lng > bbox.maxLng || lat < bbox.minLat || lat > bbox.maxLat) {
+    return minElevation;
+  }
+
+  // Map (lng, lat) to [0..width-1, 0..height-1]
+  const fracX = ((lng - bbox.minLng) / (bbox.maxLng - bbox.minLng)) * (width - 1);
+  const fracY = ((lat - bbox.minLat) / (bbox.maxLat - bbox.minLat)) * (height - 1);
+
+  const x0 = Math.floor(fracX);
+  const y0 = Math.floor(fracY);
+  const x1 = Math.min(x0 + 1, width - 1);
+  const y1 = Math.min(y0 + 1, height - 1);
+
+  const dx = fracX - x0;
+  const dy = fracY - y0;
+
+  // Bilinear interpolation from the elevation grid
+  const z00 = elevationGrid[y0][x0];
+  const z10 = elevationGrid[y0][x1];
+  const z01 = elevationGrid[y1][x0];
+  const z11 = elevationGrid[y1][x1];
+  const top = z00 * (1 - dx) + z10 * dx;
+  const bottom = z01 * (1 - dx) + z11 * dx;
+  const elevation = top * (1 - dy) + bottom * dy;
+
+  // Convert this elevation to mesh Z
+  const elevationRange = maxElevation - minElevation || 1;
+  const normalizedZ = (elevation - minElevation) / elevationRange;
+  return normalizedZ * (200 /* meshWidth */ * 0.2);
+}
+
+// Lower buildings slightly so they sink into the terrain
+const BUILDING_SUBMERGE_OFFSET = 2; // in mesh units
+
+// Modify generateBuildingObj to use the terrain-based elevation
+const generateBuildingObj = (
+  building: BuildingData,
+  vertexOffset: number,
+  verticalExaggeration: number,
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  elevationGrid: number[][],
+  gridSize: GridSize,
+  minElevation: number,
+  maxElevation: number
+): string => {
+  // ...
+  let objContent = "g building\n";
+  const { footprint, height, baseElevation } = building;
+
+  // Use building base only as a fallback, but default to sampling the first footprint point
+  const [sampleLng, sampleLat] = footprint[0] || [minLng, minLat];
+  const baseZ = sampleTerrainElevationAtPoint(
+    sampleLng,
+    sampleLat,
+    elevationGrid,
+    gridSize,
+    { minLng, minLat, maxLng, maxLat },
+    minElevation,
+    maxElevation
+  );
+
+  // Combine building base + user’s scale factor
+  const effectiveHeight = height * SCALE_FACTOR * verticalExaggeration;
+  if (!footprint || footprint.length < 3) return "";
+
+  // For each vertex, we calculate top/bottom in mesh coordinates
+  for (let i = 0; i < footprint.length; i++) {
+    const [lng, lat] = footprint[i];
+    // Sample the terrain for each footprint vertex
+    const terrainZ = sampleTerrainElevationAtPoint(
+      lng,
+      lat,
+      elevationGrid,
+      gridSize,
+      { minLng, minLat, maxLng, maxLat },
+      minElevation,
+      maxElevation
+    );
+    // Top vertex
+    const [tx, ty, _] = transformToMeshCoordinates(
+      { minLng, minLat, maxLng, maxLat },
+      200,
+      200,
+      [lng, lat],
+      // raise by building height plus terrain
+      minElevation + (maxElevation - minElevation) * (terrainZ / (200 * 0.2)) + effectiveHeight,
+      minElevation,
+      maxElevation
+    );
+    // Shift final Z by using the same ratio
+    const topZ = terrainZ + (effectiveHeight / (200 * 0.2));
+    objContent += `v ${tx.toFixed(4)} ${ty.toFixed(4)} ${(topZ - BUILDING_SUBMERGE_OFFSET).toFixed(4)}\n`;
+  }
+
+  // Then bottom vertices
+  for (let i = 0; i < footprint.length; i++) {
+    const [lng, lat] = footprint[i];
+    const terrainZ = sampleTerrainElevationAtPoint(
+      lng,
+      lat,
+      elevationGrid,
+      gridSize,
+      { minLng, minLat, maxLng, maxLat },
+      minElevation,
+      maxElevation
+    );
+    const [bx, by] = transformToMeshCoordinates(
+      { minLng, minLat, maxLng, maxLat },
+      200,
+      200,
+      [lng, lat]
+    );
+    // Just place the bottom on the terrain minus offset
+    const bottomZ = terrainZ - BUILDING_SUBMERGE_OFFSET;
+    objContent += `v ${bx.toFixed(4)} ${by.toFixed(4)} ${bottomZ.toFixed(4)}\n`;
+  }
+
+  // ...existing face indices logic...
+  // Make sure to flip winding if needed, and build side faces
+  // ...
+  return objContent;
 };

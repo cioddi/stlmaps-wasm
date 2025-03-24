@@ -350,8 +350,6 @@ export const processBuildings = (
   const buildings: BuildingData[] = [];
   const { width, height } = gridSize;
 
-  //buildingFeatures = [buildingFeatures?.[1],buildingFeatures?.[1]] || [];
-
   // Filter out invalid or empty building features
   buildingFeatures = buildingFeatures
     .filter((feature) => feature && feature.geometry && feature.geometry.type === "Polygon")
@@ -362,16 +360,16 @@ export const processBuildings = (
     const footprint = feature.geometry.coordinates[0];
     if (!footprint?.length) return;
 
-    // Check bounds
-    let isInBounds = false;
+    // Check if ALL points are within bounds
+    let fullyInBounds = true;
     for (const point of footprint) {
       const [lng, lat] = point;
-      if (lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat) {
-        isInBounds = true;
+      if (lng < minLng || lng > maxLng || lat < minLat || lat > maxLat) {
+        fullyInBounds = false;
         break;
       }
     }
-    if (!isInBounds) return;
+    if (!fullyInBounds) return;
 
     // Determine building height
     let buildingHeight = 5;
