@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import CloseIcon from "@mui/icons-material/Close";
+import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 
 interface ModelPreviewProps {
   objData: string;
@@ -115,24 +116,44 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
         controls.screenSpacePanning = true;
-        controls.minDistance = 0.1; // Further reduced to allow very close zooming
-        controls.maxDistance = 50;   // Increased for more zoom out range
+        controls.minDistance = 0.1;
+        controls.maxDistance = 500;   // Significantly increased to allow much more zoom out
         
         console.log("Parsing OBJ data", objData.substring(0, 100) + "...");
 
-        // Set up a ground plane to receive shadows
-        const groundGeometry = new THREE.PlaneGeometry(100, 100);
-        const groundMaterial = new THREE.MeshStandardMaterial({ 
-          color: 0xcccccc,
-          roughness: 0.8,
-          metalness: 0.2,
-          side: THREE.DoubleSide
-        });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = Math.PI * -0.5;
-        ground.position.y = -2;
-        ground.receiveShadow = true;
-        scene.add(ground);
+        // Add an axes helper
+        const axesHelper = new THREE.AxesHelper(10);
+        scene.add(axesHelper);
+
+        function createAxisLabel(text: string, color: string): Sprite {
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("Failed to get canvas context for axis label.");
+        
+          canvas.width = 256; 
+          canvas.height = 64; 
+          ctx.fillStyle = color; 
+          ctx.font = "28px Arial";
+          ctx.fillText(text, 10, 40);
+        
+          const texture = new CanvasTexture(canvas);
+          const spriteMaterial = new SpriteMaterial({ map: texture, depthTest: false });
+          const sprite = new Sprite(spriteMaterial);
+          sprite.scale.set(3, 1, 1); // Adjust scale as needed
+          return sprite;
+        }
+        
+        const xLabel = createAxisLabel("X", "#ff0000");
+        xLabel.position.set(12, 0, 0);
+        scene.add(xLabel);
+        
+        const yLabel = createAxisLabel("Y", "#00ff00");
+        yLabel.position.set(0, 12, 0);
+        scene.add(yLabel);
+        
+        const zLabel = createAxisLabel("Z", "#0000ff");
+        zLabel.position.set(0, 0, 12);
+        scene.add(zLabel);
         
         // Set up better directional light for shadows
         const shadowLight = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -141,11 +162,11 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
         shadowLight.shadow.mapSize.width = 1024;
         shadowLight.shadow.mapSize.height = 1024;
         shadowLight.shadow.camera.near = 0.5;
-        shadowLight.shadow.camera.far = 50;
-        shadowLight.shadow.camera.left = -10;
-        shadowLight.shadow.camera.right = 10;
-        shadowLight.shadow.camera.top = 10;
-        shadowLight.shadow.camera.bottom = -10;
+        shadowLight.shadow.camera.far = 100; // Increased to match further camera distance
+        shadowLight.shadow.camera.left = -20; // Wider shadow camera frustum
+        shadowLight.shadow.camera.right = 20;
+        shadowLight.shadow.camera.top = 20;
+        shadowLight.shadow.camera.bottom = -20;
         scene.add(shadowLight);
 
         // Create a better gradient texture - brown to green
