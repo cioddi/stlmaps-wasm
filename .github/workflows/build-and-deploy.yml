@@ -34,6 +34,10 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "github-actions-bot@users.noreply.github.com"
           
+          # Save build files to a temporary location
+          mkdir -p /tmp/build-files
+          cp -r ./my-3d-map-app/dist/* /tmp/build-files
+          
           # Check if docs branch exists
           if git ls-remote --heads origin docs | grep docs; then
             # Branch exists, check it out
@@ -48,8 +52,8 @@ jobs:
           # Remove old files but keep .git
           find . -maxdepth 1 ! -name '.git' ! -name '.' -exec rm -rf {} \;
           
-          # Copy build files to root
-          cp -r ./dist/* .
+          # Copy build files from temporary location to root
+          cp -r /tmp/build-files/* .
           
           # Add and commit changes
           git add -A
