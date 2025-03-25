@@ -18,12 +18,15 @@ jobs:
         with:
           node-version: 'lts/*'  # Latest LTS version
           cache: 'yarn'
+          cache-dependency-path: 'my-3d-map-app/yarn.lock'
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+        working-directory: ./my-3d-map-app
 
       - name: Build project
         run: yarn build
+        working-directory: ./my-3d-map-app
 
       - name: Deploy to docs branch
         run: |
@@ -46,7 +49,7 @@ jobs:
           find . -maxdepth 1 ! -name '.git' ! -name '.' -exec rm -rf {} \;
           
           # Copy build files to root
-          cp -r ../dist/* .
+          cp -r ./my-3d-map-app/dist/* .
           
           # Add and commit changes
           git add -A
