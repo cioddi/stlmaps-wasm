@@ -1,3 +1,5 @@
+> **Disclaimer:** This project was developed with assistance from AI tools including GPT-4o and Claude 3.7.
+
 # 3D Map Generator
 
 A web application for generating 3D terrain and building models from map data. This tool allows you to select an area on a map and export it as a 3D OBJ file that can be used for 3D printing, visualization, or digital elevation modeling.
