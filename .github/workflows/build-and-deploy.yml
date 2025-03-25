@@ -1,0 +1,56 @@
+name: Build and deploy
+
+on:
+  push:
+    branches:
+      - main  # Trigger on push to main branch
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'  # Latest LTS version
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build project
+        run: yarn build
+
+      - name: Deploy to docs branch
+        run: |
+          # Configure Git
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "github-actions-bot@users.noreply.github.com"
+          
+          # Check if docs branch exists
+          if git ls-remote --heads origin docs | grep docs; then
+            # Branch exists, check it out
+            git fetch origin docs
+            git checkout docs
+          else
+            # Branch doesn't exist, create an orphan branch
+            git checkout --orphan docs
+            git reset --hard
+          fi
+          
+          # Remove old files but keep .git
+          find . -maxdepth 1 ! -name '.git' ! -name '.' -exec rm -rf {} \;
+          
+          # Copy build files to root
+          cp -r ../dist/* .
+          
+          # Add and commit changes
+          git add -A
+          git commit -m "Deploy: $(date +%Y-%m-%d_%H-%M-%S)" || echo "No changes to commit"
+          
+          # Push to docs branch
+          git push -f origin docs
