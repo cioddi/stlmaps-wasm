@@ -57,6 +57,9 @@ interface GenerateMeshButtonProps {
   bboxRef: RefObject<GeoJSONFeature>;
 }
 
+// Submerge offset to ensure bottom slightly dips into terrain
+const BUILDING_SUBMERGE_OFFSET = 0.5;
+
 export const GenerateMeshButton = function ({
   bboxRef,
 }: GenerateMeshButtonProps) {
@@ -66,6 +69,7 @@ export const GenerateMeshButton = function ({
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.05);
+  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(10);
 
   // Generate an OBJ file from the elevation grid
   const generateObjFromElevation = (
@@ -493,7 +497,7 @@ export const GenerateMeshButton = function ({
 
   // Example multiplier for building height
   // Increase or adjust to match your desired scale
-  const SCALE_FACTOR = 30; // Reduced from 10 to 3 for more realistic proportions
+  //const SCALE_FACTOR = 30; // Reduced from 10 to 3 for more realistic proportions
 
   // Generate OBJ content for a building
   const generateBuildingObj = (
@@ -517,7 +521,7 @@ export const GenerateMeshButton = function ({
     let lowestTerrainZ = Infinity;
     const footprintTerrainZ: number[] = [];
     const meshCoords: [number, number][] = [];
-    
+
     // First pass: calculate terrain elevation at each footprint vertex
     footprint.forEach(([lng, lat]) => {
       const terrainZ = sampleTerrainElevationAtPoint(
@@ -529,39 +533,48 @@ export const GenerateMeshButton = function ({
         minElevation,
         maxElevation
       );
-      
+
       // Store terrain elevation and find lowest point
       footprintTerrainZ.push(terrainZ);
       lowestTerrainZ = Math.min(lowestTerrainZ, terrainZ);
-      
+
       // Pre-calculate mesh coordinates for reuse
       const [mx, my] = transformToMeshCoordinates(
         { minLng, minLat, maxLng, maxLat },
-        200, 
-        200, 
+        200,
+        200,
         [lng, lat]
       );
       meshCoords.push([mx, my]);
     });
-    
+
     // Height validation - cap at reasonable values
     // Most tall buildings in the world are under 500m
     const MAX_BUILDING_HEIGHT = 500;
     const MIN_BUILDING_HEIGHT = 2; // Ensure at least some height
-    const validatedHeight = Math.max(MIN_BUILDING_HEIGHT, 
-                            Math.min(height || 15, MAX_BUILDING_HEIGHT));
-    
+    const validatedHeight = Math.max(
+      MIN_BUILDING_HEIGHT,
+      Math.min(height || 15, MAX_BUILDING_HEIGHT)
+    );
+
     // Calculate adaptive scale factor for this map view
     const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
-      minLng, minLat, maxLng, maxLat, minElevation, maxElevation
+      minLng,
+      minLat,
+      maxLng,
+      maxLat,
+      minElevation,
+      maxElevation
     );
-    
-    // Building extrusion height with adaptive scaling
-    const effectiveHeight = validatedHeight * adaptiveScaleFactor * verticalExaggeration * SCALE_FACTOR;
 
-    // Submerge offset to ensure bottom slightly dips into terrain
-    const BUILDING_SUBMERGE_OFFSET = 0.5;
-    
+    // Building extrusion height with adaptive scaling
+    const effectiveHeight =
+      validatedHeight *
+        adaptiveScaleFactor *
+        verticalExaggeration *
+        buildingScaleFactor +
+      2 * BUILDING_SUBMERGE_OFFSET;
+
     // Write top vertices (all at the same elevation for flat roof)
     const topVerts: [number, number, number][] = [];
     meshCoords.forEach(([mx, my], i) => {
@@ -577,7 +590,9 @@ export const GenerateMeshButton = function ({
       // All bottom vertices at same height (slightly below lowest terrain point)
       const bottomZ = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
       bottomVerts.push([mx, my, bottomZ]);
-      objContent += `v ${mx.toFixed(4)} ${my.toFixed(4)} ${bottomZ.toFixed(4)}\n`;
+      objContent += `v ${mx.toFixed(4)} ${my.toFixed(4)} ${bottomZ.toFixed(
+        4
+      )}\n`;
     });
 
     const topIndexOffset = vertexOffset;
@@ -951,6 +966,13 @@ export const GenerateMeshButton = function ({
     setVerticalExaggeration(newValue as number);
   };
 
+  const handleBuildingScaleChange = (
+    event: Event,
+    newValue: number | number[]
+  ) => {
+    setBuildingScaleFactor(newValue as number);
+  };
+
   return (
     <>
       <div
@@ -982,6 +1004,26 @@ export const GenerateMeshButton = function ({
             ]}
           />
         </Box>
+
+        <Box sx={{ mb: 2 }}>
+          <Typography id="building-scale-slider" gutterBottom>
+            Building Height Scale: {buildingScaleFactor}
+          </Typography>
+          <Slider
+            value={buildingScaleFactor}
+            onChange={handleBuildingScaleChange}
+            aria-labelledby="building-scale-slider"
+            min={0}
+            max={100}
+            step={1}
+            marks={[
+              { value: 0, label: "0" },
+              { value: 50, label: "50" },
+              { value: 100, label: "100" },
+            ]}
+          />
+        </Box>
+
         <Button
           variant="contained"
           color="primary"
@@ -1092,36 +1134,40 @@ function calculateAdaptiveScaleFactor(
 ): number {
   // Calculate real-world width in meters (approximate at the center latitude)
   const centerLat = (minLat + maxLat) / 2;
-  const metersPerDegreeLng = 111320 * Math.cos(centerLat * Math.PI / 180); 
+  const metersPerDegreeLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
   const metersPerDegreeLat = 111320; // Approximately constant across latitudes
-  
+
   // Width and height in meters
   const widthInMeters = (maxLng - minLng) * metersPerDegreeLng;
   const heightInMeters = (maxLat - minLat) * metersPerDegreeLat;
-  
+
   // Calculate diagonal length of the area
-  const diagonalInMeters = Math.sqrt(widthInMeters * widthInMeters + heightInMeters * heightInMeters);
-  
+  const diagonalInMeters = Math.sqrt(
+    widthInMeters * widthInMeters + heightInMeters * heightInMeters
+  );
+
   // Calculate how meters in elevation map to mesh Z units
   const elevationRange = maxElevation - minElevation || 1;
   const meshZRange = 200 * 0.2; // meshWidth * 0.2, the Z range used for terrain
   const metersToMeshZ = meshZRange / elevationRange;
-  
+
   // The base scale factor: 1 meter building height should equal 1 meter elevation in mesh units
   let scaleFactor = metersToMeshZ;
-  
+
   // Apply adjustments based on map size to ensure buildings look reasonable at all scales
-  if (diagonalInMeters > 10000) { // Large area (>10km diagonally)
+  if (diagonalInMeters > 10000) {
+    // Large area (>10km diagonally)
     // Amplify buildings more in large areas to keep them visible
     scaleFactor *= 1.5;
-  } else if (diagonalInMeters < 2000) { // Small area (<2km diagonally)
+  } else if (diagonalInMeters < 2000) {
+    // Small area (<2km diagonally)
     // Reduce building height in small areas to prevent them from overwhelming the terrain
     scaleFactor *= 0.8;
   }
-  
+
   // Ensure reasonable bounds for the scale factor
   const MIN_SCALE_FACTOR = 0.001;
   const MAX_SCALE_FACTOR = 0.5;
-  
+
   return Math.min(MAX_SCALE_FACTOR, Math.max(MIN_SCALE_FACTOR, scaleFactor));
 }
