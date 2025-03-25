@@ -69,7 +69,7 @@ export const GenerateMeshButton = function ({
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.05);
-  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(10);
+  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(20);
 
   // Generate an OBJ file from the elevation grid
   const generateObjFromElevation = (
@@ -517,8 +517,9 @@ export const GenerateMeshButton = function ({
     const { footprint, height, baseElevation, renderMinHeight } = building;
     if (!footprint || footprint.length < 3) return "";
 
-    // Find lowest point in the building footprint to use as the base
+    // Find lowest and highest points in the building footprint
     let lowestTerrainZ = Infinity;
+    let highestTerrainZ = -Infinity;
     const footprintTerrainZ: number[] = [];
     const meshCoords: [number, number][] = [];
 
@@ -534,9 +535,10 @@ export const GenerateMeshButton = function ({
         maxElevation
       );
 
-      // Store terrain elevation and find lowest point
+      // Store terrain elevation and find lowest/highest points
       footprintTerrainZ.push(terrainZ);
       lowestTerrainZ = Math.min(lowestTerrainZ, terrainZ);
+      highestTerrainZ = Math.max(highestTerrainZ, terrainZ);
 
       // Pre-calculate mesh coordinates for reuse
       const [mx, my] = transformToMeshCoordinates(
@@ -548,8 +550,10 @@ export const GenerateMeshButton = function ({
       meshCoords.push([mx, my]);
     });
 
+    // Calculate terrain slope within building footprint
+    const terrainSlopeZ = highestTerrainZ - lowestTerrainZ;
+
     // Height validation - cap at reasonable values
-    // Most tall buildings in the world are under 500m
     const MAX_BUILDING_HEIGHT = 500;
     const MIN_BUILDING_HEIGHT = 2; // Ensure at least some height
     const validatedHeight = Math.max(
@@ -567,13 +571,14 @@ export const GenerateMeshButton = function ({
       maxElevation
     );
 
-    // Building extrusion height with adaptive scaling
+    // Building extrusion height with adaptive scaling AND terrain slope adjustment
     const effectiveHeight =
       validatedHeight *
         adaptiveScaleFactor *
         verticalExaggeration *
         buildingScaleFactor +
-      2 * BUILDING_SUBMERGE_OFFSET;
+      terrainSlopeZ + // Add the terrain slope to compensate for uneven ground
+      BUILDING_SUBMERGE_OFFSET;
 
     // Write top vertices (all at the same elevation for flat roof)
     const topVerts: [number, number, number][] = [];
