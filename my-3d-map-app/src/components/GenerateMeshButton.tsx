@@ -493,7 +493,7 @@ export const GenerateMeshButton = function ({
 
   // Example multiplier for building height
   // Increase or adjust to match your desired scale
-  const SCALE_FACTOR = 10;
+  const SCALE_FACTOR = 3; // Reduced from 10 to 3 for more realistic proportions
 
   // Generate OBJ content for a building
   const generateBuildingObj = (
@@ -544,8 +544,15 @@ export const GenerateMeshButton = function ({
       meshCoords.push([mx, my]);
     });
     
-    // Building extrusion height
-    const effectiveHeight = height * SCALE_FACTOR * verticalExaggeration;
+    // Height validation - cap at reasonable values
+    // Most tall buildings in the world are under 500m
+    const MAX_BUILDING_HEIGHT = 500;
+    const MIN_BUILDING_HEIGHT = 2; // Ensure at least some height
+    const validatedHeight = Math.max(MIN_BUILDING_HEIGHT, 
+                            Math.min(height || 15, MAX_BUILDING_HEIGHT));
+    
+    // Building extrusion height with reduced scale factor
+    const effectiveHeight = validatedHeight * SCALE_FACTOR * verticalExaggeration;
 
     // Submerge offset to ensure bottom slightly dips into terrain
     const BUILDING_SUBMERGE_OFFSET = 0.5;
@@ -1066,110 +1073,3 @@ function sampleTerrainElevationAtPoint(
   const normalizedZ = (elevation - minElevation) / elevationRange;
   return normalizedZ * (200 /* meshWidth */ * 0.2);
 }
-
-// Lower buildings slightly so they sink into the terrain
-const BUILDING_SUBMERGE_OFFSET = 2; // in mesh units
-
-// Modify generateBuildingObj to use the terrain-based elevation
-const generateBuildingObj = (
-  building: BuildingData,
-  vertexOffset: number,
-  verticalExaggeration: number,
-  minLng: number,
-  minLat: number,
-  maxLng: number,
-  maxLat: number,
-  elevationGrid: number[][],
-  gridSize: GridSize,
-  minElevation: number,
-  maxElevation: number
-): string => {
-  let objContent = "g building\n";
-  const { footprint, height, baseElevation, renderMinHeight } = building;
-  if (!footprint || footprint.length < 3) return "";
-
-  // Find lowest point in the building footprint to use as the base
-  let lowestTerrainZ = Infinity;
-  const footprintTerrainZ: number[] = [];
-  const meshCoords: [number, number][] = [];
-  
-  // First pass: calculate terrain elevation at each footprint vertex
-  footprint.forEach(([lng, lat]) => {
-    const terrainZ = sampleTerrainElevationAtPoint(
-      lng,
-      lat,
-      elevationGrid,
-      gridSize,
-      { minLng, minLat, maxLng, maxLat },
-      minElevation,
-      maxElevation
-    );
-    
-    // Store terrain elevation and find lowest point
-    footprintTerrainZ.push(terrainZ);
-    lowestTerrainZ = Math.min(lowestTerrainZ, terrainZ);
-    
-    // Pre-calculate mesh coordinates for reuse
-    const [mx, my] = transformToMeshCoordinates(
-      { minLng, minLat, maxLng, maxLat },
-      200, 
-      200, 
-      [lng, lat]
-    );
-    meshCoords.push([mx, my]);
-  });
-  
-  // Building extrusion height
-  const effectiveHeight = height * SCALE_FACTOR * verticalExaggeration;
-
-  // Submerge offset to ensure bottom slightly dips into terrain
-  const BUILDING_SUBMERGE_OFFSET = 0.5;
-  
-  // Write top vertices (all at the same elevation for flat roof)
-  const topVerts: [number, number, number][] = [];
-  meshCoords.forEach(([mx, my], i) => {
-    // All top vertices at same height (lowest terrain + building height)
-    const topZ = lowestTerrainZ + effectiveHeight;
-    topVerts.push([mx, my, topZ]);
-    objContent += `v ${mx.toFixed(4)} ${my.toFixed(4)} ${topZ.toFixed(4)}\n`;
-  });
-
-  // Write bottom vertices (all at the same elevation for flat base)
-  const bottomVerts: [number, number, number][] = [];
-  meshCoords.forEach(([mx, my], i) => {
-    // All bottom vertices at same height (slightly below lowest terrain point)
-    const bottomZ = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
-    bottomVerts.push([mx, my, bottomZ]);
-    objContent += `v ${mx.toFixed(4)} ${my.toFixed(4)} ${bottomZ.toFixed(4)}\n`;
-  });
-
-  const topIndexOffset = vertexOffset;
-  const bottomIndexOffset = vertexOffset + topVerts.length;
-
-  // Flip winding for top face
-  objContent += "f";
-  for (let i = topVerts.length - 1; i >= 0; i--) {
-    objContent += ` ${topIndexOffset + i + 1}`;
-  }
-  objContent += "\n";
-
-  // Flip winding for bottom face
-  objContent += "f";
-  for (let i = 0; i < bottomVerts.length; i++) {
-    objContent += ` ${bottomIndexOffset + i + 1}`;
-  }
-  objContent += "\n";
-
-  // Side faces
-  for (let i = 0; i < topVerts.length; i++) {
-    const nextI = (i + 1) % topVerts.length;
-    const topLeft = topIndexOffset + i + 1;
-    const topRight = topIndexOffset + nextI + 1;
-    const bottomLeft = bottomIndexOffset + i + 1;
-    const bottomRight = bottomIndexOffset + nextI + 1;
-    objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
-    objContent += `f ${topRight} ${bottomRight} ${bottomLeft}\n`;
-  }
-
-  return objContent;
-};
