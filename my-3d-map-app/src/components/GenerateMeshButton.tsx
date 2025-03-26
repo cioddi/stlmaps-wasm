@@ -603,21 +603,22 @@ export const GenerateMeshButton = function ({
     const topIndexOffset = vertexOffset;
     const bottomIndexOffset = vertexOffset + topVerts.length;
 
-    // Flip winding for top face
-    objContent += "f";
-    for (let i = topVerts.length - 1; i >= 0; i--) {
-      objContent += ` ${topIndexOffset + i + 1}`;
+    // Top face triangulation with correct winding order
+    for (let i = 2; i < topVerts.length; i++) {
+      // Use reverse winding order to ensure top faces point outward (up)
+      objContent += `f ${topIndexOffset + 0 + 1} ${topIndexOffset + i + 1} ${
+        topIndexOffset + i - 1 + 1
+      }\n`;
     }
-    objContent += "\n";
 
-    // Flip winding for bottom face
-    objContent += "f";
-    for (let i = 0; i < bottomVerts.length; i++) {
-      objContent += ` ${bottomIndexOffset + i + 1}`;
+    // Bottom face triangulation remains the same (already correct)
+    for (let i = 2; i < bottomVerts.length; i++) {
+      objContent += `f ${bottomIndexOffset + 0 + 1} ${
+        bottomIndexOffset + i + 1
+      } ${bottomIndexOffset + i - 1 + 1}\n`;
     }
-    objContent += "\n";
 
-    // Side faces
+    // Side faces - already using quads split into triangles
     for (let i = 0; i < topVerts.length; i++) {
       const nextI = (i + 1) % topVerts.length;
       const topLeft = topIndexOffset + i + 1;
