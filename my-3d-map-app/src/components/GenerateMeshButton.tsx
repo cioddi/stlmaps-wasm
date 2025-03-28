@@ -69,7 +69,8 @@ export const GenerateMeshButton = function ({
   bboxRef,
 }: GenerateMeshButtonProps) {
   const [downloadUrl, setDownloadUrl] = useState<string>("");
-  const [meshGeometry, setMeshGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [terrainGeometry, setTerrainGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [buildingsGeometry, setBuildingsGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
@@ -209,7 +210,8 @@ export const GenerateMeshButton = function ({
         [terrainGeometry, buildingsGeometry],
         true
       );
-      setMeshGeometry(mergedGeometry);
+      setTerrainGeometry(terrainGeometry);
+      setBuildingsGeometry(buildingsGeometry);
 
       console.log("3D model generated successfully");
 
@@ -656,9 +658,10 @@ export const GenerateMeshButton = function ({
       </div>
 
       <Suspense fallback={null}>
-        {meshGeometry && (
+        {(terrainGeometry || buildingsGeometry) && (
           <ModelPreview
-            meshGeometry={meshGeometry}
+            terrainGeometry={terrainGeometry}
+            buildingsGeometry={buildingsGeometry}
             open={previewOpen}
             onClose={() => setPreviewOpen(false)}
           />
@@ -790,6 +793,7 @@ function createTerrainGeometry(
   const topPositions: number[] = [];
   const bottomPositions: number[] = [];
   const indices: number[] = [];
+  const colors: number[] = [];
 
   // Generate top vertices (terrain)
   for (let y = 0; y < height; y++) {
@@ -797,6 +801,13 @@ function createTerrainGeometry(
       const normalizedZ =
         (elevationGrid[y][x] - minElevation) /
         Math.max(1, maxElevation - minElevation);
+      // Simple HSL gradient
+      const c = new THREE.Color().setHSL(
+        0.3 + 0.15 * normalizedZ,
+        0.5,
+        0.5
+      );
+      colors.push(c.r, c.g, c.b);
       const meshX = (x / (width - 1) - 0.5) * 200;
       const meshY = (y / (height - 1) - 0.5) * 200;
       const meshZ = normalizedZ * (200 * 0.2) * verticalExaggeration;
@@ -870,7 +881,13 @@ function createTerrainGeometry(
 
   geometry.setIndex(indices);
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(allPositions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  const center = geometry.boundingBox?.getCenter(new THREE.Vector3());
+  if (center) {
+    geometry.translate(-center.x, -center.y-200, -center.z);
+  }
   return geometry;
 }
 
@@ -891,6 +908,7 @@ function createBuildingsGeometry(
   const indices: number[] = [];
   let vertexCount = 0;
   const geometry = new THREE.BufferGeometry();
+  const colorArray: number[] = [];
 
   // Helper to transform lng/lat to mesh X/Y in [-100..100]
   function transformToMeshCoordinates(
@@ -950,6 +968,8 @@ function createBuildingsGeometry(
       const zTop = lowestTerrainZ + effectiveHeight;
       positions.push(mx, my, zTop);
       topIndices.push(vertexCount + i);
+      // top vertex color
+      colorArray.push(0.68, 0.85, 0.9);
     });
 
     // Write bottom vertices
@@ -959,6 +979,8 @@ function createBuildingsGeometry(
       const zBottom = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
       positions.push(mx, my, zBottom);
       bottomIndices.push(vertexCount + i + footprint.length);
+      // bottom vertex color
+      colorArray.push(0.68, 0.85, 0.9);
     });
 
     // Triangulate top face (reverse winding)
@@ -994,6 +1016,7 @@ function createBuildingsGeometry(
     "position",
     new THREE.Float32BufferAttribute(new Float32Array(positions), 3)
   );
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colorArray, 3));
   geometry.computeVertexNormals();
   return geometry;
 }

@@ -6,12 +6,13 @@ import CloseIcon from "@mui/icons-material/Close";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 
 interface ModelPreviewProps {
-  meshGeometry: THREE.BufferGeometry;
+  terrainGeometry: THREE.BufferGeometry | null;
+  buildingsGeometry: THREE.BufferGeometry | null;
   open: boolean;
   onClose: () => void;
 }
 
-const ModelPreview = ({ meshGeometry, open, onClose }: ModelPreviewProps) => {
+const ModelPreview = ({ terrainGeometry, buildingsGeometry, open, onClose }: ModelPreviewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -69,8 +70,8 @@ const ModelPreview = ({ meshGeometry, open, onClose }: ModelPreviewProps) => {
         scene.background = new THREE.Color(0xf0f0f0);
         
         // Add lighting
-        const ambientLight = new THREE.AmbientLight(0x404040);
-        scene.add(ambientLight);
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+        scene.add(hemiLight);
         
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
         directionalLight.position.set(1, 1, 1);
@@ -166,33 +167,29 @@ const ModelPreview = ({ meshGeometry, open, onClose }: ModelPreviewProps) => {
         shadowLight.shadow.camera.bottom = -20;
         scene.add(shadowLight);
 
-        // Create a better gradient texture - brown to green
-        const vertexTexture = new THREE.DataTexture(
-          new Uint8Array([
-            139, 69, 19, 255,    // Brown at bottom/back
-            100, 140, 100, 255,  // Darker green
-            150, 180, 150, 255,  // Medium green
-            200, 220, 200, 255,  // Light green
-            255, 255, 255, 255   // White at top/front
-          ]),
-          1, 5, THREE.RGBAFormat
-        );
-        vertexTexture.needsUpdate = true;
-        
+        const modelGroup = new THREE.Group();
         const geometryMesh = new THREE.Mesh(
-          meshGeometry,
-          new THREE.MeshStandardMaterial({ color: 0xffffff })
+          terrainGeometry,
+          new THREE.MeshPhongMaterial({ vertexColors: true })
         );
-        geometryMesh.castShadow = true;
-        geometryMesh.receiveShadow = true;
-        scene.add(geometryMesh);
+        modelGroup.add(geometryMesh);
+
+        if (buildingsGeometry) {
+          const buildingMesh = new THREE.Mesh(
+            buildingsGeometry,
+            new THREE.MeshLambertMaterial({ color: 0xADD8E6 })
+          );
+          modelGroup.add(buildingMesh);
+        }
+
+        scene.add(modelGroup);
 
         // Compute bounding box
-        geometryMesh.geometry.computeBoundingBox();
-        const box = geometryMesh.geometry.boundingBox;
+        modelGroup.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(modelGroup);
         if (box) {
           const center = box.getCenter(new THREE.Vector3());
-          geometryMesh.position.sub(center);
+          modelGroup.position.sub(center);
           const size = box.getSize(new THREE.Vector3());
           geometryMesh.position.y = size.y / 2;
         }
@@ -227,7 +224,7 @@ const ModelPreview = ({ meshGeometry, open, onClose }: ModelPreviewProps) => {
         };
         
         // Apply camera fitting with generous padding
-        fitCameraToObject(camera, geometryMesh, 2.2); // Increased padding for better rotation view
+        fitCameraToObject(camera, modelGroup, 2.2); // Increased padding for better rotation view
         
         // Animation loop
         const animate = () => {
@@ -251,7 +248,7 @@ const ModelPreview = ({ meshGeometry, open, onClose }: ModelPreviewProps) => {
     return () => {
       clearTimeout(initTimer);
     };
-  }, [meshGeometry, open, dialogMounted]);
+  }, [terrainGeometry, buildingsGeometry, open, dialogMounted]);
 
   return (
     <Dialog 
