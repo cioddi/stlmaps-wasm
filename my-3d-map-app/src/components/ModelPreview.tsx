@@ -1,18 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle, IconButton, CircularProgress } from "@mui/material";
 import * as THREE from "three";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import CloseIcon from "@mui/icons-material/Close";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 
 interface ModelPreviewProps {
-  objData: string;
+  meshGeometry: THREE.BufferGeometry;
   open: boolean;
   onClose: () => void;
 }
 
-const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
+const ModelPreview = ({ meshGeometry, open, onClose }: ModelPreviewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -119,8 +118,6 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
         controls.minDistance = 0.1;
         controls.maxDistance = 500;   // Significantly increased to allow much more zoom out
         
-        console.log("Parsing OBJ data", objData.substring(0, 100) + "...");
-
         // Add an axes helper
         const axesHelper = new THREE.AxesHelper(10);
         scene.add(axesHelper);
@@ -182,157 +179,68 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
         );
         vertexTexture.needsUpdate = true;
         
-        // Load OBJ model
-        const loader = new OBJLoader();
-        
-        try {
-          const objModel = loader.parse(objData);
-          console.log("OBJ parsed successfully", objModel);
-          
-          // Calculate global bounding box
-          const globalBox = new THREE.Box3().setFromObject(objModel);
-          const globalMin = globalBox.min;
-          const globalMax = globalBox.max;
-          
-          objModel.traverse((child) => {
-            if (child instanceof THREE.Mesh) {
-              // Create material with improved gradient based on view direction
-              child.material = new THREE.MeshStandardMaterial({
-                roughness: 0.7,
-                metalness: 0.1,
-                onBeforeCompile: (shader) => {
-                  shader.uniforms.minZ = { value: globalMin.z };
-                  shader.uniforms.maxZ = { value: globalMax.z };
-                  shader.uniforms.minY = { value: globalMin.y };
-                  shader.uniforms.maxY = { value: globalMax.y };
-                  shader.uniforms.gradientMap = { value: vertexTexture };
-                  
-                  // Add custom vertex shader code for gradient
-                  shader.vertexShader = shader.vertexShader.replace(
-                    '#include <common>',
-                    `#include <common>
-                    varying float vGradient;
-                    uniform float minZ;
-                    uniform float maxZ;
-                    uniform float minY;
-                    uniform float maxY;`
-                  );
-                  
-                  shader.vertexShader = shader.vertexShader.replace(
-                    '#include <begin_vertex>',
-                    `#include <begin_vertex>
-                    // Use only Z for a clean back-to-front gradient
-                    float normalizedZ = (position.z - minZ) / (maxZ - minZ);
-                    vGradient = normalizedZ;`
-                  );
-                  
-                  // Add custom fragment shader code for gradient
-                  shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <common>',
-                    `#include <common>
-                    varying float vGradient;
-                    uniform sampler2D gradientMap;`
-                  );
-                  
-                  shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <color_fragment>',
-                    `#include <color_fragment>
-                    vec4 gradColor = texture2D(gradientMap, vec2(0.5, vGradient));
-                    diffuseColor.rgb = gradColor.rgb;`
-                  );
-                }
-              });
-              
-              // Enable shadows on the mesh
-              child.castShadow = true;
-              child.receiveShadow = true;
-            }
-          });
-          
-          // Center the object
-          const box = new THREE.Box3().setFromObject(objModel);
+        const geometryMesh = new THREE.Mesh(
+          meshGeometry,
+          new THREE.MeshStandardMaterial({ color: 0xffffff })
+        );
+        geometryMesh.castShadow = true;
+        geometryMesh.receiveShadow = true;
+        scene.add(geometryMesh);
+
+        // Compute bounding box
+        geometryMesh.geometry.computeBoundingBox();
+        const box = geometryMesh.geometry.boundingBox;
+        if (box) {
           const center = box.getCenter(new THREE.Vector3());
-          objModel.position.sub(center);
-          
-          // Position slightly above the ground
-          objModel.position.y = box.getSize(new THREE.Vector3()).y / 2;
-          
-          scene.add(objModel);
-          
-          // Create a helper function to properly fit the camera to the object
-          const fitCameraToObject = (camera: THREE.PerspectiveCamera, object: THREE.Object3D, padding = 1.5) => {
-            const boundingBox = new THREE.Box3().setFromObject(object);
-            
-            const center = boundingBox.getCenter(new THREE.Vector3());
-            const size = boundingBox.getSize(new THREE.Vector3());
-            
-            // Get the max side of the bounding box
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const fov = camera.fov * (Math.PI / 180);
-            
-            // Calculate the required distance
-            let cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
-            cameraZ *= padding; // Add padding for rotation
-            
-            // Set camera position - adjusted for better viewing angle
-            camera.position.set(center.x, center.y + (size.y / 3), center.z + cameraZ);
-            camera.lookAt(center);
-            
-            // Update camera near and far planes to ensure the object remains visible during close zooming
-            camera.near = 0.01; // Set very close near plane
-            camera.far = cameraZ * 100;
-            camera.updateProjectionMatrix();
-            
-            // Update controls target
-            controls.target.copy(center);
-            controls.update();
-          };
-          
-          // Apply camera fitting with generous padding
-          fitCameraToObject(camera, objModel, 2.2); // Increased padding for better rotation view
-          
-          // Animation loop
-          const animate = () => {
-            if (!rendererRef.current) return;
-            
-            animationFrameId = requestAnimationFrame(animate);
-            controls.update();
-            rendererRef.current.render(scene, camera);
-          };
-          
-          animate();
-          console.log("Animation started");
-          setLoading(false);
-        } catch (parseError) {
-          console.error("Error parsing OBJ:", parseError);
-          setError(`Failed to parse 3D model: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
-          setLoading(false);
+          geometryMesh.position.sub(center);
+          const size = box.getSize(new THREE.Vector3());
+          geometryMesh.position.y = size.y / 2;
         }
-        
-        // Handle window resize
-        const handleResize = () => {
-          if (!containerRef.current || !rendererRef.current) return;
+
+        // Create a helper function to properly fit the camera to the object
+        const fitCameraToObject = (camera: THREE.PerspectiveCamera, object: THREE.Object3D, padding = 1.5) => {
+          const boundingBox = new THREE.Box3().setFromObject(object);
           
-          const width = containerRef.current.clientWidth;
-          const height = containerRef.current.clientHeight;
+          const center = boundingBox.getCenter(new THREE.Vector3());
+          const size = boundingBox.getSize(new THREE.Vector3());
           
-          camera.aspect = width / height;
+          // Get the max side of the bounding box
+          const maxDim = Math.max(size.x, size.y, size.z);
+          const fov = camera.fov * (Math.PI / 180);
+          
+          // Calculate the required distance
+          let cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
+          cameraZ *= padding; // Add padding for rotation
+          
+          // Set camera position - adjusted for better viewing angle
+          camera.position.set(center.x, center.y + (size.y / 3), center.z + cameraZ);
+          camera.lookAt(center);
+          
+          // Update camera near and far planes to ensure the object remains visible during close zooming
+          camera.near = 0.01; // Set very close near plane
+          camera.far = cameraZ * 100;
           camera.updateProjectionMatrix();
-          rendererRef.current.setSize(width, height);
-        };
-        
-        window.addEventListener('resize', handleResize);
-        
-        // Return cleanup function
-        return () => {
-          console.log("Cleaning up");
-          window.removeEventListener('resize', handleResize);
           
-          if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
-          }
+          // Update controls target
+          controls.target.copy(center);
+          controls.update();
         };
         
+        // Apply camera fitting with generous padding
+        fitCameraToObject(camera, geometryMesh, 2.2); // Increased padding for better rotation view
+        
+        // Animation loop
+        const animate = () => {
+          if (!rendererRef.current) return;
+          
+          animationFrameId = requestAnimationFrame(animate);
+          controls.update();
+          rendererRef.current.render(scene, camera);
+        };
+        
+        animate();
+        console.log("Animation started");
+        setLoading(false);
       } catch (setupError) {
         console.error("Error setting up 3D scene:", setupError);
         setError(`Failed to setup 3D viewer: ${setupError instanceof Error ? setupError.message : String(setupError)}`);
@@ -343,7 +251,7 @@ const ModelPreview = ({ objData, open, onClose }: ModelPreviewProps) => {
     return () => {
       clearTimeout(initTimer);
     };
-  }, [objData, open, dialogMounted]);
+  }, [meshGeometry, open, dialogMounted]);
 
   return (
     <Dialog 

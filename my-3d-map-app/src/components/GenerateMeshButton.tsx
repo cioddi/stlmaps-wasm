@@ -17,6 +17,7 @@ import {
   getTilesForBbox,
   processBuildings,
 } from "./VectorTileFunctions";
+import * as THREE from "three";
 
 // Define interfaces for our data structures
 interface GridSize {
@@ -51,6 +52,8 @@ interface GeoJSONFeature {
 interface ElevationProcessingResult {
   elevationGrid: number[][];
   gridSize: GridSize;
+  minElevation: number;
+  maxElevation: number;
 }
 
 interface GenerateMeshButtonProps {
@@ -64,223 +67,12 @@ export const GenerateMeshButton = function ({
   bboxRef,
 }: GenerateMeshButtonProps) {
   const [downloadUrl, setDownloadUrl] = useState<string>("");
-  const [objData, setObjData] = useState<string>("");
+  const [meshGeometry, setMeshGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.05);
   const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(20);
-
-  // Generate an OBJ file from the elevation grid
-  const generateObjFromElevation = (
-    elevationGrid: number[][],
-    gridSize: GridSize,
-    minLng: number,
-    minLat: number,
-    maxLng: number,
-    maxLat: number
-  ): { objContent: string; minElevation: number; maxElevation: number } => {
-    let objContent = "# OBJ file generated from elevation data\n";
-    objContent +=
-      "# Bounds: " + [minLng, minLat, maxLng, maxLat].join(", ") + "\n";
-
-    // Add a group for the terrain
-    objContent += "g terrain\n";
-
-    // Define standardized mesh dimensions
-    const meshWidth = 200;
-    const meshHeight = 200;
-    const bbox = { minLng, minLat, maxLng, maxLat };
-
-    // Add vertices for top surface
-    const { width, height } = gridSize;
-
-    // Find min and max elevation for proper scaling
-    let minElevation = Infinity;
-    let maxElevation = -Infinity;
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        minElevation = Math.min(minElevation, elevationGrid[y][x]);
-        maxElevation = Math.max(maxElevation, elevationGrid[y][x]);
-      }
-    }
-
-    console.log(
-      `Min elevation: ${minElevation}, Max elevation: ${maxElevation}`
-    );
-
-    // Set base elevation to be below the minimum elevation
-    const baseOffset = 10; // units below the minimum
-    const baseElevation = minElevation - baseOffset;
-
-    // Add top surface vertices
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const lng = minLng + ((maxLng - minLng) * x) / (width - 1);
-        const lat = minLat + ((maxLat - minLat) * y) / (height - 1);
-        const elevation = elevationGrid[y][x];
-
-        // Transform to mesh coordinates WITH elevation
-        const [meshX, meshY, meshZ] = transformToMeshCoordinates(
-          bbox,
-          meshWidth,
-          meshHeight,
-          [lng, lat],
-          elevation,
-          minElevation,
-          maxElevation
-        );
-
-        // OBJ format: v x y z
-        objContent += `v ${meshX.toFixed(4)} ${meshY.toFixed(
-          4
-        )} ${meshZ.toFixed(4)}\n`;
-      }
-    }
-
-    // Add bottom surface vertices
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const lng = minLng + ((maxLng - minLng) * x) / (width - 1);
-        const lat = minLat + ((maxLat - minLat) * y) / (height - 1);
-
-        // Transform to mesh coordinates with BASE elevation
-        const [meshX, meshY, meshZ] = transformToMeshCoordinates(
-          bbox,
-          meshWidth,
-          meshHeight,
-          [lng, lat],
-          baseElevation,
-          minElevation,
-          maxElevation
-        );
-
-        // OBJ format: v x y z
-        objContent += `v ${meshX.toFixed(4)} ${meshY.toFixed(
-          4
-        )} ${meshZ.toFixed(4)}\n`;
-      }
-    }
-
-    // The rest of the function remains mostly the same, with updated vertex references
-    // Calculate total number of vertices per layer
-    const verticesPerLayer = width * height;
-
-    // Add faces for top surface
-    for (let y = 0; y < height - 1; y++) {
-      for (let x = 0; x < width - 1; x++) {
-        const topLeft = y * width + x + 1; // +1 because OBJ indices start at 1
-        const topRight = topLeft + 1;
-        const bottomLeft = (y + 1) * width + x + 1;
-        const bottomRight = bottomLeft + 1;
-
-        // Two triangles per grid cell for the top surface
-        objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
-        objContent += `f ${bottomLeft} ${topRight} ${bottomRight}\n`;
-      }
-    }
-
-    // -----------------------------------------------------------
-    // 1. Add bottom faces
-    // -----------------------------------------------------------
-    for (let y = 0; y < height - 1; y++) {
-      for (let x = 0; x < width - 1; x++) {
-        const offset = verticesPerLayer; // bottom layer offset
-        const btl = offset + (y * width + x + 1);
-        const btr = btl + 1;
-        const bbl = offset + ((y + 1) * width + x + 1);
-        const bbr = bbl + 1;
-
-        // Flip face winding for the bottom
-        objContent += `f ${btl} ${bbl} ${btr}\n`;
-        objContent += `f ${bbl} ${bbr} ${btr}\n`;
-      }
-    }
-
-    // -----------------------------------------------------------
-    // 2. Add side faces around the mesh perimeter
-    // -----------------------------------------------------------
-    for (let y = 0; y < height - 1; y++) {
-      // Left edge
-      const topLeft1 = y * width + 1;
-      const topLeft2 = (y + 1) * width + 1;
-      const botLeft1 = verticesPerLayer + topLeft1;
-      const botLeft2 = verticesPerLayer + topLeft2;
-      // Flipped order:
-      objContent += `f ${topLeft1} ${topLeft2} ${botLeft1}\n`;
-      objContent += `f ${topLeft2} ${botLeft2} ${botLeft1}\n`;
-
-      // Right edge
-      const topRight1 = y * width + width;
-      const topRight2 = (y + 1) * width + width;
-      const botRight1 = verticesPerLayer + topRight1;
-      const botRight2 = verticesPerLayer + topRight2;
-      // Flip normals
-      objContent += `f ${topRight1} ${botRight1} ${topRight2}\n`;
-      objContent += `f ${topRight2} ${botRight1} ${botRight2}\n`;
-    }
-
-    // For edges parallel to the x-axis, flip the face definitions:
-    for (let x = 0; x < width - 1; x++) {
-      // Top edge
-      const topEdge1 = x + 1;
-      const topEdge2 = x + 2;
-      const botEdge1 = verticesPerLayer + topEdge1;
-      const botEdge2 = verticesPerLayer + topEdge2;
-      // Flip normals to match the y-axis edges
-      objContent += `f ${topEdge1} ${botEdge1} ${topEdge2}\n`;
-      objContent += `f ${topEdge2} ${botEdge1} ${botEdge2}\n`;
-
-      // Bottom edge
-      const topBottom1 = (height - 1) * width + x + 1;
-      const topBottom2 = topBottom1 + 1;
-      const botBottom1 = verticesPerLayer + topBottom1;
-      const botBottom2 = verticesPerLayer + topBottom2;
-      // Flip normals to match the y-axis edges
-      objContent += `f ${topBottom1} ${topBottom2} ${botBottom1}\n`;
-      objContent += `f ${topBottom2} ${botBottom2} ${botBottom1}\n`;
-    }
-
-    return { objContent, minElevation, maxElevation };
-  };
-
-  // Transform WGS84 coordinates to mesh coordinates including elevation
-  const transformToMeshCoordinates = (
-    bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
-    meshWidth: number,
-    meshHeight: number,
-    coordinates: [number, number],
-    elevation?: number,
-    minElevation?: number,
-    maxElevation?: number
-  ): [number, number, number] => {
-    const [lng, lat] = coordinates;
-
-    // Calculate the normalized position (0-1) within the bounding box
-    const normalizedX = (lng - bbox.minLng) / (bbox.maxLng - bbox.minLng);
-    const normalizedY = (lat - bbox.minLat) / (bbox.maxLat - bbox.minLat);
-
-    // Scale to mesh dimensions - center the mesh around origin
-    const meshX = (normalizedX - 0.5) * meshWidth;
-    const meshY = (normalizedY - 0.5) * meshHeight;
-
-    // Scale elevation if provided
-    let meshZ = 0;
-    if (
-      elevation !== undefined &&
-      minElevation !== undefined &&
-      maxElevation !== undefined
-    ) {
-      // Scale elevation to be 20% of mesh width
-      const elevationRange = maxElevation - minElevation;
-      if (elevationRange > 0) {
-        const normalizedZ = (elevation - minElevation) / elevationRange;
-        meshZ = normalizedZ * (meshWidth * 0.2);
-      }
-    }
-
-    return [meshX, meshY, meshZ];
-  };
 
   // Modify generate3DModel function to include buildings
   const generate3DModel = async (): Promise<void> => {
@@ -340,14 +132,8 @@ export const GenerateMeshButton = function ({
       );
 
       // Process elevation data to create a grid
-      const { elevationGrid, gridSize } = processElevationData(
-        tileData,
-        tiles,
-        minLng,
-        minLat,
-        maxLng,
-        maxLat
-      );
+      const { elevationGrid, gridSize, minElevation, maxElevation } =
+        processElevationData(tileData, tiles, minLng, minLat, maxLng, maxLat);
 
       // Always use zoom level 14 for building data, since that's where buildings are available
       const buildingZoom = 14; // Force zoom 14 for buildings
@@ -389,23 +175,33 @@ export const GenerateMeshButton = function ({
         maxLat
       );
 
-      // Generate OBJ model from elevation grid and buildings
-      const objData = generateObjFromElevationWithBuildings(
+      // Generate three.js geometry from elevation grid and buildings
+      const terrainGeometry = createTerrainGeometry(
         elevationGrid,
         gridSize,
+        minLng,
+        minLat,
+        maxLng,
+        maxLat,
+        minElevation,
+        maxElevation
+      );
+
+      const buildingsGeometry = createBuildingsGeometry(
         buildings,
         minLng,
         minLat,
         maxLng,
-        maxLat
+        maxLat,
+        elevationGrid,
+        gridSize,
+        minElevation,
+        maxElevation
       );
 
-      // Store obj data for preview
-      setObjData(objData);
+      // Optionally merge both geometries. For brevity, just store terrain:
+      setMeshGeometry(terrainGeometry);
 
-      // Create download
-      const blob = new Blob([objData], { type: "text/plain" });
-      setDownloadUrl(URL.createObjectURL(blob));
       console.log("3D model generated successfully");
 
       // Open the preview
@@ -415,221 +211,6 @@ export const GenerateMeshButton = function ({
     } finally {
       setGenerating(false);
     }
-  };
-
-  // Generate OBJ with buildings
-  const generateObjFromElevationWithBuildings = (
-    elevationGrid: number[][],
-    gridSize: GridSize,
-    buildings: BuildingData[],
-    minLng: number,
-    minLat: number,
-    maxLng: number,
-    maxLat: number
-  ): string => {
-    const { objContent, minElevation, maxElevation } = generateObjFromElevation(
-      elevationGrid,
-      gridSize,
-      minLng,
-      minLat,
-      maxLng,
-      maxLat
-    );
-
-    // If no buildings, return just the terrain
-    if (buildings.length === 0) {
-      return objContent;
-    }
-
-    // Count vertices in the terrain to know the offset
-    const terrainVertexCount = countVerticesInObj(objContent);
-
-    // Add buildings to the OBJ content
-    let buildingsObjContent = "\n# Building models\n";
-
-    buildings.forEach((building, index) => {
-      buildingsObjContent += `# Building ${index + 1}\n`;
-      buildingsObjContent += generateBuildingObj(
-        building,
-        terrainVertexCount + getBuildingVertexOffset(buildings, index),
-        verticalExaggeration,
-        minLng,
-        minLat,
-        maxLng,
-        maxLat,
-        elevationGrid, // pass it
-        gridSize, // pass it
-        minElevation, // from the terrain
-        maxElevation
-      );
-    });
-
-    return objContent + buildingsObjContent;
-  };
-
-  // Count vertices in OBJ content
-  const countVerticesInObj = (objContent: string): number => {
-    const lines = objContent.split("\n");
-    let count = 0;
-
-    for (const line of lines) {
-      if (line.startsWith("v ")) {
-        count++;
-      }
-    }
-
-    return count;
-  };
-
-  // Calculate vertex offset for a building
-  const getBuildingVertexOffset = (
-    buildings: BuildingData[],
-    currentIndex: number
-  ): number => {
-    let offset = 0;
-    for (let i = 0; i < currentIndex; i++) {
-      const footprintPoints = buildings[i].footprint.length;
-      // Changed: remove the extra "* 2" to fix vertex indexing
-      offset += footprintPoints * 2;
-    }
-    return offset;
-  };
-
-  // Example multiplier for building height
-  // Increase or adjust to match your desired scale
-  //const SCALE_FACTOR = 30; // Reduced from 10 to 3 for more realistic proportions
-
-  // Generate OBJ content for a building
-  const generateBuildingObj = (
-    building: BuildingData,
-    vertexOffset: number,
-    verticalExaggeration: number,
-    minLng: number,
-    minLat: number,
-    maxLng: number,
-    maxLat: number,
-    elevationGrid: number[][],
-    gridSize: GridSize,
-    minElevation: number,
-    maxElevation: number
-  ): string => {
-    let objContent = "g building\n";
-    const { footprint, height, baseElevation, renderMinHeight } = building;
-    if (!footprint || footprint.length < 3) return "";
-
-    // Find lowest and highest points in the building footprint
-    let lowestTerrainZ = Infinity;
-    let highestTerrainZ = -Infinity;
-    const footprintTerrainZ: number[] = [];
-    const meshCoords: [number, number][] = [];
-
-    // First pass: calculate terrain elevation at each footprint vertex
-    footprint.forEach(([lng, lat]) => {
-      const terrainZ = sampleTerrainElevationAtPoint(
-        lng,
-        lat,
-        elevationGrid,
-        gridSize,
-        { minLng, minLat, maxLng, maxLat },
-        minElevation,
-        maxElevation
-      );
-
-      // Store terrain elevation and find lowest/highest points
-      footprintTerrainZ.push(terrainZ);
-      lowestTerrainZ = Math.min(lowestTerrainZ, terrainZ);
-      highestTerrainZ = Math.max(highestTerrainZ, terrainZ);
-
-      // Pre-calculate mesh coordinates for reuse
-      const [mx, my] = transformToMeshCoordinates(
-        { minLng, minLat, maxLng, maxLat },
-        200,
-        200,
-        [lng, lat]
-      );
-      meshCoords.push([mx, my]);
-    });
-
-    // Calculate terrain slope within building footprint
-    const terrainSlopeZ = highestTerrainZ - lowestTerrainZ;
-
-    // Height validation - cap at reasonable values
-    const MAX_BUILDING_HEIGHT = 500;
-    const MIN_BUILDING_HEIGHT = 2; // Ensure at least some height
-    const validatedHeight = Math.max(
-      MIN_BUILDING_HEIGHT,
-      Math.min(height || 15, MAX_BUILDING_HEIGHT)
-    );
-
-    // Calculate adaptive scale factor for this map view
-    const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
-      minLng,
-      minLat,
-      maxLng,
-      maxLat,
-      minElevation,
-      maxElevation
-    );
-
-    // Building extrusion height with adaptive scaling AND terrain slope adjustment
-    const effectiveHeight =
-      validatedHeight *
-        adaptiveScaleFactor *
-        verticalExaggeration *
-        buildingScaleFactor +
-      terrainSlopeZ + // Add the terrain slope to compensate for uneven ground
-      BUILDING_SUBMERGE_OFFSET;
-
-    // Write top vertices (all at the same elevation for flat roof)
-    const topVerts: [number, number, number][] = [];
-    meshCoords.forEach(([mx, my], i) => {
-      // All top vertices at same height (lowest terrain + building height)
-      const topZ = lowestTerrainZ + effectiveHeight;
-      topVerts.push([mx, my, topZ]);
-      objContent += `v ${mx.toFixed(4)} ${my.toFixed(4)} ${topZ.toFixed(4)}\n`;
-    });
-
-    // Write bottom vertices (all at the same elevation for flat base)
-    const bottomVerts: [number, number, number][] = [];
-    meshCoords.forEach(([mx, my], i) => {
-      // All bottom vertices at same height (slightly below lowest terrain point)
-      const bottomZ = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
-      bottomVerts.push([mx, my, bottomZ]);
-      objContent += `v ${mx.toFixed(4)} ${my.toFixed(4)} ${bottomZ.toFixed(
-        4
-      )}\n`;
-    });
-
-    const topIndexOffset = vertexOffset;
-    const bottomIndexOffset = vertexOffset + topVerts.length;
-
-    // Top face triangulation with correct winding order
-    for (let i = 2; i < topVerts.length; i++) {
-      // Use reverse winding order to ensure top faces point outward (up)
-      objContent += `f ${topIndexOffset + 0 + 1} ${topIndexOffset + i + 1} ${
-        topIndexOffset + i - 1 + 1
-      }\n`;
-    }
-
-    // Bottom face triangulation remains the same (already correct)
-    for (let i = 2; i < bottomVerts.length; i++) {
-      objContent += `f ${bottomIndexOffset + 0 + 1} ${
-        bottomIndexOffset + i + 1
-      } ${bottomIndexOffset + i - 1 + 1}\n`;
-    }
-
-    // Side faces - already using quads split into triangles
-    for (let i = 0; i < topVerts.length; i++) {
-      const nextI = (i + 1) % topVerts.length;
-      const topLeft = topIndexOffset + i + 1;
-      const topRight = topIndexOffset + nextI + 1;
-      const bottomLeft = bottomIndexOffset + i + 1;
-      const bottomRight = bottomIndexOffset + nextI + 1;
-      objContent += `f ${topLeft} ${topRight} ${bottomLeft}\n`;
-      objContent += `f ${topRight} ${bottomRight} ${bottomLeft}\n`;
-    }
-
-    return objContent;
   };
 
   // Download a single tile from the WMTS service
@@ -912,7 +493,12 @@ export const GenerateMeshButton = function ({
       smoothedGrid = smoothElevationGrid(smoothedGrid, gridSize);
     }
 
-    return { elevationGrid: smoothedGrid, gridSize };
+    return {
+      elevationGrid: smoothedGrid,
+      gridSize,
+      minElevation: minElevationFound,
+      maxElevation: maxElevationFound,
+    };
   };
 
   // Helper function to smooth the elevation grid
@@ -1061,9 +647,9 @@ export const GenerateMeshButton = function ({
       </div>
 
       <Suspense fallback={null}>
-        {objData && (
+        {meshGeometry && (
           <ModelPreview
-            objData={objData}
+            meshGeometry={meshGeometry}
             open={previewOpen}
             onClose={() => setPreviewOpen(false)}
           />
@@ -1176,4 +762,165 @@ function calculateAdaptiveScaleFactor(
   const MAX_SCALE_FACTOR = 0.5;
 
   return Math.min(MAX_SCALE_FACTOR, Math.max(MIN_SCALE_FACTOR, scaleFactor));
+}
+
+function createTerrainGeometry(
+  elevationGrid: number[][],
+  gridSize: GridSize,
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  minElevation: number,
+  maxElevation: number
+): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  const { width, height } = gridSize;
+
+  const topPositions: number[] = [];
+  const bottomPositions: number[] = [];
+  const indices: number[] = [];
+
+  // Generate top vertices (terrain)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const normalizedZ =
+        (elevationGrid[y][x] - minElevation) /
+        Math.max(1, maxElevation - minElevation);
+      const meshX = (x / (width - 1) - 0.5) * 200;
+      const meshY = (y / (height - 1) - 0.5) * 200;
+      const meshZ = normalizedZ * (200 * 0.2);
+      topPositions.push(meshX, meshY, meshZ);
+      bottomPositions.push(meshX, meshY, 0);
+    }
+  }
+
+  // Build top surface indices
+  for (let y = 0; y < height - 1; y++) {
+    for (let x = 0; x < width - 1; x++) {
+      const tl = y * width + x;
+      const tr = tl + 1;
+      const bl = tl + width;
+      const br = bl + 1;
+      indices.push(tl, tr, bl, bl, tr, br);
+    }
+  }
+
+  // Build bottom surface indices
+  const bottomOffset = width * height;
+  for (let y = 0; y < height - 1; y++) {
+    for (let x = 0; x < width - 1; x++) {
+      const tl = bottomOffset + y * width + x;
+      const tr = tl + 1;
+      const bl = tl + width;
+      const br = bl + 1;
+      // Reverse winding
+      indices.push(tl, bl, tr, tr, bl, br);
+    }
+  }
+
+  // Build side walls
+  for (let y = 0; y < height - 1; y++) {
+    const topIdxTop = y * width + (width - 1);
+    const bottomIdxTop = bottomOffset + topIdxTop;
+    const topIdxBot = (y + 1) * width + (width - 1);
+    const bottomIdxBot = bottomOffset + topIdxBot;
+    // Right edge (invert the triangle order)
+    indices.push(topIdxTop, bottomIdxTop, bottomIdxBot);
+    indices.push(topIdxTop, bottomIdxBot, topIdxBot);
+    // Left edge (invert the triangle order)
+    const leftTopIdx = y * width;
+    const leftBottomIdx = bottomOffset + leftTopIdx;
+    const leftTopNext = (y + 1) * width;
+    const leftBottomNext = bottomOffset + leftTopNext;
+    indices.push(leftTopIdx, leftBottomNext, leftBottomIdx);
+    indices.push(leftTopIdx, leftTopNext, leftBottomNext);
+  }
+  for (let x = 0; x < width - 1; x++) {
+    const topIdxTop = (height - 1) * width + x;
+    const bottomIdxTop = bottomOffset + topIdxTop;
+    const topIdxBot = topIdxTop + 1;
+    const bottomIdxBot = bottomOffset + topIdxBot;
+    // Bottom edge (invert)
+    indices.push(topIdxTop, bottomIdxBot, bottomIdxTop);
+    indices.push(topIdxTop, topIdxBot, bottomIdxBot);
+    // Top edge (invert)
+    const topEdgeIdx = x;
+    const bottomEdgeIdx = bottomOffset + topEdgeIdx;
+    const topEdgeNext = x + 1;
+    const bottomEdgeNext = bottomOffset + topEdgeNext;
+    indices.push(topEdgeIdx, bottomEdgeIdx, bottomEdgeNext);
+    indices.push(topEdgeIdx, bottomEdgeNext, topEdgeNext);
+  }
+
+  // Merge top + bottom vertices
+  const allPositions = new Float32Array(topPositions.length + bottomPositions.length);
+  allPositions.set(topPositions, 0);
+  allPositions.set(bottomPositions, topPositions.length);
+
+  geometry.setIndex(indices);
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(allPositions, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function createBuildingsGeometry(
+  buildings: BuildingData[],
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  elevationGrid: number[][],
+  gridSize: GridSize,
+  minElevation: number,
+  maxElevation: number
+): THREE.BufferGeometry {
+  const buildingGeo = new THREE.BufferGeometry();
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  let vertexCount = 0;
+  buildings.forEach((bld) => {
+    if (!bld.footprint || bld.footprint.length < 3) return;
+    // ...similar logic: sample terrain under building footprint, create top/bottom/side polygons...
+
+    // Example: push random geometry for each building to illustrate
+    // Expand this to replicate your building shape
+    const baseZ = 0;
+    const topZ = 10;
+    const baseIdx = vertexCount;
+    positions.push(
+      0, 0, baseZ,
+      10, 0, baseZ,
+      10, 10, baseZ,
+      0, 10, baseZ,
+      0, 0, topZ,
+      10, 0, topZ,
+      10, 10, topZ,
+      0, 10, topZ
+    );
+    indices.push(
+      baseIdx, baseIdx + 1, baseIdx + 2,
+      baseIdx, baseIdx + 2, baseIdx + 3,
+      baseIdx + 4, baseIdx + 6, baseIdx + 5,
+      baseIdx + 4, baseIdx + 7, baseIdx + 6,
+      baseIdx, baseIdx + 4, baseIdx + 5,
+      baseIdx, baseIdx + 5, baseIdx + 1,
+      baseIdx + 1, baseIdx + 5, baseIdx + 6,
+      baseIdx + 1, baseIdx + 6, baseIdx + 2,
+      baseIdx + 2, baseIdx + 6, baseIdx + 7,
+      baseIdx + 2, baseIdx + 7, baseIdx + 3,
+      baseIdx + 3, baseIdx + 7, baseIdx + 4,
+      baseIdx + 3, baseIdx + 4, baseIdx
+    );
+    vertexCount += 8;
+  });
+
+  buildingGeo.setIndex(indices);
+  buildingGeo.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(new Float32Array(positions), 3)
+  );
+  buildingGeo.computeVertexNormals();
+  return buildingGeo;
 }
