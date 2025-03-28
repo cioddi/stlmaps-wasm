@@ -184,7 +184,8 @@ export const GenerateMeshButton = function ({
         maxLng,
         maxLat,
         minElevation,
-        maxElevation
+        maxElevation,
+        verticalExaggeration
       );
 
       const buildingsGeometry = createBuildingsGeometry(
@@ -587,8 +588,8 @@ export const GenerateMeshButton = function ({
             onChange={handleExaggerationChange}
             aria-labelledby="vertical-exaggeration-slider"
             min={0.01}
-            max={1.0}
-            step={0.00001}
+            max={10.0}
+            step={0.1}
             marks={[
               { value: 0.000001, label: "Min" },
               { value: 0.0001, label: "Med" },
@@ -772,7 +773,8 @@ function createTerrainGeometry(
   maxLng: number,
   maxLat: number,
   minElevation: number,
-  maxElevation: number
+  maxElevation: number,
+  verticalExaggeration: number
 ): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   const { width, height } = gridSize;
@@ -789,7 +791,7 @@ function createTerrainGeometry(
         Math.max(1, maxElevation - minElevation);
       const meshX = (x / (width - 1) - 0.5) * 200;
       const meshY = (y / (height - 1) - 0.5) * 200;
-      const meshZ = normalizedZ * (200 * 0.2);
+      const meshZ = normalizedZ * (200 * 0.2) * verticalExaggeration;
       topPositions.push(meshX, meshY, meshZ);
       bottomPositions.push(meshX, meshY, 0);
     }
