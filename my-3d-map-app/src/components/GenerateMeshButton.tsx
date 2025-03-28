@@ -18,6 +18,8 @@ import {
   processBuildings,
 } from "./VectorTileFunctions";
 import * as THREE from "three";
+// @ts-expect-error
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils';
 
 // Define interfaces for our data structures
 interface GridSize {
@@ -190,6 +192,8 @@ export const GenerateMeshButton = function ({
 
       const buildingsGeometry = createBuildingsGeometry(
         buildings,
+        buildingScaleFactor,
+        verticalExaggeration,
         minLng,
         minLat,
         maxLng,
@@ -201,7 +205,11 @@ export const GenerateMeshButton = function ({
       );
 
       // Optionally merge both geometries. For brevity, just store terrain:
-      setMeshGeometry(terrainGeometry);
+      const mergedGeometry = BufferGeometryUtils.mergeGeometries(
+        [terrainGeometry, buildingsGeometry],
+        true
+      );
+      setMeshGeometry(mergedGeometry);
 
       console.log("3D model generated successfully");
 
@@ -868,6 +876,8 @@ function createTerrainGeometry(
 
 function createBuildingsGeometry(
   buildings: BuildingData[],
+  buildingScaleFactor: number,
+  verticalExaggeration: number,
   minLng: number,
   minLat: number,
   maxLng: number,
@@ -877,52 +887,113 @@ function createBuildingsGeometry(
   minElevation: number,
   maxElevation: number
 ): THREE.BufferGeometry {
-  const buildingGeo = new THREE.BufferGeometry();
   const positions: number[] = [];
   const indices: number[] = [];
-
   let vertexCount = 0;
-  buildings.forEach((bld) => {
-    if (!bld.footprint || bld.footprint.length < 3) return;
-    // ...similar logic: sample terrain under building footprint, create top/bottom/side polygons...
+  const geometry = new THREE.BufferGeometry();
 
-    // Example: push random geometry for each building to illustrate
-    // Expand this to replicate your building shape
-    const baseZ = 0;
-    const topZ = 10;
-    const baseIdx = vertexCount;
-    positions.push(
-      0, 0, baseZ,
-      10, 0, baseZ,
-      10, 10, baseZ,
-      0, 10, baseZ,
-      0, 0, topZ,
-      10, 0, topZ,
-      10, 10, topZ,
-      0, 10, topZ
+  // Helper to transform lng/lat to mesh X/Y in [-100..100]
+  function transformToMeshCoordinates(
+    lng: number,
+    lat: number
+  ): [number, number] {
+    const xFrac = (lng - minLng) / (maxLng - minLng) - 0.5;
+    const yFrac = (lat - minLat) / (maxLat - minLat) - 0.5;
+    return [xFrac * 200, yFrac * 200];
+  }
+
+  buildings.forEach((bld) => {
+    const { footprint, height = 15 } = bld;
+    if (!footprint || footprint.length < 3) return;
+
+    // Sample terrain for each vertex
+    let lowestTerrainZ = Infinity;
+    let highestTerrainZ = -Infinity;
+    const meshCoords: [number, number][] = [];
+    const terrainZList: number[] = [];
+
+    footprint.forEach(([lng, lat]) => {
+      const tZ = sampleTerrainElevationAtPoint(
+        lng,
+        lat,
+        elevationGrid,
+        gridSize,
+        { minLng, minLat, maxLng, maxLat },
+        minElevation,
+        maxElevation
+      );
+      lowestTerrainZ = Math.min(lowestTerrainZ, tZ);
+      highestTerrainZ = Math.max(highestTerrainZ, tZ);
+      meshCoords.push(transformToMeshCoordinates(lng, lat));
+      terrainZList.push(tZ);
+    });
+
+    const validatedHeight = Math.min(Math.max(height, 2), 500);
+    const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
+      minLng,
+      minLat,
+      maxLng,
+      maxLat,
+      minElevation,
+      maxElevation
     );
-    indices.push(
-      baseIdx, baseIdx + 1, baseIdx + 2,
-      baseIdx, baseIdx + 2, baseIdx + 3,
-      baseIdx + 4, baseIdx + 6, baseIdx + 5,
-      baseIdx + 4, baseIdx + 7, baseIdx + 6,
-      baseIdx, baseIdx + 4, baseIdx + 5,
-      baseIdx, baseIdx + 5, baseIdx + 1,
-      baseIdx + 1, baseIdx + 5, baseIdx + 6,
-      baseIdx + 1, baseIdx + 6, baseIdx + 2,
-      baseIdx + 2, baseIdx + 6, baseIdx + 7,
-      baseIdx + 2, baseIdx + 7, baseIdx + 3,
-      baseIdx + 3, baseIdx + 7, baseIdx + 4,
-      baseIdx + 3, baseIdx + 4, baseIdx
-    );
-    vertexCount += 8;
+    const slopeZ = highestTerrainZ - lowestTerrainZ;
+    const effectiveHeight =
+      validatedHeight * adaptiveScaleFactor * verticalExaggeration * buildingScaleFactor +
+      slopeZ +
+      BUILDING_SUBMERGE_OFFSET;
+
+    // Write top vertices
+    const topIndices: number[] = [];
+    footprint.forEach((_, i) => {
+      const [mx, my] = meshCoords[i];
+      const zTop = lowestTerrainZ + effectiveHeight;
+      positions.push(mx, my, zTop);
+      topIndices.push(vertexCount + i);
+    });
+
+    // Write bottom vertices
+    const bottomIndices: number[] = [];
+    footprint.forEach((_, i) => {
+      const [mx, my] = meshCoords[i];
+      const zBottom = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
+      positions.push(mx, my, zBottom);
+      bottomIndices.push(vertexCount + i + footprint.length);
+    });
+
+    // Triangulate top face (reverse winding)
+    for (let i = 2; i < footprint.length; i++) {
+      indices.push(topIndices[0], topIndices[i], topIndices[i - 1]);
+    }
+
+    // Triangulate bottom face
+    for (let i = 2; i < footprint.length; i++) {
+      indices.push(
+        bottomIndices[0],
+        bottomIndices[i - 1],
+        bottomIndices[i]
+      );
+    }
+
+    // Add side faces
+    for (let i = 0; i < footprint.length; i++) {
+      const nextI = (i + 1) % footprint.length;
+      const topL = topIndices[i];
+      const topR = topIndices[nextI];
+      const botL = bottomIndices[i];
+      const botR = bottomIndices[nextI];
+      indices.push(topL, topR, botL);
+      indices.push(topR, botR, botL);
+    }
+
+    vertexCount += footprint.length * 2;
   });
 
-  buildingGeo.setIndex(indices);
-  buildingGeo.setAttribute(
+  geometry.setIndex(indices);
+  geometry.setAttribute(
     "position",
     new THREE.Float32BufferAttribute(new Float32Array(positions), 3)
   );
-  buildingGeo.computeVertexNormals();
-  return buildingGeo;
+  geometry.computeVertexNormals();
+  return geometry;
 }
