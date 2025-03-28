@@ -939,7 +939,7 @@ function createBuildingsGeometry(
     );
     const slopeZ = highestTerrainZ - lowestTerrainZ;
     const effectiveHeight =
-      validatedHeight * adaptiveScaleFactor * verticalExaggeration * buildingScaleFactor +
+      validatedHeight * adaptiveScaleFactor * buildingScaleFactor +
       slopeZ +
       BUILDING_SUBMERGE_OFFSET;
 
