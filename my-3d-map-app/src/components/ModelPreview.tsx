@@ -191,7 +191,11 @@ const ModelPreview = ({
         if (buildingsGeometry) {
           const buildingMesh = new THREE.Mesh(
             buildingsGeometry,
-            new THREE.MeshLambertMaterial({ color: 0xadd8e6 })
+            new THREE.MeshPhongMaterial({ 
+              color: new THREE.Color(0x87CEEB), // Light sky blue
+              flatShading: true, // Use flat shading for better definition
+              shininess: 0 // Remove shininess for a matte look
+            })
           );
           modelGroup.add(buildingMesh);
         }

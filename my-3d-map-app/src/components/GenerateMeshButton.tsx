@@ -207,19 +207,38 @@ export const GenerateMeshButton = function ({
         maxElevation
       );
 
-      // Optionally merge both geometries. For brevity, just store terrain:
+      // Ensure buildingsGeometry is valid before merging
+      const geometriesToMerge = [terrainGeometry];
+      if (buildingsGeometry && buildingsGeometry.attributes.position) {
+        // Add color attribute to buildings to match terrain geometry
+        if (!buildingsGeometry.hasAttribute("color")) {
+          const buildingColor = new THREE.Color(0.7, 0.7, 0.7); // Light gray color for buildings
+          const colorArray = new Float32Array(buildingsGeometry.attributes.position.count * 3);
+          for (let i = 0; i < colorArray.length; i += 3) {
+            colorArray[i] = buildingColor.r;
+            colorArray[i + 1] = buildingColor.g;
+            colorArray[i + 2] = buildingColor.b;
+          }
+          buildingsGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
+        }
+        geometriesToMerge.push(buildingsGeometry);
+      }
+
       const mergedGeometry = BufferGeometryUtils.mergeGeometries(
-        [terrainGeometry, buildingsGeometry],
+        geometriesToMerge,
         true
       );
-      // Now center everything once at the end:
-      mergedGeometry.computeBoundingBox();
-      const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
-      if (center) {
-        mergedGeometry.translate(-center.x, -center.y, -center.z);
+
+      if (mergedGeometry) {
+        mergedGeometry.computeBoundingBox();
+        const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
+        if (center) {
+          mergedGeometry.translate(-center.x, -center.y, -center.z);
+        }
       }
-      setTerrainGeometry(mergedGeometry);
-      setBuildingsGeometry(null);
+
+      setTerrainGeometry(terrainGeometry);
+      setBuildingsGeometry(buildingsGeometry);
       props.setTerrainGeometry(mergedGeometry);
       props.setBuildingsGeometry(null);
 
@@ -893,11 +912,7 @@ function createBuildingsGeometry(
   minElevation: number,
   maxElevation: number
 ): THREE.BufferGeometry {
-  const positions: number[] = [];
-  const indices: number[] = [];
-  let vertexCount = 0;
-  const geometry = new THREE.BufferGeometry();
-  const colorArray: number[] = [];
+  const bufferGeometries: THREE.BufferGeometry[] = [];
 
   // Helper to transform lng/lat to mesh X/Y in [-100..100]
   function transformToMeshCoordinates(
@@ -913,12 +928,9 @@ function createBuildingsGeometry(
     const { footprint, height = 15 } = bld;
     if (!footprint || footprint.length < 3) return;
 
-    // Sample terrain for each vertex
+    // Sample terrain for this building
     let lowestTerrainZ = Infinity;
-    let highestTerrainZ = -Infinity;
     const meshCoords: [number, number][] = [];
-    const terrainZList: number[] = [];
-
     footprint.forEach(([lng, lat]) => {
       const tZ = sampleTerrainElevationAtPoint(
         lng,
@@ -930,9 +942,7 @@ function createBuildingsGeometry(
         maxElevation
       );
       lowestTerrainZ = Math.min(lowestTerrainZ, tZ);
-      highestTerrainZ = Math.max(highestTerrainZ, tZ);
       meshCoords.push(transformToMeshCoordinates(lng, lat));
-      terrainZList.push(tZ);
     });
 
     const validatedHeight = Math.min(Math.max(height, 2), 500);
@@ -950,60 +960,63 @@ function createBuildingsGeometry(
     const zTop = lowestTerrainZ + effectiveHeight;
     const zBottom = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
 
-    // Write top vertices
-    const topIndices: number[] = [];
-    footprint.forEach((_, i) => {
-      const [mx, my] = meshCoords[i];
-      positions.push(mx, my, zTop);
-      topIndices.push(vertexCount + i);
-      // top vertex color
-      colorArray.push(0.68, 0.85, 0.9);
+    // Create a new shape for extrusion
+    const shape = new THREE.Shape();
+    meshCoords.forEach(([x, y], i) => {
+      if (i === 0) {
+        shape.moveTo(x, y);
+      } else {
+        shape.lineTo(x, y);
+      }
     });
 
-    // Write bottom vertices
-    const bottomIndices: number[] = [];
-    footprint.forEach((_, i) => {
-      const [mx, my] = meshCoords[i];
-      positions.push(mx, my, zBottom);
-      bottomIndices.push(vertexCount + i + footprint.length);
-      // bottom vertex color
-      colorArray.push(0.68, 0.85, 0.9);
-    });
+    // Close the shape
+    shape.lineTo(meshCoords[0][0], meshCoords[0][1]);
 
-    // Triangulate top face (reverse winding)
-    for (let i = 2; i < footprint.length; i++) {
-      indices.push(topIndices[0], topIndices[i], topIndices[i - 1]);
-    }
+    // Extrude settings
+    const extrudeSettings = {
+      steps: 1,
+      depth: effectiveHeight,
+      bevelEnabled: false,
+    };
 
-    // Triangulate bottom face
-    for (let i = 2; i < footprint.length; i++) {
-      indices.push(
-        bottomIndices[0],
-        bottomIndices[i - 1],
-        bottomIndices[i]
+    // Create extruded geometry
+    const buildingGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    // Move to correct position (accounting for terrain height)
+    buildingGeometry.translate(0, 0, zBottom);
+    buildingGeometry.computeVertexNormals();
+
+    // Ensure the geometry has an index attribute
+    if (!buildingGeometry.getIndex()) {
+      buildingGeometry.setIndex(
+        Array.from({ length: buildingGeometry.attributes.position.count }, (_, i) => i)
       );
     }
 
-    // Add side faces
-    for (let i = 0; i < footprint.length; i++) {
-      const nextI = (i + 1) % footprint.length;
-      const topL = topIndices[i];
-      const topR = topIndices[nextI];
-      const botL = bottomIndices[i];
-      const botR = bottomIndices[nextI];
-      indices.push(topL, topR, botL);
-      indices.push(topR, botR, botL);
+    // Remove the "uv" attribute if it exists
+    if (buildingGeometry.hasAttribute("uv")) {
+      buildingGeometry.deleteAttribute("uv");
     }
 
-    vertexCount += footprint.length * 2;
+    // Add to list of geometries
+    bufferGeometries.push(buildingGeometry);
   });
 
-  geometry.setIndex(indices);
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(new Float32Array(positions), 3)
+  // If no buildings were found, return empty geometry
+  if (bufferGeometries.length === 0) {
+    return new THREE.BufferGeometry();
+  }
+
+  // Merge all building geometries
+  const mergedGeometry = BufferGeometryUtils.mergeGeometries(
+    bufferGeometries,
+    false
   );
-  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colorArray, 3));
-  geometry.computeVertexNormals();
-  return geometry;
+
+  // Ensure merged geometry is valid
+  if (!mergedGeometry) {
+    return new THREE.BufferGeometry();
+  }
+
+  return mergedGeometry;
 }
