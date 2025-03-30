@@ -76,7 +76,7 @@ export const GenerateMeshButton = function ({
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.8);
-  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(8);
+  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(1);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Modify generate3DModel function to include buildings

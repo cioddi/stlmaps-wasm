@@ -102,7 +102,9 @@ export default function BboxSelector(props: Props) {
   const mapHook = useMap({
     mapId: props.mapId,
   });
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
+    null
+  );
   const [bbox, setBbox] = useState<Feature | undefined>(undefined);
 
   function onChangeDebounced(bbox: Feature, debounceMs = 1000) {
@@ -124,6 +126,27 @@ export default function BboxSelector(props: Props) {
       props.setOptions(options);
     }
   }, [options, props]);
+
+  useEffect(() => {
+    if (props?.options?.center && mapHook.map) {
+      const _centerX = Math.round(mapHook.map.map._container.clientWidth / 2);
+      const _centerY = Math.round(mapHook.map.map._container.clientHeight / 2);
+
+      const bbox_size = _centerX < _centerY ? _centerX : _centerY;
+
+      //const scale = parseFloat(/(14/mapState.viewport.zoom));
+      const scale =
+        1 / getMapZoomScaleModifier([_centerX, _centerY], mapHook.map.map);
+
+      setOptions((val: BboxSelectorOptions) => ({
+        ...val,
+        scale: [scale, scale],
+        width: bbox_size,
+        height: bbox_size,
+        center: props?.options?.center,
+      }));
+    }
+  }, [mapHook.map, props.options?.center]);
 
   useEffect(() => {
     if (!mapState?.viewport?.zoom || !mapHook.map) return;
@@ -177,6 +200,7 @@ export default function BboxSelector(props: Props) {
     const centerInPixels = mapHook.map.map.project(
       options.center as LngLatLike
     );
+    console.log(options.center);
 
     const x = centerInPixels.x;
     const y = centerInPixels.y;
@@ -250,7 +274,7 @@ export default function BboxSelector(props: Props) {
 
   // update props.geoJsonRef
   useEffect(() => {
-    if (targetRef.current && mapHook.map) {
+    if (targetRef.current && mapHook.map && transformOrigin?.[0]) {
       // apply orientation
       let _width = options.width;
       let _height = options.height;
@@ -307,8 +331,8 @@ export default function BboxSelector(props: Props) {
         },
         properties: { bearing: getTargetRotationAngle(targetRef.current) },
       } as Feature;
-      console.log('update bbox', _geoJson);
-      setBbox(_geoJson)
+      console.log("update bbox", _geoJson);
+      setBbox(_geoJson);
       props.geojsonRef.current = _geoJson;
     }
 
@@ -321,7 +345,7 @@ export default function BboxSelector(props: Props) {
     options?.width,
     props.geojsonRef,
     transformOrigin,
-    mapState.viewport?.center
+    mapState?.viewport?.center,
   ]);
 
   return mapHook?.map?.map?._canvas?.parentNode?.parentNode ? (

@@ -16,6 +16,7 @@ import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import BboxSelector from "./components/BboxSelector";
 import ModelPreview from "./components/ModelPreview";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
+import SetLocationButtons from "./components/SetLocationButtons";
 
 const SIDEBAR_WIDTH = 240;
 
@@ -26,6 +27,8 @@ const App: React.FC = () => {
     useState<THREE.BufferGeometry | null>(null);
   const [buildingsGeometry, setBuildingsGeometry] =
     useState<THREE.BufferGeometry | null>(null);
+  const [bboxCenter, setBboxCenter] = useState<[number, number]>([11.310180118044855, 47.55592195900479]);
+  const [mapCenter, setMapCenter] = useState<[number, number]>([11.310180118044855, 47.55592195900479]);
 
   return (
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
@@ -59,7 +62,7 @@ const App: React.FC = () => {
           <BboxSelector
             geojsonRef={bboxRef}
             options={{
-              center: [11.310180118044855, 47.55592195900479],
+              center: bboxCenter,
               scale: [1, 1],
               rotate: 0,
               orientation: "portrait",
@@ -77,6 +80,10 @@ const App: React.FC = () => {
               setBuildingsGeometry={setBuildingsGeometry}
             />
           </Box>
+          <SetLocationButtons
+            setBboxCenter={setBboxCenter}
+            setMapCenter={setMapCenter}
+          />
         </Box>
       </Drawer>
 
@@ -103,7 +110,7 @@ const App: React.FC = () => {
               right: 0,
             }}
             options={{
-              center: [11.310180118044855, 47.55592195900479],
+              center: mapCenter,
               zoom: 9,
               style:
                 "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
