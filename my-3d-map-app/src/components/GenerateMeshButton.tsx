@@ -75,8 +75,8 @@ export const GenerateMeshButton = function ({
   const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
-    useState<number>(0.8);
-  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(1);
+    useState<number>(0.2);
+  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(8);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Modify generate3DModel function to include buildings
@@ -211,17 +211,17 @@ export const GenerateMeshButton = function ({
       const geometriesToMerge = [terrainGeometry];
       if (buildingsGeometry && buildingsGeometry.attributes.position) {
         // Add color attribute to buildings to match terrain geometry
-        if (!buildingsGeometry.hasAttribute("color")) {
-          const buildingColor = new THREE.Color(0.7, 0.7, 0.7); // Light gray color for buildings
-          const colorArray = new Float32Array(buildingsGeometry.attributes.position.count * 3);
-          for (let i = 0; i < colorArray.length; i += 3) {
-            colorArray[i] = buildingColor.r;
-            colorArray[i + 1] = buildingColor.g;
-            colorArray[i + 2] = buildingColor.b;
-          }
-          buildingsGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
-        }
-        geometriesToMerge.push(buildingsGeometry);
+        //if (!buildingsGeometry.hasAttribute("color")) {
+          //const buildingColor = new THREE.Color(0.7, 0.7, 0.7); // Light gray color for buildings
+          //const colorArray = new Float32Array(buildingsGeometry.attributes.position.count * 3);
+          //for (let i = 0; i < colorArray.length; i += 3) {
+            //colorArray[i] = buildingColor.r;
+            //colorArray[i + 1] = buildingColor.g;
+            //colorArray[i + 2] = buildingColor.b;
+          //}
+          //buildingsGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
+        //}
+        //geometriesToMerge.push(buildingsGeometry);
       }
 
       const mergedGeometry = BufferGeometryUtils.mergeGeometries(
@@ -229,18 +229,22 @@ export const GenerateMeshButton = function ({
         true
       );
 
-      if (mergedGeometry) {
-        mergedGeometry.computeBoundingBox();
-        const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
-        if (center) {
-          mergedGeometry.translate(-center.x, -center.y, -center.z);
-        }
-      }
+      //if (mergedGeometry) {
+        //mergedGeometry.computeBoundingBox();
+        //const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
+        //if (center) {
+          //mergedGeometry.translate(-center.x, -center.y, -center.z);
+        //}
+      //}
+      //if(buildingsGeometry) {
+        //const terrainHeight = mergedGeometry.boundingBox?.max.z || 0;
+        //buildingsGeometry.translate(0, 0, 0);
+      //}
 
       setTerrainGeometry(terrainGeometry);
       setBuildingsGeometry(buildingsGeometry);
-      props.setTerrainGeometry(mergedGeometry);
-      props.setBuildingsGeometry(null);
+      props.setTerrainGeometry(terrainGeometry);
+      props.setBuildingsGeometry(buildingsGeometry);
 
       console.log("3D model generated successfully");
 
@@ -632,7 +636,7 @@ export const GenerateMeshButton = function ({
             aria-labelledby="vertical-exaggeration-slider"
             min={0.01}
             max={10.0}
-            step={0.1}
+            step={0.01}
             marks={[
               { value: 0.000001, label: "Min" },
               { value: 0.0001, label: "Med" },
@@ -650,8 +654,8 @@ export const GenerateMeshButton = function ({
             onChange={handleBuildingScaleChange}
             aria-labelledby="building-scale-slider"
             min={0}
-            max={100}
-            step={1}
+            max={15}
+            step={.1}
             marks={[
               { value: 0, label: "0" },
               { value: 50, label: "50" },
@@ -913,12 +917,11 @@ function createBuildingsGeometry(
   maxElevation: number
 ): THREE.BufferGeometry {
   const bufferGeometries: THREE.BufferGeometry[] = [];
+  const processedFootprints = new Set<string>();
+  // Define a consistent building color
+  const buildingColor = new THREE.Color(0.7, 0.7, 0.7);
 
-  // Helper to transform lng/lat to mesh X/Y in [-100..100]
-  function transformToMeshCoordinates(
-    lng: number,
-    lat: number
-  ): [number, number] {
+  function transformToMeshCoordinates(lng: number, lat: number): [number, number] {
     const xFrac = (lng - minLng) / (maxLng - minLng) - 0.5;
     const yFrac = (lat - minLat) / (maxLat - minLat) - 0.5;
     return [xFrac * 200, yFrac * 200];
@@ -927,96 +930,79 @@ function createBuildingsGeometry(
   buildings.forEach((bld) => {
     const { footprint, height = 15 } = bld;
     if (!footprint || footprint.length < 3) return;
+    
+    // Create a footprint signature to detect duplicates
+    const footprintSignature = footprint
+      .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
+      .join('|');
+      
+    if (processedFootprints.has(footprintSignature)) return;
+    processedFootprints.add(footprintSignature);
 
-    // Sample terrain for this building
+    // Ensure polygons are oriented clockwise
+    const path2D = footprint.map(([lng, lat]) => new THREE.Vector2(lng, lat));
+    if (!THREE.ShapeUtils.isClockWise(path2D)) {
+      path2D.reverse();
+    }
+
     let lowestTerrainZ = Infinity;
     const meshCoords: [number, number][] = [];
-    footprint.forEach(([lng, lat]) => {
+    
+    path2D.forEach((vec2) => {
+      const lng = vec2.x;
+      const lat = vec2.y;
+      // Get terrain elevation without exaggeration
       const tZ = sampleTerrainElevationAtPoint(
-        lng,
-        lat,
-        elevationGrid,
-        gridSize,
+        lng, lat, elevationGrid, gridSize,
         { minLng, minLat, maxLng, maxLat },
-        minElevation,
-        maxElevation
+        minElevation, maxElevation
       );
       lowestTerrainZ = Math.min(lowestTerrainZ, tZ);
       meshCoords.push(transformToMeshCoordinates(lng, lat));
     });
-
+    
+    // Apply the same vertical exaggeration to building base as applied to terrain
+    const exaggeratedTerrainZ = lowestTerrainZ * verticalExaggeration;
+    
     const validatedHeight = Math.min(Math.max(height, 2), 500);
     const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
-      minLng,
-      minLat,
-      maxLng,
-      maxLat,
-      minElevation,
-      maxElevation
+      minLng, minLat, maxLng, maxLat, minElevation, maxElevation
     );
-    const effectiveHeight =
-      validatedHeight * adaptiveScaleFactor * buildingScaleFactor +
-      BUILDING_SUBMERGE_OFFSET;
-    const zTop = lowestTerrainZ + effectiveHeight;
-    const zBottom = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
+    
+    // Apply vertical exaggeration to building height to match terrain
+    const effectiveHeight = validatedHeight * adaptiveScaleFactor * buildingScaleFactor * verticalExaggeration;
+    const zBottom = exaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET * verticalExaggeration;
 
-    // Create a new shape for extrusion
     const shape = new THREE.Shape();
-    meshCoords.forEach(([x, y], i) => {
-      if (i === 0) {
-        shape.moveTo(x, y);
-      } else {
-        shape.lineTo(x, y);
-      }
-    });
+    shape.moveTo(meshCoords[0][0], meshCoords[0][1]);
+    for (let i = 1; i < meshCoords.length; i++) {
+      shape.lineTo(meshCoords[i][0], meshCoords[i][1]);
+    }
+    shape.autoClose = true;
 
-    // Close the shape
-    shape.lineTo(meshCoords[0][0], meshCoords[0][1]);
-
-    // Extrude settings
-    const extrudeSettings = {
-      steps: 1,
-      depth: effectiveHeight,
-      bevelEnabled: false,
-    };
-
-    // Create extruded geometry
+    const extrudeSettings = { steps: 1, depth: effectiveHeight, bevelEnabled: false };
     const buildingGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    // Move to correct position (accounting for terrain height)
     buildingGeometry.translate(0, 0, zBottom);
     buildingGeometry.computeVertexNormals();
 
-    // Ensure the geometry has an index attribute
-    if (!buildingGeometry.getIndex()) {
-      buildingGeometry.setIndex(
-        Array.from({ length: buildingGeometry.attributes.position.count }, (_, i) => i)
-      );
+    // Add color attribute to match terrain expectation
+    const colorArray = new Float32Array(buildingGeometry.attributes.position.count * 3);
+    for (let i = 0; i < buildingGeometry.attributes.position.count; i++) {
+      colorArray[i * 3] = buildingColor.r;
+      colorArray[i * 3 + 1] = buildingColor.g;
+      colorArray[i * 3 + 2] = buildingColor.b;
     }
+    buildingGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
 
-    // Remove the "uv" attribute if it exists
+    // Remove UV attributes to prevent conflicts
     if (buildingGeometry.hasAttribute("uv")) {
       buildingGeometry.deleteAttribute("uv");
     }
 
-    // Add to list of geometries
     bufferGeometries.push(buildingGeometry);
   });
 
-  // If no buildings were found, return empty geometry
-  if (bufferGeometries.length === 0) {
-    return new THREE.BufferGeometry();
-  }
-
-  // Merge all building geometries
-  const mergedGeometry = BufferGeometryUtils.mergeGeometries(
-    bufferGeometries,
-    false
-  );
-
-  // Ensure merged geometry is valid
-  if (!mergedGeometry) {
-    return new THREE.BufferGeometry();
-  }
-
-  return mergedGeometry;
+  if (!bufferGeometries.length) return new THREE.BufferGeometry();
+  const mergedGeometry = BufferGeometryUtils.mergeGeometries(bufferGeometries, false);
+  return mergedGeometry || new THREE.BufferGeometry();
 }
