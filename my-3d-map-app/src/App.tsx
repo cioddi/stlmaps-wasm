@@ -7,53 +7,123 @@ import {
   Container,
   CssBaseline,
   CircularProgress,
+  Box,
+  Drawer,
+  Divider,
+  Paper,
 } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import BboxSelector from "./components/BboxSelector";
 import ModelPreview from "./components/ModelPreview";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
 
+const SIDEBAR_WIDTH = 240;
+
 const App: React.FC = () => {
   const bboxRef = useRef<GeoJSON.Feature | undefined>(undefined);
+  const [bbox, setBbox] = useState<GeoJSON.Feature | undefined>(undefined);
+  const [terrainGeometry, setTerrainGeometry] =
+    useState<THREE.BufferGeometry | null>(null);
+  const [buildingsGeometry, setBuildingsGeometry] =
+    useState<THREE.BufferGeometry | null>(null);
 
   return (
-    <>
+    <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <CssBaseline />
-      <AppBar position="static">
+      <AppBar
+        position="fixed"
+        sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}
+      >
         <Toolbar>
           <Typography variant="h6">3D Model App</Typography>
         </Toolbar>
       </AppBar>
-      <Container style={{ height: "100vh", width: "100vw" }}>
-        <MapLibreMap
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-          }}
-          options={{
-            center: [11.310180118044855, 47.55592195900479],
-            zoom: 9,
-            style:
-              "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
-          }}
-        />
-        <BboxSelector
-          geojsonRef={bboxRef}
-          options={{
-            center: [11.310180118044855, 47.55592195900479],
-            scale: [1, 1],
-            rotate: 0,
-            orientation: "portrait",
-            width: 40000,
-            height: 40000,
-          }}
-        />
-        <GenerateMeshButton bboxRef={bboxRef} />
-      </Container>
-    </>
+
+      {/* Sidebar */}
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: SIDEBAR_WIDTH,
+          flexShrink: 0,
+          [`& .MuiDrawer-paper`]: {
+            width: SIDEBAR_WIDTH,
+            boxSizing: "border-box",
+          },
+        }}
+      >
+        <Toolbar /> {/* Spacing below AppBar */}
+        <Box sx={{ overflow: "auto", p: 2 }}>
+          <Typography variant="h6" gutterBottom>
+            Controls
+          </Typography>
+          <BboxSelector
+            geojsonRef={bboxRef}
+            options={{
+              center: [11.310180118044855, 47.55592195900479],
+              scale: [1, 1],
+              rotate: 0,
+              orientation: "portrait",
+              width: 40000,
+              height: 40000,
+            }}
+            onChange={(geojson) => {
+              setBbox(geojson);
+            }}
+          />
+          <Box sx={{ mt: 2 }}>
+            <GenerateMeshButton
+              bbox={bbox}
+              setTerrainGeometry={setTerrainGeometry}
+              setBuildingsGeometry={setBuildingsGeometry}
+            />
+          </Box>
+        </Box>
+      </Drawer>
+
+      {/* Main Content */}
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          height: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <Toolbar /> {/* Spacing below AppBar */}
+        {/* Map - Top Half */}
+        <Box sx={{ flex: 1, position: "relative", minHeight: 0 }}>
+          <MapLibreMap
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
+            }}
+            options={{
+              center: [11.310180118044855, 47.55592195900479],
+              zoom: 9,
+              style:
+                "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
+            }}
+          />
+        </Box>
+        <Divider />
+        {/* Model Preview - Bottom Half */}
+        <Box sx={{ flex: 1, position: "relative", minHeight: 0 }}>
+          <Suspense fallback={<CircularProgress />}>
+            {(terrainGeometry || buildingsGeometry) && (
+              <ModelPreview
+                terrainGeometry={terrainGeometry}
+                buildingsGeometry={buildingsGeometry}
+              />
+            )}
+          </Suspense>
+        </Box>
+      </Box>
+    </Box>
   );
 };
 

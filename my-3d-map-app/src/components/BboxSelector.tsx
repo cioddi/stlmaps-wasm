@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from "react";
+import React, { useRef, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom";
 import Moveable from "react-moveable";
 import { useMap, useMapState } from "@mapcomponents/react-maplibre";
@@ -38,6 +38,7 @@ type Props = {
       | ((val: BboxSelectorOptions) => BboxSelectorOptions)
       | BboxSelectorOptions
   ) => void;
+  onChange?: (geojson: Feature) => void;
 };
 
 function getTargetRotationAngle(target: HTMLDivElement) {
@@ -101,6 +102,22 @@ export default function BboxSelector(props: Props) {
   const mapHook = useMap({
     mapId: props.mapId,
   });
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [bbox, setBbox] = useState<Feature | undefined>(undefined);
+
+  function onChangeDebounced(bbox: Feature, debounceMs = 1000) {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    const timer = setTimeout(() => {
+      props.onChange?.(bbox);
+    }, debounceMs);
+    setDebounceTimer(timer);
+  }
+
+  useEffect(() => {
+    if (bbox) {
+      onChangeDebounced(bbox);
+    }
+  }, [bbox]);
 
   useEffect(() => {
     if (typeof props.setOptions === "function") {
@@ -290,18 +307,19 @@ export default function BboxSelector(props: Props) {
         },
         properties: { bearing: getTargetRotationAngle(targetRef.current) },
       } as Feature;
+      console.log('update bbox', _geoJson);
+      setBbox(_geoJson)
       props.geojsonRef.current = _geoJson;
     }
 
     return undefined;
   }, [
-    mapHook,
+    mapHook.map,
     transform,
     options?.orientation,
     options?.height,
     options?.width,
     props.geojsonRef,
-    mapState,
     transformOrigin,
   ]);
 

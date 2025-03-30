@@ -1,6 +1,5 @@
-import { useState, Suspense, RefObject, ChangeEvent } from "react";
+import { useState, Suspense, RefObject, ChangeEvent, useEffect } from "react";
 import {
-  Button,
   CircularProgress,
   Slider,
   Typography,
@@ -59,14 +58,16 @@ interface ElevationProcessingResult {
 }
 
 interface GenerateMeshButtonProps {
-  bboxRef: RefObject<GeoJSONFeature>;
+  bbox: GeoJSONFeature | undefined;
+  setTerrainGeometry: (geometry: THREE.BufferGeometry | null) => void;
+  setBuildingsGeometry: (geometry: THREE.BufferGeometry | null) => void;
 }
 
 // Submerge offset to ensure bottom slightly dips into terrain
 const BUILDING_SUBMERGE_OFFSET = 0.5;
 
 export const GenerateMeshButton = function ({
-  bboxRef,
+  bbox, ...props
 }: GenerateMeshButtonProps) {
   const [downloadUrl, setDownloadUrl] = useState<string>("");
   const [terrainGeometry, setTerrainGeometry] = useState<THREE.BufferGeometry | null>(null);
@@ -76,16 +77,17 @@ export const GenerateMeshButton = function ({
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.05);
   const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(20);
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Modify generate3DModel function to include buildings
   const generate3DModel = async (): Promise<void> => {
-    if (!bboxRef.current) return;
-    console.log("Generating 3D model for:", bboxRef.current);
+    if (!bbox) return;
+    console.log("Generating 3D model for:", bbox);
     setGenerating(true);
 
     try {
       // Extract bbox coordinates from the feature
-      const feature = bboxRef.current;
+      const feature = bbox;
 
       if (!feature.geometry || feature.geometry.type !== "Polygon") {
         console.error("Invalid geometry: expected a Polygon");
@@ -212,6 +214,8 @@ export const GenerateMeshButton = function ({
       );
       setTerrainGeometry(terrainGeometry);
       setBuildingsGeometry(buildingsGeometry);
+      props.setTerrainGeometry(terrainGeometry);
+      props.setBuildingsGeometry(buildingsGeometry);
 
       console.log("3D model generated successfully");
 
@@ -576,6 +580,21 @@ export const GenerateMeshButton = function ({
     setBuildingScaleFactor(newValue as number);
   };
 
+  useEffect(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (!bbox) return;
+
+    const timer = setTimeout(() => {
+      generate3DModel();
+    }, 1000);
+
+    setDebounceTimer(timer);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [bbox]);
+
   return (
     <>
       <div
@@ -627,15 +646,6 @@ export const GenerateMeshButton = function ({
           />
         </Box>
 
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={generate3DModel}
-          disabled={generating}
-          sx={{ marginBottom: "5px" }}
-        >
-          {generating ? <CircularProgress size={24} /> : "Generate 3D Model"}
-        </Button>
         {downloadUrl && (
           <>
             <Button
@@ -657,16 +667,6 @@ export const GenerateMeshButton = function ({
         )}
       </div>
 
-      <Suspense fallback={null}>
-        {(terrainGeometry || buildingsGeometry) && (
-          <ModelPreview
-            terrainGeometry={terrainGeometry}
-            buildingsGeometry={buildingsGeometry}
-            open={previewOpen}
-            onClose={() => setPreviewOpen(false)}
-          />
-        )}
-      </Suspense>
     </>
   );
 };
