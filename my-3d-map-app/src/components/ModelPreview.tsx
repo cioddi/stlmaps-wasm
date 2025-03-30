@@ -184,48 +184,9 @@ const ModelPreview = ({ terrainGeometry, buildingsGeometry, open, onClose }: Mod
 
         scene.add(modelGroup);
 
-        // Compute bounding box
-        modelGroup.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(modelGroup);
-        if (box) {
-          const center = box.getCenter(new THREE.Vector3());
-          modelGroup.position.sub(center);
-          const size = box.getSize(new THREE.Vector3());
-          geometryMesh.position.y = size.y / 2;
-        }
+        modelGroup.position.set(0, 0, 0);
+        camera.position.set(0, 150, 300);
 
-        // Create a helper function to properly fit the camera to the object
-        const fitCameraToObject = (camera: THREE.PerspectiveCamera, object: THREE.Object3D, padding = 1.5) => {
-          const boundingBox = new THREE.Box3().setFromObject(object);
-          
-          const center = boundingBox.getCenter(new THREE.Vector3());
-          const size = boundingBox.getSize(new THREE.Vector3());
-          
-          // Get the max side of the bounding box
-          const maxDim = Math.max(size.x, size.y, size.z);
-          const fov = camera.fov * (Math.PI / 180);
-          
-          // Calculate the required distance
-          let cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
-          cameraZ *= padding; // Add padding for rotation
-          
-          // Set camera position - adjusted for better viewing angle
-          camera.position.set(center.x, center.y + (size.y / 3), center.z + cameraZ);
-          camera.lookAt(center);
-          
-          // Update camera near and far planes to ensure the object remains visible during close zooming
-          camera.near = 0.01; // Set very close near plane
-          camera.far = cameraZ * 100;
-          camera.updateProjectionMatrix();
-          
-          // Update controls target
-          controls.target.copy(center);
-          controls.update();
-        };
-        
-        // Apply camera fitting with generous padding
-        fitCameraToObject(camera, modelGroup, 2.2); // Increased padding for better rotation view
-        
         // Animation loop
         const animate = () => {
           if (!rendererRef.current) return;

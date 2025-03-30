@@ -886,7 +886,7 @@ function createTerrainGeometry(
   geometry.computeBoundingBox();
   const center = geometry.boundingBox?.getCenter(new THREE.Vector3());
   if (center) {
-    geometry.translate(-center.x, -center.y-200, -center.z);
+    geometry.translate(-center.x, -center.y, -center.z);
   }
   return geometry;
 }
