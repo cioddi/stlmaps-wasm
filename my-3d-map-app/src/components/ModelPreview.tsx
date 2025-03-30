@@ -201,7 +201,10 @@ const ModelPreview = ({
         scene.add(modelGroup);
 
         modelGroup.position.set(0, 0, 0);
-        camera.position.set(0, 150, 300);
+        camera.position.set(0, -145, 70);
+
+        //camera.position.set(80, 200, 600);
+        camera.updateProjectionMatrix();
 
         // Animation loop
         const animate = () => {
@@ -212,6 +215,7 @@ const ModelPreview = ({
           rendererRef.current.render(scene, camera);
         };
 
+        document.camera = camera; // Expose camera to global scope for debugging
         animate();
         console.log("Animation started");
         setLoading(false);
