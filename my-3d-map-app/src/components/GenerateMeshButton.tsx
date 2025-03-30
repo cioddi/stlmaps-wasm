@@ -75,7 +75,7 @@ export const GenerateMeshButton = function ({
   const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
-    useState<number>(0.2);
+    useState<number>(0.06);
   const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(0.8);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
@@ -921,6 +921,11 @@ function createBuildingsGeometry(
   // Define a consistent building color
   const buildingColor = new THREE.Color(0.7, 0.7, 0.7);
 
+  // Maximum reasonable building height in meters (skyscrapers rarely exceed this)
+  const MAX_BUILDING_HEIGHT = 500;
+  // Minimum reasonable building height in meters
+  const MIN_BUILDING_HEIGHT = 2;
+
   function transformToMeshCoordinates(lng: number, lat: number): [number, number] {
     const xFrac = (lng - minLng) / (maxLng - minLng) - 0.5;
     const yFrac = (lat - minLat) / (maxLat - minLat) - 0.5;
@@ -932,12 +937,12 @@ function createBuildingsGeometry(
     if (!footprint || footprint.length < 3) return;
     
     // Create a footprint signature to detect duplicates
-    //const footprintSignature = footprint
-      //.map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
-      //.join('|');
+    const footprintSignature = footprint
+      .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
+      .join('|');
       
-    //if (processedFootprints.has(footprintSignature)) return;
-    //processedFootprints.add(footprintSignature);
+    if (processedFootprints.has(footprintSignature)) return;
+    processedFootprints.add(footprintSignature);
 
     // Ensure polygons are oriented clockwise
     const path2D = footprint.map(([lng, lat]) => new THREE.Vector2(lng, lat));
@@ -945,7 +950,10 @@ function createBuildingsGeometry(
       path2D.reverse();
     }
 
+    // Calculate average terrain elevation instead of just the lowest point
+    let totalTerrainZ = 0;
     let lowestTerrainZ = Infinity;
+    let highestTerrainZ = -Infinity;
     const meshCoords: [number, number][] = [];
     
     path2D.forEach((vec2) => {
@@ -958,20 +966,35 @@ function createBuildingsGeometry(
         minElevation, maxElevation
       );
       lowestTerrainZ = Math.min(lowestTerrainZ, tZ);
+      highestTerrainZ = Math.max(highestTerrainZ, tZ);
+      totalTerrainZ += tZ;
       meshCoords.push(transformToMeshCoordinates(lng, lat));
+
     });
     
-    // Apply the same vertical exaggeration to building base as applied to terrain
-    const exaggeratedTerrainZ = lowestTerrainZ * verticalExaggeration;
+    // Use average elevation for more stability with complex buildings
+    const avgTerrainZ = totalTerrainZ / path2D.length;
     
-    const validatedHeight = Math.min(Math.max(height, 2), 500);
+    // Apply vertical exaggeration to base elevation
+    const lowestExaggeratedTerrainZ = lowestTerrainZ * verticalExaggeration;
+    const highestExaggeratedTerrainZ = highestTerrainZ * verticalExaggeration;
+    const terrainDifference = highestExaggeratedTerrainZ - lowestExaggeratedTerrainZ;
+    console.log(avgTerrainZ, lowestExaggeratedTerrainZ)
+    
+    // Strict height validation to prevent unreasonable values
+    const validatedHeight = Math.min(Math.max(height+terrainDifference, MIN_BUILDING_HEIGHT), MAX_BUILDING_HEIGHT);
+    
     const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
       minLng, minLat, maxLng, maxLat, minElevation, maxElevation
     );
     
-    // Apply vertical exaggeration to building height to match terrain
-    const effectiveHeight = validatedHeight * adaptiveScaleFactor * buildingScaleFactor;
-    const zBottom = exaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET * verticalExaggeration;
+    // Apply vertical exaggeration to building height with a dampening factor for taller buildings
+    // This prevents extreme heights while maintaining proportionality
+    const heightDampeningFactor = Math.max(0.5, 1 - (validatedHeight / MAX_BUILDING_HEIGHT));
+    const effectiveHeight = validatedHeight * adaptiveScaleFactor * buildingScaleFactor * 
+                            heightDampeningFactor;
+    
+    const zBottom = lowestExaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET;
 
     const shape = new THREE.Shape();
     shape.moveTo(meshCoords[0][0], meshCoords[0][1]);
