@@ -17,6 +17,7 @@ import BboxSelector from "./components/BboxSelector";
 import ModelPreview from "./components/ModelPreview";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
 import SetLocationButtons from "./components/SetLocationButtons";
+import ExportButtons from "./components/ExportButtons";
 
 const SIDEBAR_WIDTH = 240;
 
@@ -27,8 +28,12 @@ const App: React.FC = () => {
     useState<THREE.BufferGeometry | null>(null);
   const [buildingsGeometry, setBuildingsGeometry] =
     useState<THREE.BufferGeometry | null>(null);
-  const [bboxCenter, setBboxCenter] = useState<[number, number]>([11.310180118044855, 47.55592195900479]);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([11.310180118044855, 47.55592195900479]);
+  const [bboxCenter, setBboxCenter] = useState<[number, number]>([
+    11.310180118044855, 47.55592195900479,
+  ]);
+  const [mapCenter, setMapCenter] = useState<[number, number]>([
+    11.310180118044855, 47.55592195900479,
+  ]);
 
   return (
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
@@ -36,7 +41,6 @@ const App: React.FC = () => {
       <AppBar
         position="fixed"
         sx={{ zIndex: (theme) => theme.zIndex.drawer + 10000 }}
-
       >
         <Toolbar>
           <Typography variant="h6">3D Model App</Typography>
@@ -85,6 +89,13 @@ const App: React.FC = () => {
             setBboxCenter={setBboxCenter}
             setMapCenter={setMapCenter}
           />
+
+          {terrainGeometry && (
+            <ExportButtons
+              terrainGeometry={terrainGeometry}
+              buildingsGeometry={buildingsGeometry}
+            />
+          )}
         </Box>
       </Drawer>
 
@@ -120,7 +131,9 @@ const App: React.FC = () => {
         </Box>
         <Divider />
         {/* Model Preview - Bottom Half */}
-        <Box sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 10000 }}>
+        <Box
+          sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 10000 }}
+        >
           <Suspense fallback={<CircularProgress />}>
             {(terrainGeometry || buildingsGeometry) && (
               <ModelPreview
