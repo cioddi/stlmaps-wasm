@@ -75,8 +75,8 @@ export const GenerateMeshButton = function ({
   const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
-    useState<number>(0.05);
-  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(20);
+    useState<number>(0.8);
+  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(8);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Modify generate3DModel function to include buildings
@@ -593,21 +593,10 @@ export const GenerateMeshButton = function ({
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [bbox]);
+  }, [bbox, verticalExaggeration, buildingScaleFactor]);
 
   return (
     <>
-      <div
-        style={{
-          position: "absolute",
-          bottom: 20,
-          left: 20,
-          backgroundColor: "rgba(255,255,255,0.8)",
-          padding: "10px",
-          borderRadius: "4px",
-          width: "300px",
-        }}
-      >
         <Box sx={{ mb: 2 }}>
           <Typography id="vertical-exaggeration-slider" gutterBottom>
             Vertical Exaggeration: {verticalExaggeration.toFixed(6)}
@@ -665,7 +654,6 @@ export const GenerateMeshButton = function ({
             </Button>
           </>
         )}
-      </div>
 
     </>
   );
