@@ -212,6 +212,12 @@ export const GenerateMeshButton = function ({
         [terrainGeometry, buildingsGeometry],
         true
       );
+      // Now center everything once at the end:
+      mergedGeometry.computeBoundingBox();
+      const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
+      if (center) {
+        mergedGeometry.translate(-center.x, -center.y, -center.z);
+      }
       setTerrainGeometry(mergedGeometry);
       setBuildingsGeometry(null);
       props.setTerrainGeometry(mergedGeometry);
@@ -871,11 +877,6 @@ function createTerrainGeometry(
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(allPositions, 3));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
-  geometry.computeBoundingBox();
-  const center = geometry.boundingBox?.getCenter(new THREE.Vector3());
-  if (center) {
-    geometry.translate(-center.x, -center.y, -center.z);
-  }
   return geometry;
 }
 
