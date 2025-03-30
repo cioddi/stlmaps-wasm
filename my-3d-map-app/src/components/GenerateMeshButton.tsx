@@ -78,6 +78,7 @@ export const GenerateMeshButton = function ({
     useState<number>(0.06);
   const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(0.8);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [terrainBaseHeight, setTerrainBaseHeight] = useState<number>(5);
 
   // Modify generate3DModel function to include buildings
   const generate3DModel = async (): Promise<void> => {
@@ -190,13 +191,15 @@ export const GenerateMeshButton = function ({
         maxLat,
         minElevation,
         maxElevation,
-        verticalExaggeration
+        verticalExaggeration,
+        terrainBaseHeight
       );
 
       const buildingsGeometry = createBuildingsGeometry(
         buildings,
         buildingScaleFactor,
         verticalExaggeration,
+        terrainBaseHeight, // pass desired base height
         minLng,
         minLat,
         maxLng,
@@ -622,7 +625,7 @@ export const GenerateMeshButton = function ({
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [bbox, verticalExaggeration, buildingScaleFactor]);
+  }, [bbox, verticalExaggeration, buildingScaleFactor, terrainBaseHeight]);
 
   return (
     <>
@@ -661,6 +664,19 @@ export const GenerateMeshButton = function ({
               { value: 50, label: "50" },
               { value: 100, label: "100" },
             ]}
+          />
+        </Box>
+
+        <Box sx={{ mb: 2 }}>
+          <Typography id="terrain-base-height-slider" gutterBottom>
+            Base Height: {terrainBaseHeight}
+          </Typography>
+          <Slider
+            value={terrainBaseHeight}
+            onChange={(e, newVal) => setTerrainBaseHeight(newVal as number)}
+            min={0}
+            max={100}
+            step={1}
           />
         </Box>
 
@@ -802,7 +818,8 @@ function createTerrainGeometry(
   maxLat: number,
   minElevation: number,
   maxElevation: number,
-  verticalExaggeration: number
+  verticalExaggeration: number,
+  terrainBaseHeight: number // added
 ): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   const { width, height } = gridSize;
@@ -827,7 +844,7 @@ function createTerrainGeometry(
       colors.push(c.r, c.g, c.b);
       const meshX = (x / (width - 1) - 0.5) * 200;
       const meshY = (y / (height - 1) - 0.5) * 200;
-      const meshZ = normalizedZ * (200 * 0.2) * verticalExaggeration;
+      const meshZ = terrainBaseHeight + normalizedZ * (200 * 0.2) * verticalExaggeration; 
       topPositions.push(meshX, meshY, meshZ);
       bottomPositions.push(meshX, meshY, 0);
     }
@@ -907,6 +924,7 @@ function createBuildingsGeometry(
   buildings: BuildingData[],
   buildingScaleFactor: number,
   verticalExaggeration: number,
+  terrainBaseHeight: number, // new parameter
   minLng: number,
   minLat: number,
   maxLng: number,
@@ -994,7 +1012,7 @@ function createBuildingsGeometry(
     const effectiveHeight = validatedHeight * adaptiveScaleFactor * buildingScaleFactor * 
                             heightDampeningFactor;
     
-    const zBottom = lowestExaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET;
+    const zBottom = terrainBaseHeight + lowestExaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET;
 
     const shape = new THREE.Shape();
     shape.moveTo(meshCoords[0][0], meshCoords[0][1]);
