@@ -212,10 +212,10 @@ export const GenerateMeshButton = function ({
         [terrainGeometry, buildingsGeometry],
         true
       );
-      setTerrainGeometry(terrainGeometry);
-      setBuildingsGeometry(buildingsGeometry);
-      props.setTerrainGeometry(terrainGeometry);
-      props.setBuildingsGeometry(buildingsGeometry);
+      setTerrainGeometry(mergedGeometry);
+      setBuildingsGeometry(null);
+      props.setTerrainGeometry(mergedGeometry);
+      props.setBuildingsGeometry(null);
 
       console.log("3D model generated successfully");
 
@@ -943,17 +943,16 @@ function createBuildingsGeometry(
       minElevation,
       maxElevation
     );
-    const slopeZ = highestTerrainZ - lowestTerrainZ;
     const effectiveHeight =
       validatedHeight * adaptiveScaleFactor * buildingScaleFactor +
-      slopeZ +
       BUILDING_SUBMERGE_OFFSET;
+    const zTop = lowestTerrainZ + effectiveHeight;
+    const zBottom = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
 
     // Write top vertices
     const topIndices: number[] = [];
     footprint.forEach((_, i) => {
       const [mx, my] = meshCoords[i];
-      const zTop = lowestTerrainZ + effectiveHeight;
       positions.push(mx, my, zTop);
       topIndices.push(vertexCount + i);
       // top vertex color
@@ -964,7 +963,6 @@ function createBuildingsGeometry(
     const bottomIndices: number[] = [];
     footprint.forEach((_, i) => {
       const [mx, my] = meshCoords[i];
-      const zBottom = lowestTerrainZ - BUILDING_SUBMERGE_OFFSET;
       positions.push(mx, my, zBottom);
       bottomIndices.push(vertexCount + i + footprint.length);
       // bottom vertex color

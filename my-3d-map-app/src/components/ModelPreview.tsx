@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  CircularProgress,
-} from "@mui/material";
+import { CircularProgress } from "@mui/material";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
@@ -235,7 +233,7 @@ const ModelPreview = ({
     return () => {
       clearTimeout(initTimer);
     };
-  }, [terrainGeometry, buildingsGeometry ]);
+  }, [terrainGeometry, buildingsGeometry]);
 
   return (
     <div
