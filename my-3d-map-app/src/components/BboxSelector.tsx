@@ -321,6 +321,7 @@ export default function BboxSelector(props: Props) {
     options?.width,
     props.geojsonRef,
     transformOrigin,
+    mapState.viewport?.center
   ]);
 
   return mapHook?.map?.map?._canvas?.parentNode?.parentNode ? (
