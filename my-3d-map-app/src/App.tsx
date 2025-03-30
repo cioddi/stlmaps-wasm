@@ -18,6 +18,7 @@ import ModelPreview from "./components/ModelPreview";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
 import SetLocationButtons from "./components/SetLocationButtons";
 import ExportButtons from "./components/ExportButtons";
+import AttributionDialog from "./components/AttributionDialog";
 
 const SIDEBAR_WIDTH = 240;
 
@@ -34,6 +35,7 @@ const App: React.FC = () => {
   const [mapCenter, setMapCenter] = useState<[number, number]>([
     11.310180118044855, 47.55592195900479,
   ]);
+  const [openAttribution, setOpenAttribution] = useState(false);
 
   return (
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
@@ -43,7 +45,7 @@ const App: React.FC = () => {
         sx={{ zIndex: (theme) => theme.zIndex.drawer + 10000 }}
       >
         <Toolbar>
-          <Typography variant="h6">3D Model App</Typography>
+          <Typography variant="h6" color="primary">STLmaps</Typography>
         </Toolbar>
       </AppBar>
 
@@ -96,6 +98,13 @@ const App: React.FC = () => {
               buildingsGeometry={buildingsGeometry}
             />
           )}
+          <Button variant="outlined" onClick={() => setOpenAttribution(true)}>
+            Attribution
+          </Button>
+          <AttributionDialog
+            open={openAttribution}
+            onClose={() => setOpenAttribution(false)}
+          />
         </Box>
       </Drawer>
 
