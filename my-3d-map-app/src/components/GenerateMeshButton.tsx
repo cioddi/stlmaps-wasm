@@ -76,7 +76,7 @@ export const GenerateMeshButton = function ({
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.2);
-  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(8);
+  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(0.8);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Modify generate3DModel function to include buildings
@@ -932,12 +932,12 @@ function createBuildingsGeometry(
     if (!footprint || footprint.length < 3) return;
     
     // Create a footprint signature to detect duplicates
-    const footprintSignature = footprint
-      .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
-      .join('|');
+    //const footprintSignature = footprint
+      //.map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
+      //.join('|');
       
-    if (processedFootprints.has(footprintSignature)) return;
-    processedFootprints.add(footprintSignature);
+    //if (processedFootprints.has(footprintSignature)) return;
+    //processedFootprints.add(footprintSignature);
 
     // Ensure polygons are oriented clockwise
     const path2D = footprint.map(([lng, lat]) => new THREE.Vector2(lng, lat));
@@ -970,7 +970,7 @@ function createBuildingsGeometry(
     );
     
     // Apply vertical exaggeration to building height to match terrain
-    const effectiveHeight = validatedHeight * adaptiveScaleFactor * buildingScaleFactor * verticalExaggeration;
+    const effectiveHeight = validatedHeight * adaptiveScaleFactor * buildingScaleFactor;
     const zBottom = exaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET * verticalExaggeration;
 
     const shape = new THREE.Shape();

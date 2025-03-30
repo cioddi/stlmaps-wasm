@@ -35,7 +35,8 @@ const App: React.FC = () => {
       <CssBaseline />
       <AppBar
         position="fixed"
-        sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}
+        sx={{ zIndex: (theme) => theme.zIndex.drawer + 10000 }}
+
       >
         <Toolbar>
           <Typography variant="h6">3D Model App</Typography>
@@ -119,7 +120,7 @@ const App: React.FC = () => {
         </Box>
         <Divider />
         {/* Model Preview - Bottom Half */}
-        <Box sx={{ flex: 1, position: "relative", minHeight: 0 }}>
+        <Box sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 10000 }}>
           <Suspense fallback={<CircularProgress />}>
             {(terrainGeometry || buildingsGeometry) && (
               <ModelPreview
