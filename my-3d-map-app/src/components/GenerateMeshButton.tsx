@@ -1,29 +1,31 @@
-import { useState, Suspense, RefObject, ChangeEvent, useEffect } from "react";
-import {
-  CircularProgress,
-  Slider,
-  Typography,
-  Box,
-} from "@mui/material";
-import ModelPreview from "./ModelPreview";
-import Pbf from "pbf";
-import { VectorTile } from "@mapbox/vector-tile";
+import { useState, useEffect } from "react";
+import { Slider, Typography, Box } from "@mui/material";
 import {
   BuildingData,
+  PolygonData,
   calculateTileCount,
   fetchBuildingData,
   fetchBuildingDataDirect,
+  fetchGeometryData,
   getTilesForBbox,
   processBuildings,
 } from "./VectorTileFunctions";
 import * as THREE from "three";
 // @ts-expect-error
-import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils';
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
+import createPolygonGeometry from "../three_maps/createPolygonGeometry";
 
 // Define interfaces for our data structures
-interface GridSize {
+export interface GridSize {
   width: number;
   height: number;
+}
+
+export interface VtDataSet {
+  sourceLayer: string;
+  color: THREE.Color;
+  data?: PolygonData[];
+  geometry?: THREE.BufferGeometry;
 }
 
 export interface Tile {
@@ -61,23 +63,29 @@ interface GenerateMeshButtonProps {
   bbox: GeoJSONFeature | undefined;
   setTerrainGeometry: (geometry: THREE.BufferGeometry | null) => void;
   setBuildingsGeometry: (geometry: THREE.BufferGeometry | null) => void;
+  setPolygonGeometries: (geometry: THREE.BufferGeometry[] | null) => void;
 }
 
 // Submerge offset to ensure bottom slightly dips into terrain
 const BUILDING_SUBMERGE_OFFSET = 0.5;
 
 export const GenerateMeshButton = function ({
-  bbox, ...props
+  bbox,
+  ...props
 }: GenerateMeshButtonProps) {
   const [downloadUrl, setDownloadUrl] = useState<string>("");
-  const [terrainGeometry, setTerrainGeometry] = useState<THREE.BufferGeometry | null>(null);
-  const [buildingsGeometry, setBuildingsGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [terrainGeometry, setTerrainGeometry] =
+    useState<THREE.BufferGeometry | null>(null);
+  const [buildingsGeometry, setBuildingsGeometry] =
+    useState<THREE.BufferGeometry | null>(null);
   const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.06);
   const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(0.8);
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
+    null
+  );
   const [terrainBaseHeight, setTerrainBaseHeight] = useState<number>(5);
 
   // Modify generate3DModel function to include buildings
@@ -210,44 +218,79 @@ export const GenerateMeshButton = function ({
         maxElevation
       );
 
+      const vtGeometries: VtDataSet[] = [
+        {
+          sourceLayer: "water",
+          color: new THREE.Color(0x0000ff), // Blue color for water
+        },
+      ];
+      const vtPolygonGeometries: THREE.BufferGeometry[] = [];
+
+      for (let i = 0; i < vtGeometries.length; i++) {
+        vtGeometries[i].data = await fetchGeometryData(
+          minLng,
+          minLat,
+          maxLng,
+          maxLat,
+          14,
+          vtGeometries[i].sourceLayer,
+          elevationGrid,
+          gridSize
+        );
+
+        if (vtGeometries[i].data) {
+          vtGeometries[i].geometry = createPolygonGeometry(
+            vtGeometries[i].data as PolygonData[],
+            1,
+            verticalExaggeration,
+            terrainBaseHeight,
+            minLng,
+            minLat,
+            maxLng,
+            maxLat,
+            elevationGrid,
+            gridSize,
+            minElevation,
+            maxElevation,
+            vtGeometries[i]
+          );
+          vtPolygonGeometries.push(vtGeometries[i].geometry);
+        }
+      }
       // Ensure buildingsGeometry is valid before merging
       const geometriesToMerge = [terrainGeometry];
       if (buildingsGeometry && buildingsGeometry.attributes.position) {
         // Add color attribute to buildings to match terrain geometry
         //if (!buildingsGeometry.hasAttribute("color")) {
-          //const buildingColor = new THREE.Color(0.7, 0.7, 0.7); // Light gray color for buildings
-          //const colorArray = new Float32Array(buildingsGeometry.attributes.position.count * 3);
-          //for (let i = 0; i < colorArray.length; i += 3) {
-            //colorArray[i] = buildingColor.r;
-            //colorArray[i + 1] = buildingColor.g;
-            //colorArray[i + 2] = buildingColor.b;
-          //}
-          //buildingsGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
+        //const buildingColor = new THREE.Color(0.7, 0.7, 0.7); // Light gray color for buildings
+        //const colorArray = new Float32Array(buildingsGeometry.attributes.position.count * 3);
+        //for (let i = 0; i < colorArray.length; i += 3) {
+        //colorArray[i] = buildingColor.r;
+        //colorArray[i + 1] = buildingColor.g;
+        //colorArray[i + 2] = buildingColor.b;
+        //}
+        //buildingsGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
         //}
         //geometriesToMerge.push(buildingsGeometry);
       }
 
-      const mergedGeometry = BufferGeometryUtils.mergeGeometries(
-        geometriesToMerge,
-        true
-      );
-
       //if (mergedGeometry) {
-        //mergedGeometry.computeBoundingBox();
-        //const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
-        //if (center) {
-          //mergedGeometry.translate(-center.x, -center.y, -center.z);
-        //}
+      //mergedGeometry.computeBoundingBox();
+      //const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
+      //if (center) {
+      //mergedGeometry.translate(-center.x, -center.y, -center.z);
+      //}
       //}
       //if(buildingsGeometry) {
-        //const terrainHeight = mergedGeometry.boundingBox?.max.z || 0;
-        //buildingsGeometry.translate(0, 0, 0);
+      //const terrainHeight = mergedGeometry.boundingBox?.max.z || 0;
+      //buildingsGeometry.translate(0, 0, 0);
       //}
 
       setTerrainGeometry(terrainGeometry);
       setBuildingsGeometry(buildingsGeometry);
       props.setTerrainGeometry(terrainGeometry);
       props.setBuildingsGeometry(buildingsGeometry);
+      props.setPolygonGeometries(vtPolygonGeometries);
 
       console.log("3D model generated successfully");
 
@@ -629,77 +672,76 @@ export const GenerateMeshButton = function ({
 
   return (
     <>
-        <Box sx={{ mb: 2 }}>
-          <Typography id="vertical-exaggeration-slider" gutterBottom>
-            Vertical Exaggeration: {verticalExaggeration.toFixed(6)}
-          </Typography>
-          <Slider
-            value={verticalExaggeration}
-            onChange={handleExaggerationChange}
-            aria-labelledby="vertical-exaggeration-slider"
-            min={0.01}
-            max={10.0}
-            step={0.01}
-            marks={[
-              { value: 0.000001, label: "Min" },
-              { value: 0.0001, label: "Med" },
-              { value: 0.001, label: "Max" },
-            ]}
-          />
-        </Box>
+      <Box sx={{ mb: 2 }}>
+        <Typography id="vertical-exaggeration-slider" gutterBottom>
+          Vertical Exaggeration: {verticalExaggeration.toFixed(6)}
+        </Typography>
+        <Slider
+          value={verticalExaggeration}
+          onChange={handleExaggerationChange}
+          aria-labelledby="vertical-exaggeration-slider"
+          min={0.01}
+          max={10.0}
+          step={0.01}
+          marks={[
+            { value: 0.000001, label: "Min" },
+            { value: 0.0001, label: "Med" },
+            { value: 0.001, label: "Max" },
+          ]}
+        />
+      </Box>
 
-        <Box sx={{ mb: 2 }}>
-          <Typography id="building-scale-slider" gutterBottom>
-            Building Height Scale: {buildingScaleFactor}
-          </Typography>
-          <Slider
-            value={buildingScaleFactor}
-            onChange={handleBuildingScaleChange}
-            aria-labelledby="building-scale-slider"
-            min={0}
-            max={15}
-            step={.1}
-            marks={[
-              { value: 0, label: "0" },
-              { value: 50, label: "50" },
-              { value: 100, label: "100" },
-            ]}
-          />
-        </Box>
+      <Box sx={{ mb: 2 }}>
+        <Typography id="building-scale-slider" gutterBottom>
+          Building Height Scale: {buildingScaleFactor}
+        </Typography>
+        <Slider
+          value={buildingScaleFactor}
+          onChange={handleBuildingScaleChange}
+          aria-labelledby="building-scale-slider"
+          min={0}
+          max={15}
+          step={0.1}
+          marks={[
+            { value: 0, label: "0" },
+            { value: 50, label: "50" },
+            { value: 100, label: "100" },
+          ]}
+        />
+      </Box>
 
-        <Box sx={{ mb: 2 }}>
-          <Typography id="terrain-base-height-slider" gutterBottom>
-            Base Height: {terrainBaseHeight}
-          </Typography>
-          <Slider
-            value={terrainBaseHeight}
-            onChange={(e, newVal) => setTerrainBaseHeight(newVal as number)}
-            min={0}
-            max={100}
-            step={1}
-          />
-        </Box>
+      <Box sx={{ mb: 2 }}>
+        <Typography id="terrain-base-height-slider" gutterBottom>
+          Base Height: {terrainBaseHeight}
+        </Typography>
+        <Slider
+          value={terrainBaseHeight}
+          onChange={(e, newVal) => setTerrainBaseHeight(newVal as number)}
+          min={0}
+          max={100}
+          step={1}
+        />
+      </Box>
 
-        {downloadUrl && (
-          <>
-            <Button
-              variant="outlined"
-              onClick={() => setPreviewOpen(true)}
-              sx={{ marginBottom: "5px", marginRight: "5px" }}
-            >
-              Preview
-            </Button>
-            <Button
-              variant="outlined"
-              href={downloadUrl}
-              download="model.obj"
-              sx={{ marginBottom: "5px" }}
-            >
-              Download OBJ
-            </Button>
-          </>
-        )}
-
+      {downloadUrl && (
+        <>
+          <Button
+            variant="outlined"
+            onClick={() => setPreviewOpen(true)}
+            sx={{ marginBottom: "5px", marginRight: "5px" }}
+          >
+            Preview
+          </Button>
+          <Button
+            variant="outlined"
+            href={downloadUrl}
+            download="model.obj"
+            sx={{ marginBottom: "5px" }}
+          >
+            Download OBJ
+          </Button>
+        </>
+      )}
     </>
   );
 };
@@ -836,15 +878,12 @@ function createTerrainGeometry(
         (elevationGrid[y][x] - minElevation) /
         Math.max(1, maxElevation - minElevation);
       // Simple HSL gradient
-      const c = new THREE.Color().setHSL(
-        0.3 + 0.15 * normalizedZ,
-        0.5,
-        0.5
-      );
+      const c = new THREE.Color().setHSL(0.3 + 0.15 * normalizedZ, 0.5, 0.5);
       colors.push(c.r, c.g, c.b);
       const meshX = (x / (width - 1) - 0.5) * 200;
       const meshY = (y / (height - 1) - 0.5) * 200;
-      const meshZ = terrainBaseHeight + normalizedZ * (200 * 0.2) * verticalExaggeration; 
+      const meshZ =
+        terrainBaseHeight + normalizedZ * (200 * 0.2) * verticalExaggeration;
       topPositions.push(meshX, meshY, meshZ);
       bottomPositions.push(meshX, meshY, 0);
     }
@@ -909,12 +948,17 @@ function createTerrainGeometry(
   }
 
   // Merge top + bottom vertices
-  const allPositions = new Float32Array(topPositions.length + bottomPositions.length);
+  const allPositions = new Float32Array(
+    topPositions.length + bottomPositions.length
+  );
   allPositions.set(topPositions, 0);
   allPositions.set(bottomPositions, topPositions.length);
 
   geometry.setIndex(indices);
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(allPositions, 3));
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(allPositions, 3)
+  );
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
   return geometry;
@@ -944,7 +988,10 @@ function createBuildingsGeometry(
   // Minimum reasonable building height in meters
   const MIN_BUILDING_HEIGHT = 2;
 
-  function transformToMeshCoordinates(lng: number, lat: number): [number, number] {
+  function transformToMeshCoordinates(
+    lng: number,
+    lat: number
+  ): [number, number] {
     const xFrac = (lng - minLng) / (maxLng - minLng) - 0.5;
     const yFrac = (lat - minLat) / (maxLat - minLat) - 0.5;
     return [xFrac * 200, yFrac * 200];
@@ -953,12 +1000,12 @@ function createBuildingsGeometry(
   buildings.forEach((bld) => {
     const { footprint, height = 15 } = bld;
     if (!footprint || footprint.length < 3) return;
-    
+
     // Create a footprint signature to detect duplicates
     const footprintSignature = footprint
       .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
-      .join('|');
-      
+      .join("|");
+
     if (processedFootprints.has(footprintSignature)) return;
     processedFootprints.add(footprintSignature);
 
@@ -973,46 +1020,65 @@ function createBuildingsGeometry(
     let lowestTerrainZ = Infinity;
     let highestTerrainZ = -Infinity;
     const meshCoords: [number, number][] = [];
-    
+
     path2D.forEach((vec2) => {
       const lng = vec2.x;
       const lat = vec2.y;
       // Get terrain elevation without exaggeration
       const tZ = sampleTerrainElevationAtPoint(
-        lng, lat, elevationGrid, gridSize,
+        lng,
+        lat,
+        elevationGrid,
+        gridSize,
         { minLng, minLat, maxLng, maxLat },
-        minElevation, maxElevation
+        minElevation,
+        maxElevation
       );
       lowestTerrainZ = Math.min(lowestTerrainZ, tZ);
       highestTerrainZ = Math.max(highestTerrainZ, tZ);
       totalTerrainZ += tZ;
       meshCoords.push(transformToMeshCoordinates(lng, lat));
-
     });
-    
+
     // Use average elevation for more stability with complex buildings
     const avgTerrainZ = totalTerrainZ / path2D.length;
-    
+
     // Apply vertical exaggeration to base elevation
     const lowestExaggeratedTerrainZ = lowestTerrainZ * verticalExaggeration;
     const highestExaggeratedTerrainZ = highestTerrainZ * verticalExaggeration;
-    const terrainDifference = highestExaggeratedTerrainZ - lowestExaggeratedTerrainZ;
-    console.log(avgTerrainZ, lowestExaggeratedTerrainZ)
-    
+    const terrainDifference =
+      highestExaggeratedTerrainZ - lowestExaggeratedTerrainZ;
+    console.log(avgTerrainZ, lowestExaggeratedTerrainZ);
+
     // Strict height validation to prevent unreasonable values
-    const validatedHeight = Math.min(Math.max(height+terrainDifference, MIN_BUILDING_HEIGHT), MAX_BUILDING_HEIGHT);
-    
-    const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
-      minLng, minLat, maxLng, maxLat, minElevation, maxElevation
+    const validatedHeight = Math.min(
+      Math.max(height + terrainDifference, MIN_BUILDING_HEIGHT),
+      MAX_BUILDING_HEIGHT
     );
-    
+
+    const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
+      minLng,
+      minLat,
+      maxLng,
+      maxLat,
+      minElevation,
+      maxElevation
+    );
+
     // Apply vertical exaggeration to building height with a dampening factor for taller buildings
     // This prevents extreme heights while maintaining proportionality
-    const heightDampeningFactor = Math.max(0.5, 1 - (validatedHeight / MAX_BUILDING_HEIGHT));
-    const effectiveHeight = validatedHeight * adaptiveScaleFactor * buildingScaleFactor * 
-                            heightDampeningFactor;
-    
-    const zBottom = terrainBaseHeight + lowestExaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET;
+    const heightDampeningFactor = Math.max(
+      0.5,
+      1 - validatedHeight / MAX_BUILDING_HEIGHT
+    );
+    const effectiveHeight =
+      validatedHeight *
+      adaptiveScaleFactor *
+      buildingScaleFactor *
+      heightDampeningFactor;
+
+    const zBottom =
+      terrainBaseHeight + lowestExaggeratedTerrainZ - BUILDING_SUBMERGE_OFFSET;
 
     const shape = new THREE.Shape();
     shape.moveTo(meshCoords[0][0], meshCoords[0][1]);
@@ -1021,19 +1087,28 @@ function createBuildingsGeometry(
     }
     shape.autoClose = true;
 
-    const extrudeSettings = { steps: 1, depth: effectiveHeight, bevelEnabled: false };
+    const extrudeSettings = {
+      steps: 1,
+      depth: effectiveHeight,
+      bevelEnabled: false,
+    };
     const buildingGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     buildingGeometry.translate(0, 0, zBottom);
     buildingGeometry.computeVertexNormals();
 
     // Add color attribute to match terrain expectation
-    const colorArray = new Float32Array(buildingGeometry.attributes.position.count * 3);
+    const colorArray = new Float32Array(
+      buildingGeometry.attributes.position.count * 3
+    );
     for (let i = 0; i < buildingGeometry.attributes.position.count; i++) {
       colorArray[i * 3] = buildingColor.r;
       colorArray[i * 3 + 1] = buildingColor.g;
       colorArray[i * 3 + 2] = buildingColor.b;
     }
-    buildingGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
+    buildingGeometry.setAttribute(
+      "color",
+      new THREE.BufferAttribute(colorArray, 3)
+    );
 
     // Remove UV attributes to prevent conflicts
     if (buildingGeometry.hasAttribute("uv")) {
@@ -1044,6 +1119,9 @@ function createBuildingsGeometry(
   });
 
   if (!bufferGeometries.length) return new THREE.BufferGeometry();
-  const mergedGeometry = BufferGeometryUtils.mergeGeometries(bufferGeometries, false);
+  const mergedGeometry = BufferGeometryUtils.mergeGeometries(
+    bufferGeometries,
+    false
+  );
   return mergedGeometry || new THREE.BufferGeometry();
 }

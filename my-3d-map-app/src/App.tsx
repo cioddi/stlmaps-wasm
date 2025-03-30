@@ -25,6 +25,8 @@ const SIDEBAR_WIDTH = 240;
 const App: React.FC = () => {
   const bboxRef = useRef<GeoJSON.Feature | undefined>(undefined);
   const [bbox, setBbox] = useState<GeoJSON.Feature | undefined>(undefined);
+  const [polygonGeometries, setPolygonGeometries] =
+    useState<THREE.BufferGeometry[] | null>(null);
   const [terrainGeometry, setTerrainGeometry] =
     useState<THREE.BufferGeometry | null>(null);
   const [buildingsGeometry, setBuildingsGeometry] =
@@ -85,6 +87,7 @@ const App: React.FC = () => {
               bbox={bbox}
               setTerrainGeometry={setTerrainGeometry}
               setBuildingsGeometry={setBuildingsGeometry}
+              setPolygonGeometries={setPolygonGeometries}
             />
           </Box>
           <SetLocationButtons
@@ -148,6 +151,7 @@ const App: React.FC = () => {
               <ModelPreview
                 terrainGeometry={terrainGeometry}
                 buildingsGeometry={buildingsGeometry}
+                polygonGeometries={polygonGeometries}
               />
             )}
           </Suspense>

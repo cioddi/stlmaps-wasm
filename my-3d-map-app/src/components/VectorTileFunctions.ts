@@ -1,7 +1,6 @@
 import { VectorTile } from "@mapbox/vector-tile";
-import { GridSize } from "@mui/material";
 import Pbf from "pbf";
-import { Tile } from "./GenerateMeshButton";
+import { Tile, GridSize } from "./GenerateMeshButton";
 
 // Add new interfaces for building data
 export interface BuildingFeature {
@@ -19,6 +18,19 @@ export interface BuildingData {
   footprint: number[][]; // Simplified to single polygon ring
   height: number;
   baseElevation: number; // Elevation at building position
+}
+export interface PolygonData {
+  geometry: number[][]; // Represents a single polygon ring
+  height: number;
+  baseElevation: number; // Elevation at geometry position
+}
+
+export interface LineStringData {
+  coordinates: number[][]; // Represents a line string
+}
+
+export interface PointData {
+  coordinates: number[]; // Represents a point
 }
 
 // Function to fetch building data from vector tiles
@@ -490,4 +502,163 @@ export const getTilesForBbox = (
   }
 
   return tiles;
+};
+
+/**
+ * Fetch geometry data from a specified source layer in vector tiles and convert it to PolygonData.
+ * @param minLng Minimum longitude of the bounding box.
+ * @param minLat Minimum latitude of the bounding box.
+ * @param maxLng Maximum longitude of the bounding box.
+ * @param maxLat Maximum latitude of the bounding box.
+ * @param zoom Zoom level for the tiles.
+ * @param sourceLayer The source layer to extract geometry from.
+ * @param elevationGrid The elevation grid for calculating base elevation.
+ * @param gridSize The size of the elevation grid.
+ * @param minElevation Minimum elevation in the grid.
+ * @param maxElevation Maximum elevation in the grid.
+ * @returns An array of PolygonData.
+ */
+export const fetchGeometryData = async (
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  zoom: number,
+  sourceLayer: string,
+  elevationGrid: number[][],
+  gridSize: GridSize,
+): Promise<PolygonData[]> => {
+  if (!gridSize || !gridSize.width || !gridSize.height) {
+    console.warn("Invalid or missing gridSize. Returning no data.");
+    return [];
+  }
+
+  const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
+  if (tileCount > 9) {
+    console.warn(
+      `Skipping geometry data fetch: area too large (${tileCount} tiles, max allowed: 9)`
+    );
+    return [];
+  }
+
+  const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
+  console.log(`Fetching geometry data from ${tiles.length} tiles`);
+
+  const polygonData: PolygonData[] = [];
+
+  try {
+    await Promise.all(
+      tiles.map(async (tile) => {
+        const url = `https://wms.wheregroup.com/tileserver/tile/world-0-14/${tile.z}/${tile.x}/${tile.y}.pbf`;
+
+        console.log(`Fetching geometry from: ${url}`);
+
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            console.warn(`Failed to fetch tile: ${response.status}`);
+            return;
+          }
+
+          const arrayBuffer = await response.arrayBuffer();
+          const vectorTile = parseVectorTile(arrayBuffer);
+
+          if (!vectorTile.layers || !vectorTile.layers[sourceLayer]) {
+            console.warn(`Source layer "${sourceLayer}" not found in tile`);
+            return;
+          }
+
+          const layer = vectorTile.layers[sourceLayer];
+          for (let i = 0; i < layer.length; i++) {
+            const feature = layer.feature(i).toGeoJSON(tile.x, tile.y, tile.z);
+
+            if (feature.geometry.type === "Polygon") {
+              feature.geometry.coordinates.forEach((ring) => {
+                const baseElevation = calculateBaseElevation(
+                  ring,
+                  elevationGrid,
+                  gridSize,
+                  minLng,
+                  minLat,
+                  maxLng,
+                  maxLat
+                );
+
+                polygonData.push({
+                  geometry: ring,
+                  height: 5, // Default height
+                  baseElevation,
+                });
+              });
+            } else if (feature.geometry.type === "MultiPolygon") {
+              feature.geometry.coordinates.forEach((polygon) => {
+                polygon.forEach((ring) => {
+                  const baseElevation = calculateBaseElevation(
+                    ring,
+                    elevationGrid,
+                    gridSize,
+                    minLng,
+                    minLat,
+                    maxLng,
+                    maxLat
+                  );
+
+                  polygonData.push({
+                    geometry: ring,
+                    height: 5, // Default height
+                    baseElevation,
+                  });
+                });
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching tile ${tile.z}/${tile.x}/${tile.y}:`, error);
+        }
+      })
+    );
+
+    console.log(`Fetched ${polygonData.length} polygons from source layer "${sourceLayer}"`);
+    return polygonData;
+  } catch (error) {
+    console.error("Error fetching geometry data:", error);
+    return [];
+  }
+};
+
+/**
+ * Calculate the base elevation for a polygon ring using the elevation grid.
+ * @param ring The polygon ring (array of [lng, lat] coordinates).
+ * @param elevationGrid The elevation grid.
+ * @param gridSize The size of the elevation grid.
+ * @param minLng Minimum longitude of the bounding box.
+ * @param minLat Minimum latitude of the bounding box.
+ * @param maxLng Maximum longitude of the bounding box.
+ * @param maxLat Maximum latitude of the bounding box.
+ * @returns The average base elevation for the ring.
+ */
+const calculateBaseElevation = (
+  ring: number[][],
+  elevationGrid: number[][],
+  gridSize: GridSize,
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number
+): number => {
+  const { width, height } = gridSize;
+  let totalElevation = 0;
+  let validPoints = 0;
+
+  ring.forEach(([lng, lat]) => {
+    const x = Math.floor(((lng - minLng) / (maxLng - minLng)) * (width - 1));
+    const y = Math.floor(((lat - minLat) / (maxLat - minLat)) * (height - 1));
+
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+      totalElevation += elevationGrid[y][x];
+      validPoints++;
+    }
+  });
+
+  return validPoints > 0 ? totalElevation / validPoints : 0;
 };

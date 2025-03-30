@@ -7,6 +7,7 @@ import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 interface ModelPreviewProps {
   terrainGeometry: THREE.BufferGeometry | null;
   buildingsGeometry: THREE.BufferGeometry | null;
+  polygonGeometry: THREE.BufferGeometry[] | null;
   open: boolean;
   onClose: () => void;
 }
@@ -14,6 +15,7 @@ interface ModelPreviewProps {
 const ModelPreview = ({
   terrainGeometry,
   buildingsGeometry,
+  polygonGeometries,
   open,
   onClose,
 }: ModelPreviewProps) => {
@@ -191,13 +193,26 @@ const ModelPreview = ({
         if (buildingsGeometry) {
           const buildingMesh = new THREE.Mesh(
             buildingsGeometry,
-            new THREE.MeshPhongMaterial({ 
-              color: new THREE.Color(0x87CEEB), // Light sky blue
+            new THREE.MeshPhongMaterial({
+              color: new THREE.Color(0x87ceeb), // Light sky blue
               flatShading: true, // Use flat shading for better definition
-              shininess: 0 // Remove shininess for a matte look
+              shininess: 0, // Remove shininess for a matte look
             })
           );
           modelGroup.add(buildingMesh);
+        }
+        if (polygonGeometries) {
+          polygonGeometries.forEach((geometry) => {
+            const polygonMesh = new THREE.Mesh(
+              geometry,
+              new THREE.MeshPhongMaterial({
+                color: new THREE.Color(0x87ceeb), // Light sky blue
+                flatShading: true, // Use flat shading for better definition
+                shininess: 0, // Remove shininess for a matte look
+              })
+            );
+            modelGroup.add(polygonMesh);
+          });
         }
 
         scene.add(modelGroup);
