@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, version } from "react";
 import { CircularProgress } from "@mui/material";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
+import { Vertex } from "three-csg-ts/lib/esm/Vertex";
 
 interface ModelPreviewProps {
   terrainGeometry: THREE.BufferGeometry | null;
@@ -194,7 +195,8 @@ const ModelPreview = ({
           const buildingMesh = new THREE.Mesh(
             buildingsGeometry,
             new THREE.MeshPhongMaterial({
-              color: new THREE.Color(0x87ceeb), // Light sky blue
+              color: new THREE.Color(0xe1e1e1), // Light sky blue
+              VertexColors: true,
               flatShading: true, // Use flat shading for better definition
               shininess: 0, // Remove shininess for a matte look
             })
@@ -207,6 +209,7 @@ const ModelPreview = ({
               geometry,
               new THREE.MeshPhongMaterial({
                 color: new THREE.Color(0x87ceeb), // Light sky blue
+                //VertexColors: true,
                 flatShading: true, // Use flat shading for better definition
                 shininess: 0, // Remove shininess for a matte look
               })

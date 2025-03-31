@@ -32,10 +32,10 @@ const App: React.FC = () => {
   const [buildingsGeometry, setBuildingsGeometry] =
     useState<THREE.BufferGeometry | null>(null);
   const [bboxCenter, setBboxCenter] = useState<[number, number]>([
-    11.310180118044855, 47.55592195900479,
+    -74.00599999999997, 40.71279999999999,
   ]);
   const [mapCenter, setMapCenter] = useState<[number, number]>([
-    11.310180118044855, 47.55592195900479,
+    -74.00599999999997, 40.71279999999999,
   ]);
   const [openAttribution, setOpenAttribution] = useState(false);
 
@@ -75,8 +75,8 @@ const App: React.FC = () => {
               scale: [1, 1],
               rotate: 0,
               orientation: "portrait",
-              width: 40000,
-              height: 40000,
+              width: 800,
+              height: 800,
             }}
             onChange={(geojson) => {
               setBbox(geojson);
@@ -135,7 +135,7 @@ const App: React.FC = () => {
             }}
             options={{
               center: mapCenter,
-              zoom: 9,
+              zoom: 12,
               style:
                 "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
             }}
