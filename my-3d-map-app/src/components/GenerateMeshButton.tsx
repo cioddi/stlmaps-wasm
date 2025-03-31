@@ -11,8 +11,9 @@ import {
   processBuildings,
 } from "./VectorTileFunctions";
 import * as THREE from "three";
-// @ts-expect-error
+//@ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
+import { CSG } from 'three-csg-ts';
 import createPolygonGeometry from "../three_maps/createPolygonGeometry";
 
 // Define interfaces for our data structures
@@ -221,12 +222,21 @@ export const GenerateMeshButton = function ({
       const vtGeometries: VtDataSet[] = [
         {
           sourceLayer: "water",
-          color: new THREE.Color(0x0000ff), // Blue color for water
+          color: new THREE.Color(0x0077ff), // Lighter blue color for water
+          extrudeDepth: 8.5, // Thin extrusion for water
+          isWater: true, // Flag to identify water features
         },
+        // Add a land layer for testing
+        //{
+        //  sourceLayer: "landuse",
+        //  color: new THREE.Color(0x00ff00), // Green color for land use
+        //  extrudeDepth: 1, // Standard extrusion for land
+        //},
       ];
       const vtPolygonGeometries: THREE.BufferGeometry[] = [];
 
       for (let i = 0; i < vtGeometries.length; i++) {
+        console.log(`Fetching ${vtGeometries[i].sourceLayer} data...`);
         vtGeometries[i].data = await fetchGeometryData(
           minLng,
           minLat,
@@ -238,12 +248,28 @@ export const GenerateMeshButton = function ({
           gridSize
         );
 
-        if (vtGeometries[i].data) {
+        console.log(`Received ${vtGeometries[i].data?.length || 0} ${vtGeometries[i].sourceLayer} features`);
+
+        if (vtGeometries[i].data && vtGeometries[i].data.length > 0) {
+          // For water features, add a z-offset to keep water below terrain level
+          const zOffset = vtGeometries[i].isWater ? -2 : 0;
+
+          const TERRAIN_SIZE = 200;
+          // Set appropriate clip boundaries based on feature type
+          const clipBoundaries = {
+            minX: -TERRAIN_SIZE/2,
+            maxX: TERRAIN_SIZE/2,
+            minY: -TERRAIN_SIZE/2,
+            maxY: TERRAIN_SIZE/2,
+            minZ: terrainBaseHeight - 20, // Ensure lower elements are included
+            maxZ: terrainBaseHeight + 100  // High enough for all buildings
+          };
+
           vtGeometries[i].geometry = createPolygonGeometry(
             vtGeometries[i].data as PolygonData[],
             1,
             verticalExaggeration,
-            terrainBaseHeight,
+            terrainBaseHeight + zOffset, // Apply z-offset for water
             minLng,
             minLat,
             maxLng,
@@ -254,48 +280,39 @@ export const GenerateMeshButton = function ({
             maxElevation,
             vtGeometries[i]
           );
-          vtPolygonGeometries.push(vtGeometries[i].geometry);
+
+          // Check if we got a valid geometry
+          if (vtGeometries[i].geometry &&
+            vtGeometries[i].geometry.attributes &&
+            vtGeometries[i].geometry.attributes.position &&
+            vtGeometries[i].geometry.attributes.position.count > 0) {
+            console.log(`Created valid ${vtGeometries[i].sourceLayer} geometry with ${vtGeometries[i].geometry.attributes.position.count} vertices`);
+            vtPolygonGeometries.push(vtGeometries[i].geometry);
+          } else {
+            console.warn(`Failed to create valid ${vtGeometries[i].sourceLayer} geometry or all features were clipped out`);
+          }
+        } else {
+          console.warn(`No ${vtGeometries[i].sourceLayer} features found`);
         }
       }
-      // Ensure buildingsGeometry is valid before merging
-      const geometriesToMerge = [terrainGeometry];
-      if (buildingsGeometry && buildingsGeometry.attributes.position) {
-        // Add color attribute to buildings to match terrain geometry
-        //if (!buildingsGeometry.hasAttribute("color")) {
-        //const buildingColor = new THREE.Color(0.7, 0.7, 0.7); // Light gray color for buildings
-        //const colorArray = new Float32Array(buildingsGeometry.attributes.position.count * 3);
-        //for (let i = 0; i < colorArray.length; i += 3) {
-        //colorArray[i] = buildingColor.r;
-        //colorArray[i + 1] = buildingColor.g;
-        //colorArray[i + 2] = buildingColor.b;
-        //}
-        //buildingsGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
-        //}
-        //geometriesToMerge.push(buildingsGeometry);
-      }
 
-      //if (mergedGeometry) {
-      //mergedGeometry.computeBoundingBox();
-      //const center = mergedGeometry.boundingBox?.getCenter(new THREE.Vector3());
-      //if (center) {
-      //mergedGeometry.translate(-center.x, -center.y, -center.z);
-      //}
-      //}
-      //if(buildingsGeometry) {
-      //const terrainHeight = mergedGeometry.boundingBox?.max.z || 0;
-      //buildingsGeometry.translate(0, 0, 0);
-      //}
-
-      setTerrainGeometry(terrainGeometry);
-      setBuildingsGeometry(buildingsGeometry);
       props.setTerrainGeometry(terrainGeometry);
       props.setBuildingsGeometry(buildingsGeometry);
+      
+      // Create debug visualization for the terrain area if needed
+      if (vtPolygonGeometries.length > 0) {
+        // Create a box to visualize the clipping area (but don't actually use it for clipping)
+        const TERRAIN_SIZE = 200;
+        const boxGeometry = new THREE.BoxGeometry(
+          TERRAIN_SIZE,
+          TERRAIN_SIZE,
+          TERRAIN_SIZE / 2
+        );
+
+        // Add the box geometry to the geometries (optional, for debugging only)
+        //vtPolygonGeometries.push(boxGeometry);
+      }
       props.setPolygonGeometries(vtPolygonGeometries);
-
-      console.log("3D model generated successfully");
-
-      // Open the preview
-      setPreviewOpen(true);
     } catch (error) {
       console.error("Error generating 3D model:", error);
     } finally {
@@ -1048,7 +1065,6 @@ function createBuildingsGeometry(
     const highestExaggeratedTerrainZ = highestTerrainZ * verticalExaggeration;
     const terrainDifference =
       highestExaggeratedTerrainZ - lowestExaggeratedTerrainZ;
-    console.log(avgTerrainZ, lowestExaggeratedTerrainZ);
 
     // Strict height validation to prevent unreasonable values
     const validatedHeight = Math.min(
