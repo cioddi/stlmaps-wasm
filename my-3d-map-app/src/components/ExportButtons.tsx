@@ -26,9 +26,7 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
   useEffect(() => {
     // Generate export files when geometries change
     if (terrainGeometry) {
-      generateOBJFile();
-      generateSTLFile();
-      generateGLTFFile();
+      generateExports();
     }
     
     // Cleanup function to revoke object URLs when component unmounts
@@ -39,43 +37,130 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     };
   }, [terrainGeometry, buildingsGeometry, polygonGeometries]);
 
-  const generateOBJFile = (): void => {
-    if (!terrainGeometry) return;
+  // Helper function to validate and fix geometry indices
+  const validateGeometry = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => {
+    if (!geometry) return geometry;
     
-    try {
-      // Create a scene for the exporter
-      const scene = new THREE.Scene();
+    // Create a clone to avoid modifying the original
+    const validatedGeometry = geometry.clone();
+    
+    // If no position attribute, we can't validate
+    if (!validatedGeometry.attributes.position) return validatedGeometry;
+    
+    const positionCount = validatedGeometry.attributes.position.count;
+    
+    // Check if we have an index buffer that needs validation
+    if (validatedGeometry.index) {
+      const indices = validatedGeometry.index.array;
+      let maxIndex = 0;
+      let hasInvalidIndex = false;
       
-      // Create a mesh for the terrain with vertex colors
+      // Check for out-of-bounds indices
+      for (let i = 0; i < indices.length; i++) {
+        maxIndex = Math.max(maxIndex, indices[i]);
+        if (indices[i] >= positionCount) {
+          hasInvalidIndex = true;
+          break;
+        }
+      }
+      
+      // If indices are out of bounds, remove them and let Three.js create valid ones
+      if (hasInvalidIndex || maxIndex >= positionCount) {
+        console.warn(`Fixing out-of-bounds indices: max index ${maxIndex} exceeds vertex count ${positionCount}`);
+        validatedGeometry.setIndex(null);
+      }
+    }
+    
+    // Ensure all attribute arrays have the same count
+    const attributeNames = Object.keys(validatedGeometry.attributes);
+    for (const name of attributeNames) {
+      if (name === 'position') continue; // Skip position as it's our reference
+      
+      const attribute = validatedGeometry.attributes[name];
+      if (attribute.count !== positionCount) {
+        console.warn(`Fixing mismatched attribute count for ${name}: ${attribute.count} vs position ${positionCount}`);
+        // Remove problematic attributes
+        validatedGeometry.deleteAttribute(name);
+      }
+    }
+    
+    // Create non-indexed geometry if needed (safer for exports)
+    if (validatedGeometry.index) {
+      const nonIndexed = validatedGeometry.toNonIndexed();
+      return nonIndexed;
+    }
+    
+    return validatedGeometry;
+  };
+
+  // Create a scene with all meshes for export
+  const createExportScene = (validateGeometries = false): THREE.Scene => {
+    const scene = new THREE.Scene();
+    
+    // Add terrain
+    if (terrainGeometry) {
+      const geomToUse = validateGeometries ? validateGeometry(terrainGeometry) : terrainGeometry;
       const terrainMaterial = new THREE.MeshStandardMaterial({ 
         vertexColors: true,
         flatShading: true
       });
-      const terrainMesh = new THREE.Mesh(terrainGeometry, terrainMaterial);
+      const terrainMesh = new THREE.Mesh(geomToUse, terrainMaterial);
+      terrainMesh.name = "Terrain";
       scene.add(terrainMesh);
-      
-      // Add buildings if available
-      if (buildingsGeometry) {
-        const buildingsMaterial = new THREE.MeshStandardMaterial({ 
-          color: 0xaaaaaa,
+    }
+    
+    // Add buildings
+    if (buildingsGeometry) {
+      const geomToUse = validateGeometries ? validateGeometry(buildingsGeometry) : buildingsGeometry;
+      const buildingsMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0xaaaaaa,
+        flatShading: true
+      });
+      const buildingsMesh = new THREE.Mesh(geomToUse, buildingsMaterial);
+      buildingsMesh.name = "Buildings";
+      scene.add(buildingsMesh);
+    }
+    
+    // Add other polygon geometries
+    if (polygonGeometries && polygonGeometries.length > 0) {
+      polygonGeometries.forEach((geometry, index) => {
+        if (!geometry) return;
+        
+        const geomToUse = validateGeometries ? validateGeometry(geometry) : geometry;
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x87ceeb, // Light sky blue
           flatShading: true
         });
-        const buildingsMesh = new THREE.Mesh(buildingsGeometry, buildingsMaterial);
-        scene.add(buildingsMesh);
-      }
-      
-      // Add polygon geometries if available
-      if (polygonGeometries && polygonGeometries.length > 0) {
-        polygonGeometries.forEach((geometry, index) => {
-          const material = new THREE.MeshStandardMaterial({
-            color: 0x87ceeb, // Light sky blue
-            flatShading: true
-          });
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.name = `Polygon_${index}`;
-          scene.add(mesh);
-        });
-      }
+        const mesh = new THREE.Mesh(geomToUse, material);
+        mesh.name = `Polygon_${index}`;
+        scene.add(mesh);
+      });
+    }
+    
+    // Add lights for better visualization in viewers
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(1, 1, 1);
+    scene.add(directionalLight);
+    
+    return scene;
+  };
+
+  // Generate all exports
+  const generateExports = (): void => {
+    generateOBJFile();
+    generateSTLFile();
+    generateGLTFFile();
+  };
+  
+  const generateOBJFile = (): void => {
+    if (!terrainGeometry) return;
+    
+    try {
+      // Create scene with standard (non-validated) geometries for OBJ
+      const scene = createExportScene(false);
       
       // Create OBJ exporter and export the scene
       const exporter = new OBJExporter();
@@ -98,38 +183,8 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     if (!terrainGeometry) return;
     
     try {
-      // Create a scene for the exporter
-      const scene = new THREE.Scene();
-      
-      // Create a mesh for the terrain
-      const terrainMaterial = new THREE.MeshStandardMaterial({ 
-        vertexColors: true,
-        flatShading: true
-      });
-      const terrainMesh = new THREE.Mesh(terrainGeometry, terrainMaterial);
-      scene.add(terrainMesh);
-      
-      // Add buildings if available
-      if (buildingsGeometry) {
-        const buildingsMaterial = new THREE.MeshStandardMaterial({ 
-          color: 0xaaaaaa,
-          flatShading: true
-        });
-        const buildingsMesh = new THREE.Mesh(buildingsGeometry, buildingsMaterial);
-        scene.add(buildingsMesh);
-      }
-      
-      // Add polygon geometries if available
-      if (polygonGeometries && polygonGeometries.length > 0) {
-        polygonGeometries.forEach((geometry, index) => {
-          const material = new THREE.MeshStandardMaterial({
-            color: 0x87ceeb, // Light sky blue
-            flatShading: true
-          });
-          const mesh = new THREE.Mesh(geometry, material);
-          scene.add(mesh);
-        });
-      }
+      // Create scene with standard (non-validated) geometries for STL
+      const scene = createExportScene(false);
       
       // Create STL exporter and export the scene (binary format for smaller file size)
       const exporter = new STLExporter();
@@ -152,68 +207,37 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     if (!terrainGeometry) return;
     
     try {
-      // Create a scene for the exporter
-      const scene = new THREE.Scene();
+      // Create scene with validated geometries for GLTF/GLB
+      const scene = createExportScene(true);
       
-      // Create a mesh for the terrain with vertex colors
-      const terrainMaterial = new THREE.MeshStandardMaterial({ 
-        vertexColors: true,
-        flatShading: true
-      });
-      const terrainMesh = new THREE.Mesh(terrainGeometry, terrainMaterial);
-      terrainMesh.name = "Terrain";
-      scene.add(terrainMesh);
-      
-      // Add buildings if available
-      if (buildingsGeometry) {
-        const buildingsMaterial = new THREE.MeshStandardMaterial({ 
-          color: 0xaaaaaa,
-          flatShading: true
-        });
-        const buildingsMesh = new THREE.Mesh(buildingsGeometry, buildingsMaterial);
-        buildingsMesh.name = "Buildings";
-        scene.add(buildingsMesh);
-      }
-      
-      // Add polygon geometries if available
-      if (polygonGeometries && polygonGeometries.length > 0) {
-        polygonGeometries.forEach((geometry, index) => {
-          const material = new THREE.MeshStandardMaterial({
-            color: 0x87ceeb, // Light sky blue
-            flatShading: true
-          });
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.name = `Polygon_${index}`;
-          scene.add(mesh);
-        });
-      }
-      
-      // Add lights for better visualization in GLTF viewers
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-      scene.add(ambientLight);
-      
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      directionalLight.position.set(1, 1, 1);
-      scene.add(directionalLight);
-      
-      // Create GLTF exporter and export the scene
+      // Create GLTF exporter with binary option for better compatibility
       const exporter = new GLTFExporter();
       exporter.parse(
         scene,
         (gltf) => {
-          // Create downloadable Blob and URL
-          const blob = new Blob([JSON.stringify(gltf)], { type: 'model/gltf+json' });
+          // Create downloadable Blob with appropriate type
+          let blob;
+          
+          // Check if the export is binary (GLB) or JSON (GLTF)
+          if (gltf instanceof ArrayBuffer) {
+            blob = new Blob([gltf], { type: 'application/octet-stream' });
+          } else {
+            blob = new Blob([JSON.stringify(gltf)], { type: 'model/gltf+json' });
+          }
+          
           const url = URL.createObjectURL(blob);
-          
-          // Set the download URL
           setGltfDownloadUrl(url);
-          
-          console.log("GLTF file generated successfully");
+          console.log("GLTF/GLB file generated successfully");
         },
         (error) => {
           console.error("Error during GLTF export:", error);
         },
-        { binary: false } // Export as JSON for better compatibility
+        { 
+          binary: true, // Use binary GLB format for better compatibility
+          onlyVisible: true,
+          truncateDrawRange: true, // Ensure proper buffer lengths
+          animations: []
+        }
       );
     } catch (error) {
       console.error("Error generating GLTF file:", error);
@@ -247,9 +271,9 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
         <Button
           variant="outlined"
           href={gltfDownloadUrl}
-          download="model.gltf"
+          download="model.glb"
         >
-          Download GLTF
+          Download GLB
         </Button>
       )}
     </Box>
