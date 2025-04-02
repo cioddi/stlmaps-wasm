@@ -18,15 +18,15 @@ jobs:
         with:
           node-version: 'lts/*'  # Latest LTS version
           cache: 'yarn'
-          cache-dependency-path: 'stlmaps/yarn.lock'
+          cache-dependency-path: 'packages/stlmaps-app/yarn.lock'
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
-        working-directory: ./stlmaps
+        working-directory: ./packages/stlmaps-app
 
       - name: Build project
         run: yarn build
-        working-directory: ./stlmaps
+        working-directory: ./packages/stlmaps-app
 
       - name: Deploy to docs branch
         run: |
@@ -36,7 +36,7 @@ jobs:
           
           # Save build files to a temporary location
           mkdir -p /tmp/build-files
-          cp -r ./stlmaps/dist/* /tmp/build-files
+          cp -r ./packages/stlmaps-app/dist/* /tmp/build-files
           
           # Check if docs branch exists
           if git ls-remote --heads origin docs | grep docs; then
