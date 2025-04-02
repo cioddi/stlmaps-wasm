@@ -11,11 +11,13 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 interface ExportButtonsProps {
   terrainGeometry: THREE.BufferGeometry | null;
   buildingsGeometry: THREE.BufferGeometry | null;
+  polygonGeometries?: THREE.BufferGeometry[] | null;
 }
 
 const ExportButtons: React.FC<ExportButtonsProps> = ({
   terrainGeometry,
   buildingsGeometry,
+  polygonGeometries
 }) => {
   const [objDownloadUrl, setObjDownloadUrl] = useState<string>("");
   const [stlDownloadUrl, setStlDownloadUrl] = useState<string>("");
@@ -35,7 +37,7 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
       if (stlDownloadUrl) URL.revokeObjectURL(stlDownloadUrl);
       if (gltfDownloadUrl) URL.revokeObjectURL(gltfDownloadUrl);
     };
-  }, [terrainGeometry, buildingsGeometry]);
+  }, [terrainGeometry, buildingsGeometry, polygonGeometries]);
 
   const generateOBJFile = (): void => {
     if (!terrainGeometry) return;
@@ -60,6 +62,19 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
         });
         const buildingsMesh = new THREE.Mesh(buildingsGeometry, buildingsMaterial);
         scene.add(buildingsMesh);
+      }
+      
+      // Add polygon geometries if available
+      if (polygonGeometries && polygonGeometries.length > 0) {
+        polygonGeometries.forEach((geometry, index) => {
+          const material = new THREE.MeshStandardMaterial({
+            color: 0x87ceeb, // Light sky blue
+            flatShading: true
+          });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.name = `Polygon_${index}`;
+          scene.add(mesh);
+        });
       }
       
       // Create OBJ exporter and export the scene
@@ -104,6 +119,18 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
         scene.add(buildingsMesh);
       }
       
+      // Add polygon geometries if available
+      if (polygonGeometries && polygonGeometries.length > 0) {
+        polygonGeometries.forEach((geometry, index) => {
+          const material = new THREE.MeshStandardMaterial({
+            color: 0x87ceeb, // Light sky blue
+            flatShading: true
+          });
+          const mesh = new THREE.Mesh(geometry, material);
+          scene.add(mesh);
+        });
+      }
+      
       // Create STL exporter and export the scene (binary format for smaller file size)
       const exporter = new STLExporter();
       const stlString = exporter.parse(scene, { binary: true });
@@ -146,6 +173,19 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
         const buildingsMesh = new THREE.Mesh(buildingsGeometry, buildingsMaterial);
         buildingsMesh.name = "Buildings";
         scene.add(buildingsMesh);
+      }
+      
+      // Add polygon geometries if available
+      if (polygonGeometries && polygonGeometries.length > 0) {
+        polygonGeometries.forEach((geometry, index) => {
+          const material = new THREE.MeshStandardMaterial({
+            color: 0x87ceeb, // Light sky blue
+            flatShading: true
+          });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.name = `Polygon_${index}`;
+          scene.add(mesh);
+        });
       }
       
       // Add lights for better visualization in GLTF viewers

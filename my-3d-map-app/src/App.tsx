@@ -99,6 +99,7 @@ const App: React.FC = () => {
             <ExportButtons
               terrainGeometry={terrainGeometry}
               buildingsGeometry={buildingsGeometry}
+              polygonGeometries={polygonGeometries}
             />
           )}
           <Button variant="outlined" onClick={() => setOpenAttribution(true)}>
