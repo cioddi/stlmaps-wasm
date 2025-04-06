@@ -9,7 +9,7 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "prepare": "husky init",
+    "prepare": "husky",
     "test": "echo \"No tests specified\" && exit 0"
   },
   "devDependencies": {

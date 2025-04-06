@@ -1,6 +1,6 @@
 import { VectorTile } from "@mapbox/vector-tile";
 import Pbf from "pbf";
-import { Tile, GridSize } from "./GenerateMeshButton";
+import { Tile, GridSize, VtDataSet } from "./GenerateMeshButton";
 
 // Add new interfaces for building data
 export interface BuildingFeature {
@@ -504,6 +504,13 @@ export const getTilesForBbox = (
   return tiles;
 };
 
+export interface FetchGeometryDataOptions {
+  bbox: [number, number, number, number];
+  vtDataset: VtDataSet;
+  zoom: number;
+  elevationGrid: number[][];
+  gridSize: GridSize;
+}
 /**
  * Fetch geometry data from a specified source layer in vector tiles and convert it to PolygonData.
  * @param minLng Minimum longitude of the bounding box.
@@ -514,20 +521,14 @@ export const getTilesForBbox = (
  * @param sourceLayer The source layer to extract geometry from.
  * @param elevationGrid The elevation grid for calculating base elevation.
  * @param gridSize The size of the elevation grid.
- * @param minElevation Minimum elevation in the grid.
- * @param maxElevation Maximum elevation in the grid.
  * @returns An array of PolygonData.
  */
 export const fetchGeometryData = async (
-  minLng: number,
-  minLat: number,
-  maxLng: number,
-  maxLat: number,
-  zoom: number,
-  sourceLayer: string,
-  elevationGrid: number[][],
-  gridSize: GridSize,
+  config: FetchGeometryDataOptions
 ): Promise<PolygonData[]> => {
+  const { bbox, vtDataset, zoom, elevationGrid, gridSize } = config;
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+
   if (!gridSize || !gridSize.width || !gridSize.height) {
     console.warn("Invalid or missing gridSize. Returning no data.");
     return [];
@@ -563,12 +564,12 @@ export const fetchGeometryData = async (
           const arrayBuffer = await response.arrayBuffer();
           const vectorTile = parseVectorTile(arrayBuffer);
 
-          if (!vectorTile.layers || !vectorTile.layers[sourceLayer]) {
-            console.warn(`Source layer "${sourceLayer}" not found in tile`);
+          if (!vectorTile.layers || !vectorTile.layers[vtDataset.sourceLayer]) {
+            console.warn(`Source layer "${vtDataset.sourceLayer}" not found in tile`);
             return;
           }
 
-          const layer = vectorTile.layers[sourceLayer];
+          const layer = vectorTile.layers[vtDataset.sourceLayer];
           for (let i = 0; i < layer.length; i++) {
             const feature = layer.feature(i).toGeoJSON(tile.x, tile.y, tile.z);
 
@@ -618,7 +619,7 @@ export const fetchGeometryData = async (
       })
     );
 
-    console.log(`Fetched ${polygonData.length} polygons from source layer "${sourceLayer}"`);
+    console.log(`Fetched ${polygonData.length} polygons from source layer "${vtDataset.sourceLayer}"`);
     return polygonData;
   } catch (error) {
     console.error("Error fetching geometry data:", error);

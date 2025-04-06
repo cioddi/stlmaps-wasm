@@ -13,7 +13,7 @@ import {
 import * as THREE from "three";
 //@ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
-import { CSG } from 'three-csg-ts';
+import { CSG } from "three-csg-ts";
 import createPolygonGeometry from "../three_maps/createPolygonGeometry";
 
 // Define interfaces for our data structures
@@ -27,6 +27,8 @@ export interface VtDataSet {
   color: THREE.Color;
   data?: PolygonData[];
   geometry?: THREE.BufferGeometry;
+  extrusionDepth?: number;
+  zOffset?: number;
 }
 
 export interface Tile {
@@ -74,16 +76,10 @@ export const GenerateMeshButton = function ({
   bbox,
   ...props
 }: GenerateMeshButtonProps) {
-  const [downloadUrl, setDownloadUrl] = useState<string>("");
-  const [terrainGeometry, setTerrainGeometry] =
-    useState<THREE.BufferGeometry | null>(null);
-  const [buildingsGeometry, setBuildingsGeometry] =
-    useState<THREE.BufferGeometry | null>(null);
-  const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [verticalExaggeration, setVerticalExaggeration] =
     useState<number>(0.06);
-  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(0.8);
+  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(0.5);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
     null
   );
@@ -191,40 +187,38 @@ export const GenerateMeshButton = function ({
       );
 
       // Generate three.js geometry from elevation grid and buildings
-      const terrainGeometry = createTerrainGeometry(
+      let {
+        geometry: terrainGeometry,
+        processedElevationGrid,
+        processedMinElevation,
+        processedMaxElevation,
+      } = createTerrainGeometry(
         elevationGrid,
         gridSize,
-        minLng,
-        minLat,
-        maxLng,
-        maxLat,
         minElevation,
         maxElevation,
         verticalExaggeration,
         terrainBaseHeight
       );
 
-      const buildingsGeometry = createBuildingsGeometry(
+      const buildingsGeometry = createBuildingsGeometry({
         buildings,
         buildingScaleFactor,
         verticalExaggeration,
         terrainBaseHeight, // pass desired base height
-        minLng,
-        minLat,
-        maxLng,
-        maxLat,
+        bbox: [minLng, minLat, maxLng, maxLat],
         elevationGrid,
         gridSize,
         minElevation,
-        maxElevation
-      );
+        maxElevation,
+      });
 
       const vtGeometries: VtDataSet[] = [
         {
           sourceLayer: "water",
           color: new THREE.Color(0x0077ff), // Lighter blue color for water
-          extrudeDepth: 8.5, // Thin extrusion for water
-          isWater: true, // Flag to identify water features
+          extrusionDepth: 1, // Thin extrusion for water
+          zOffset: -.5,
         },
         // Add a land layer for testing
         //{
@@ -237,68 +231,89 @@ export const GenerateMeshButton = function ({
 
       for (let i = 0; i < vtGeometries.length; i++) {
         console.log(`Fetching ${vtGeometries[i].sourceLayer} data...`);
-        vtGeometries[i].data = await fetchGeometryData(
-          minLng,
-          minLat,
-          maxLng,
-          maxLat,
-          14,
-          vtGeometries[i].sourceLayer,
-          elevationGrid,
-          gridSize
+        vtGeometries[i].data = await fetchGeometryData({
+          bbox: [minLng, minLat, maxLng, maxLat],
+          vtDataset: vtGeometries[i],
+          zoom: 14,
+          elevationGrid: processedElevationGrid,
+          gridSize,
+        });
+
+        console.log(
+          `Received ${vtGeometries[i].data?.length || 0} ${vtGeometries[i].sourceLayer} features`
         );
 
-        console.log(`Received ${vtGeometries[i].data?.length || 0} ${vtGeometries[i].sourceLayer} features`);
-
         if (vtGeometries[i].data && vtGeometries[i].data.length > 0) {
-          // For water features, add a z-offset to keep water below terrain level
-          const zOffset = vtGeometries[i].isWater ? -2 : 0;
-
           const TERRAIN_SIZE = 200;
           // Set appropriate clip boundaries based on feature type
           const clipBoundaries = {
-            minX: -TERRAIN_SIZE/2,
-            maxX: TERRAIN_SIZE/2,
-            minY: -TERRAIN_SIZE/2,
-            maxY: TERRAIN_SIZE/2,
+            minX: -TERRAIN_SIZE / 2,
+            maxX: TERRAIN_SIZE / 2,
+            minY: -TERRAIN_SIZE / 2,
+            maxY: TERRAIN_SIZE / 2,
             minZ: terrainBaseHeight - 20, // Ensure lower elements are included
-            maxZ: terrainBaseHeight + 100  // High enough for all buildings
+            maxZ: terrainBaseHeight + 100, // High enough for all buildings
           };
-
-          vtGeometries[i].geometry = createPolygonGeometry(
-            vtGeometries[i].data as PolygonData[],
-            1,
-            verticalExaggeration,
-            terrainBaseHeight + zOffset, // Apply z-offset for water
-            minLng,
-            minLat,
-            maxLng,
-            maxLat,
-            elevationGrid,
-            gridSize,
-            minElevation,
-            maxElevation,
-            vtGeometries[i]
+          console.log(
+            "processedMinElevation",
+            processedMinElevation,
+            "processedMaxElevation",
+            processedMaxElevation
           );
+          vtGeometries[i].geometry = createPolygonGeometry({
+            polygons: vtGeometries[i].data as PolygonData[],
+            terrainBaseHeight,
+            bbox: [minLng, minLat, maxLng, maxLat],
+            elevationGrid: processedElevationGrid,
+            gridSize,
+            minElevation: processedMinElevation,
+            maxElevation: processedMaxElevation,
+            vtDataSet: vtGeometries[i],
+            useSameZOffset: true,
+          });
 
           // Check if we got a valid geometry
-          if (vtGeometries[i].geometry &&
+          if (
+            vtGeometries[i].geometry &&
             vtGeometries[i].geometry.attributes &&
             vtGeometries[i].geometry.attributes.position &&
-            vtGeometries[i].geometry.attributes.position.count > 0) {
-            console.log(`Created valid ${vtGeometries[i].sourceLayer} geometry with ${vtGeometries[i].geometry.attributes.position.count} vertices`);
+            vtGeometries[i].geometry.attributes.position.count > 0
+          ) {
+            console.log(
+              `Created valid ${vtGeometries[i].sourceLayer} geometry with ${vtGeometries[i].geometry.attributes.position.count} vertices`
+            );
             vtPolygonGeometries.push(vtGeometries[i].geometry);
           } else {
-            console.warn(`Failed to create valid ${vtGeometries[i].sourceLayer} geometry or all features were clipped out`);
+            console.warn(
+              `Failed to create valid ${vtGeometries[i].sourceLayer} geometry or all features were clipped out`
+            );
           }
         } else {
           console.warn(`No ${vtGeometries[i].sourceLayer} features found`);
         }
       }
 
+      const waterClipGeometry = createPolygonGeometry({
+        polygons: vtGeometries[0].data as PolygonData[],
+        terrainBaseHeight,
+        bbox: [minLng, minLat, maxLng, maxLat],
+        elevationGrid: processedElevationGrid,
+        gridSize,
+        minElevation: processedMinElevation,
+        maxElevation: processedMaxElevation,
+        vtDataSet: {
+          sourceLayer: "water",
+          color: new THREE.Color(0x0077ff), // Lighter blue color for water
+          extrusionDepth: 20, // Thin extrusion for water
+          zOffset: -0.9,
+        },
+      });
+
+      terrainGeometry = clipFromTerrain(waterClipGeometry, terrainGeometry);
+
       props.setTerrainGeometry(terrainGeometry);
       props.setBuildingsGeometry(buildingsGeometry);
-      
+
       // Create debug visualization for the terrain area if needed
       if (vtPolygonGeometries.length > 0) {
         // Create a box to visualize the clipping area (but don't actually use it for clipping)
@@ -379,7 +394,7 @@ export const GenerateMeshButton = function ({
     maxLat: number
   ): ElevationProcessingResult => {
     // Define grid size for the final model - higher resolution for better quality
-    const gridSize: GridSize = { width: 150, height: 150 };
+    const gridSize: GridSize = { width: 200, height: 200 };
 
     // Track accumulated elevation values and weights
     const elevationGrid: number[][] = new Array(gridSize.height)
@@ -698,12 +713,12 @@ export const GenerateMeshButton = function ({
           onChange={handleExaggerationChange}
           aria-labelledby="vertical-exaggeration-slider"
           min={0.01}
-          max={10.0}
+          max={1.0}
           step={0.01}
           marks={[
-            { value: 0.000001, label: "Min" },
-            { value: 0.0001, label: "Med" },
-            { value: 0.001, label: "Max" },
+            { value: 0.01, label: "Min" },
+            { value: 0.5, label: "Med" },
+            { value: 1.0, label: "Max" },
           ]}
         />
       </Box>
@@ -739,30 +754,24 @@ export const GenerateMeshButton = function ({
           step={1}
         />
       </Box>
-
-      {downloadUrl && (
-        <>
-          <Button
-            variant="outlined"
-            onClick={() => setPreviewOpen(true)}
-            sx={{ marginBottom: "5px", marginRight: "5px" }}
-          >
-            Preview
-          </Button>
-          <Button
-            variant="outlined"
-            href={downloadUrl}
-            download="model.obj"
-            sx={{ marginBottom: "5px" }}
-          >
-            Download OBJ
-          </Button>
-        </>
-      )}
     </>
   );
 };
 
+function clipFromTerrain(
+  clipGeometry: THREE.BufferGeometry,
+  terrainGeometry: THREE.BufferGeometry
+): THREE.BufferGeometry {
+  const terrainMesh = new THREE.Mesh(
+    terrainGeometry,
+    new THREE.MeshBasicMaterial()
+  );
+  return terrainGeometry
+  const clipMesh = new THREE.Mesh(clipGeometry, new THREE.MeshBasicMaterial());
+  const clippedMesh = CSG.subtract(terrainMesh, clipMesh);
+  const clippedGeometry = clippedMesh.geometry;
+  return clippedGeometry;
+}
 /**
  * Sample the terrain elevation at a given lng/lat using bilinear interpolation.
  * Returns the normalized elevation value scaled into 3D mesh coordinates.
@@ -871,17 +880,22 @@ function calculateAdaptiveScaleFactor(
 function createTerrainGeometry(
   elevationGrid: number[][],
   gridSize: GridSize,
-  minLng: number,
-  minLat: number,
-  maxLng: number,
-  maxLat: number,
   minElevation: number,
   maxElevation: number,
   verticalExaggeration: number,
   terrainBaseHeight: number // added
-): THREE.BufferGeometry {
+): {
+  geometry: THREE.BufferGeometry;
+  processedElevationGrid: number[][];
+  processedMinElevation: number;
+  processedMaxElevation: number;
+} {
+  const processedElevationGrid: number[][] = [];
   const geometry = new THREE.BufferGeometry();
   const { width, height } = gridSize;
+
+  let processedMinElevation = Infinity;
+  let processedMaxElevation = -Infinity;
 
   const topPositions: number[] = [];
   const bottomPositions: number[] = [];
@@ -901,7 +915,17 @@ function createTerrainGeometry(
       const meshY = (y / (height - 1) - 0.5) * 200;
       const meshZ =
         terrainBaseHeight + normalizedZ * (200 * 0.2) * verticalExaggeration;
+
+      //console.log("terrainBaseHeight", terrainBaseHeight ,"normalizedZ", normalizedZ, "verticalExaggeration", verticalExaggeration, "meshZ", meshZ);
+      // Track processed min/max elevations
+      processedMinElevation = Math.min(processedMinElevation, meshZ);
+      processedMaxElevation = Math.max(processedMaxElevation, meshZ);
+
       topPositions.push(meshX, meshY, meshZ);
+      if (!processedElevationGrid[y]) {
+        processedElevationGrid[y] = [];
+      }
+      processedElevationGrid[y][x] = meshZ;
       bottomPositions.push(meshX, meshY, 0);
     }
   }
@@ -978,23 +1002,36 @@ function createTerrainGeometry(
   );
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
-  return geometry;
+  console.log(processedElevationGrid);
+  return {
+    geometry,
+    processedElevationGrid,
+    processedMinElevation,
+    processedMaxElevation,
+  };
 }
 
-function createBuildingsGeometry(
-  buildings: BuildingData[],
-  buildingScaleFactor: number,
-  verticalExaggeration: number,
-  terrainBaseHeight: number, // new parameter
-  minLng: number,
-  minLat: number,
-  maxLng: number,
-  maxLat: number,
-  elevationGrid: number[][],
-  gridSize: GridSize,
-  minElevation: number,
-  maxElevation: number
-): THREE.BufferGeometry {
+function createBuildingsGeometry({
+  buildings,
+  buildingScaleFactor,
+  verticalExaggeration,
+  terrainBaseHeight,
+  bbox: [minLng, minLat, maxLng, maxLat],
+  elevationGrid,
+  gridSize,
+  minElevation,
+  maxElevation,
+}: {
+  buildings: BuildingData[];
+  buildingScaleFactor: number;
+  verticalExaggeration: number;
+  terrainBaseHeight: number; // new parameter
+  bbox: [number, number, number, number];
+  elevationGrid: number[][];
+  gridSize: GridSize;
+  minElevation: number;
+  maxElevation: number;
+}): THREE.BufferGeometry {
   const bufferGeometries: THREE.BufferGeometry[] = [];
   const processedFootprints = new Set<string>();
   // Define a consistent building color

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { PolygonData } from "../components/VectorTileFunctions";
 import { GridSize, VtDataSet } from "../components/GenerateMeshButton";
-import { CSG } from 'three-csg-ts';
+import { CSG } from "three-csg-ts";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 
 const BUILDING_SUBMERGE_OFFSET = 0.01;
@@ -10,35 +10,34 @@ const USE_CSG_OPERATIONS = true;
 
 /**
  * Sample the terrain elevation at a given lng/lat using bilinear interpolation.
- * Returns the normalized elevation value scaled into 3D mesh coordinates.
+ * Returns the elevation value in the original range.
  */
 function sampleTerrainElevationAtPoint(
   lng: number,
   lat: number,
   elevationGrid: number[][],
   gridSize: GridSize,
-  bounds: { minLng: number; minLat: number; maxLng: number; maxLat: number },
+  bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
   minElevation: number,
   maxElevation: number
 ): number {
   const { width, height } = gridSize;
-  const { minLng, minLat, maxLng, maxLat } = bounds;
 
   // If out of bounds, just return minElevation
   if (
-    lng < minLng ||
-    lng > maxLng ||
-    lat < minLat ||
-    lat > maxLat
+    lng < bbox.minLng ||
+    lng > bbox.maxLng ||
+    lat < bbox.minLat ||
+    lat > bbox.maxLat
   ) {
     return minElevation;
   }
 
   // Map (lng, lat) to [0..width-1, 0..height-1]
   const fracX =
-    ((lng - minLng) / (maxLng - minLng)) * (width - 1);
+    ((lng - bbox.minLng) / (bbox.maxLng - bbox.minLng)) * (width - 1);
   const fracY =
-    ((lat - minLat) / (maxLat - minLat)) * (height - 1);
+    ((lat - bbox.minLat) / (bbox.maxLat - bbox.minLat)) * (height - 1);
 
   const x0 = Math.floor(fracX);
   const y0 = Math.floor(fracY);
@@ -57,29 +56,42 @@ function sampleTerrainElevationAtPoint(
   const bottom = z01 * (1 - dx) + z11 * dx;
   const elevation = top * (1 - dy) + bottom * dy;
 
-  // Convert this elevation to mesh Z
-  const elevationRange = maxElevation - minElevation || 1;
-  const normalizedZ = (elevation - minElevation) / elevationRange;
-  return normalizedZ * (200 /* meshWidth */ * 0.2);
+  // Convert this elevation to a normalized position value for the mesh
+  // But constrain it within the original elevation range
+  const normalizedValue = Math.max(
+    0,
+    Math.min(1, (elevation - minElevation) / (maxElevation - minElevation || 1))
+  );
+
+  // Scale for mesh height but keep within original elevation range
+  return minElevation + normalizedValue * (maxElevation - minElevation);
 }
 
-function createPolygonGeometry(
-  polygons: PolygonData[],
-  geometryScaleFactor: number,
-  verticalExaggeration: number,
-  terrainBaseHeight: number,
-  minLng: number,
-  minLat: number,
-  maxLng: number,
-  maxLat: number,
-  elevationGrid: number[][],
-  gridSize: GridSize,
-  minElevation: number,
-  maxElevation: number,
-  vtDataSet: VtDataSet
-): THREE.BufferGeometry {
+function createPolygonGeometry({
+  bbox: [minLng, minLat, maxLng, maxLat],
+  polygons,
+  terrainBaseHeight,
+  elevationGrid,
+  gridSize,
+  minElevation,
+  maxElevation,
+  vtDataSet,
+  useSameZOffset = false,
+}: {
+  polygons: PolygonData[];
+  terrainBaseHeight: number;
+  bbox: number[];
+  elevationGrid: number[][];
+  gridSize: GridSize;
+  minElevation: number;
+  maxElevation: number;
+  vtDataSet: VtDataSet;
+  useSameZOffset?: boolean;
+}): THREE.BufferGeometry {
   // Log information about the input polygons for debugging
-  console.log(`Processing ${polygons.length} polygons for ${vtDataSet.sourceLayer}`);
+  console.log(
+    `Processing ${polygons.length} polygons for ${vtDataSet.sourceLayer}`
+  );
 
   // Create empty collections for our geometries
   const bufferGeometries: THREE.BufferGeometry[] = [];
@@ -88,7 +100,36 @@ function createPolygonGeometry(
   // Maximum reasonable height in meters
   const MAX_HEIGHT = 500;
   // Minimum reasonable height in meters
-  const MIN_HEIGHT = 2;
+  const MIN_HEIGHT = 0.5;
+
+  // Calculate a dataset-wide terrain elevation offset by sampling multiple points
+  let datasetLowestZ = Infinity;
+  let datasetHighestZ = -Infinity;
+  const SAMPLE_COUNT = 10; // Number of points to sample per dataset
+
+  // Sample evenly across the dataset bounds
+  for (let i = 0; i < SAMPLE_COUNT; i++) {
+    const sampleLng = minLng + (maxLng - minLng) * (i / (SAMPLE_COUNT - 1));
+    for (let j = 0; j < SAMPLE_COUNT; j++) {
+      const sampleLat = minLat + (maxLat - minLat) * (j / (SAMPLE_COUNT - 1));
+      const elevationZ = sampleTerrainElevationAtPoint(
+        sampleLng,
+        sampleLat,
+        elevationGrid,
+        gridSize,
+        { minLng, minLat, maxLng, maxLat },
+        minElevation,
+        maxElevation
+      );
+      datasetLowestZ = Math.min(datasetLowestZ, elevationZ);
+      datasetHighestZ = Math.max(datasetHighestZ, elevationZ);
+    }
+  }
+
+  const datasetElevationRange = datasetHighestZ - datasetLowestZ;
+  console.log(
+    `Dataset elevation range: ${datasetElevationRange}, lowest: ${datasetLowestZ}, highest: ${datasetHighestZ}, minElevation: ${minElevation}, maxElevation: ${maxElevation}`
+  );
 
   // Create a clipping box for all geometries
   // Size and position based on the terrain size (typically 200x200)
@@ -101,7 +142,10 @@ function createPolygonGeometry(
   );
 
   // Position the clipping box at the center of the terrain but lower to include water bodies
-  const clipBoxMesh = new THREE.Mesh(clipBoxGeometry, new THREE.MeshBasicMaterial());
+  const clipBoxMesh = new THREE.Mesh(
+    clipBoxGeometry,
+    new THREE.MeshBasicMaterial()
+  );
   clipBoxMesh.position.set(0, 0, -10); // Move lower to ensure water is captured
 
   // Create a bounding box for simpler clipping
@@ -113,9 +157,12 @@ function createPolygonGeometry(
   const wireframeMaterial = new THREE.LineBasicMaterial({
     color: 0xff0000,
     transparent: true,
-    opacity: 0.5
+    opacity: 0.5,
   });
-  const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+  const wireframe = new THREE.LineSegments(
+    wireframeGeometry,
+    wireframeMaterial
+  );
   wireframe.position.copy(clipBoxMesh.position);
 
   function transformToMeshCoordinates(
@@ -128,131 +175,105 @@ function createPolygonGeometry(
   }
 
   // Helper function to clip an individual geometry
-  function clipGeometry(geometry: THREE.BufferGeometry): THREE.BufferGeometry | null {
+  function clipGeometry(
+    geometry: THREE.BufferGeometry
+  ): THREE.BufferGeometry | null {
     // Compute bounding box if not already computed
     if (!geometry.boundingBox) {
       geometry.computeBoundingBox();
     }
-    
+
     // If the geometry is completely outside the clip box, return null
     if (geometry.boundingBox && !clipBox.intersectsBox(geometry.boundingBox)) {
       return null;
     }
-    
+
     if (USE_CSG_OPERATIONS) {
       try {
         // Skip invalid geometries
-        if (!geometry || !geometry.attributes || !geometry.attributes.position) {
+        if (
+          !geometry ||
+          !geometry.attributes ||
+          !geometry.attributes.position
+        ) {
           return null;
         }
-        
+
         // Skip empty geometries
         if (geometry.attributes.position.count === 0) {
           return null;
         }
-        
+
         // Clone the geometry and REMOVE color attribute before CSG operations
         // This prevents the NBuf3.write error with colors
         const geometryForCSG = geometry.clone();
         if (geometryForCSG.attributes.color) {
-          geometryForCSG.deleteAttribute('color');
+          geometryForCSG.deleteAttribute("color");
         }
-        
+
         // Create a mesh from the geometry without colors
         const material = new THREE.MeshBasicMaterial();
         const mesh = new THREE.Mesh(geometryForCSG, material);
-        
+
         try {
           // Perform CSG intersection without colors
           const result = CSG.intersect(mesh, clipBoxMesh);
-          
-          if (result && result.geometry && 
-              result.geometry.attributes && 
-              result.geometry.attributes.position &&
-              result.geometry.attributes.position.count > 0) {
-            
+
+          if (
+            result &&
+            result.geometry &&
+            result.geometry.attributes &&
+            result.geometry.attributes.position &&
+            result.geometry.attributes.position.count > 0
+          ) {
             // Add back the colors after CSG operation is complete
             if (geometry.attributes.color) {
               const originalColors = geometry.attributes.color;
-              const colors = new Float32Array(result.geometry.attributes.position.count * 3);
-              
+              const colors = new Float32Array(
+                result.geometry.attributes.position.count * 3
+              );
+
               // Use a simple color (avoid transferring complex color objects)
               const r = originalColors.array ? originalColors.array[0] : 0.7;
               const g = originalColors.array ? originalColors.array[1] : 0.7;
               const b = originalColors.array ? originalColors.array[2] : 0.7;
-              
+
               for (let i = 0; i < colors.length; i += 3) {
                 colors[i] = r;
-                colors[i+1] = g;
-                colors[i+2] = b;
+                colors[i + 1] = g;
+                colors[i + 2] = b;
               }
-              
-              result.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+              result.geometry.setAttribute(
+                "color",
+                new THREE.BufferAttribute(colors, 3)
+              );
             }
-            
+
             return result.geometry;
           }
           return null;
         } catch (e) {
           console.warn("CSG intersection failed:", e);
           // Fall back to the original geometry on error
-          return geometry; 
+          return geometry;
         }
       } catch (error) {
         console.error("Unhandled error during geometry clipping:", error);
         return geometry;
       }
     }
-    
+
     return geometry;
-  }
-
-  function calculateAdaptiveScaleFactor(
-    minLng: number,
-    minLat: number,
-    maxLng: number,
-    maxLat: number,
-    minElevation: number,
-    maxElevation: number
-  ): number {
-    // Calculate the bounding box area in geographic coordinates (degrees).
-    const lngDiff = maxLng - minLng;
-    const latDiff = maxLat - minLat;
-    const areaInDegrees = lngDiff * latDiff;
-
-    // Calculate the elevation range.
-    const elevationRange = maxElevation - minElevation;
-
-    // Define some scaling factors based on area and elevation range.
-    const areaScaleFactor = 1000; // Adjust this based on your typical area size.
-    const elevationScaleFactor = 10; // Adjust this based on your typical elevation range.
-
-    // Combine the scaling factors to get an adaptive scale factor.
-    const adaptiveScaleFactor =
-      areaInDegrees * areaScaleFactor + elevationRange * elevationScaleFactor;
-
-    return adaptiveScaleFactor;
   }
 
   // Process each polygon individually
   polygons.forEach((poly, polyIndex) => {
-    const { geometry: footprint, height = 10 } = poly;
+    const height = vtDataSet.extrusionDepth || poly.height || 10;
+    const footprint: PolygonData["geometry"] = poly.geometry;
 
     if (!footprint || footprint.length < 3) {
       return;
-    }
-
-    // For water features, don't deduplicate - we want to keep all water polygons separate
-    if (!vtDataSet.isWater) {
-      // Create a footprint signature to detect duplicates
-      const geometrySignature = footprint
-        .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
-        .join("|");
-
-      if (processedGeometries.has(geometrySignature)) {
-        return;
-      }
-      processedGeometries.add(geometrySignature);
     }
 
     // Ensure polygons are oriented clockwise
@@ -261,8 +282,7 @@ function createPolygonGeometry(
       path2D.reverse();
     }
 
-    // Calculate average terrain elevation
-    let totalTerrainZ = 0;
+    // Calculate terrain elevation for this specific polygon
     let lowestTerrainZ = Infinity;
     let highestTerrainZ = -Infinity;
     const meshCoords: [number, number][] = [];
@@ -281,23 +301,36 @@ function createPolygonGeometry(
       );
       lowestTerrainZ = Math.min(lowestTerrainZ, tZ);
       highestTerrainZ = Math.max(highestTerrainZ, tZ);
-      totalTerrainZ += tZ;
       meshCoords.push(transformToMeshCoordinates(lng, lat));
     });
 
-    const avgTerrainZ = totalTerrainZ / path2D.length;
-
-    // Apply vertical exaggeration
-    const lowestExaggeratedTerrainZ = lowestTerrainZ * verticalExaggeration;
-    const highestExaggeratedTerrainZ = highestTerrainZ * verticalExaggeration;
-    const terrainDifference =
-      highestExaggeratedTerrainZ - lowestExaggeratedTerrainZ;
+    // Use dataset-wide elevation if the polygon's terrain difference is very small
+    // This prevents unrealistic flat areas
+    if (useSameZOffset) {
+      // Use dataset values instead of individual polygon values
+      lowestTerrainZ = datasetLowestZ;
+      highestTerrainZ = datasetHighestZ;
+    }
 
     // For water, use a fixed shallow depth; for other features, use the provided height
     const validatedHeight = Math.min(Math.max(height, MIN_HEIGHT), MAX_HEIGHT);
+    const terrainDifference = highestTerrainZ - lowestTerrainZ;
 
     // For water, position it slightly below terrain; for other features, use terrain base height
-    const zBottom = (terrainBaseHeight - BUILDING_SUBMERGE_OFFSET);
+    const zBottom =
+      lowestTerrainZ +
+      (typeof vtDataSet?.zOffset !== "undefined" ? vtDataSet.zOffset : 0) -
+      BUILDING_SUBMERGE_OFFSET;
+    console.log(
+      "zBottom:",
+      zBottom,
+      "lowestTerrainZ:",
+      lowestTerrainZ,
+      "terrainDifference:",
+      terrainDifference,
+      "terrainBaseHeight:",
+      terrainBaseHeight
+    );
 
     const shape = new THREE.Shape();
     shape.moveTo(meshCoords[0][0], meshCoords[0][1]);
@@ -313,6 +346,9 @@ function createPolygonGeometry(
     };
     const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     geometry.translate(0, 0, zBottom);
+    console.log(
+      `Polygon ${polyIndex} height: ${validatedHeight}, zBottom: ${zBottom}, terrainBaseHeight: ${terrainBaseHeight}, lowestTerrainZ: ${lowestTerrainZ}, terrainDifference: ${terrainDifference}, using dataset elevation: ${terrainDifference < 0.1}, datasetLowestZ: ${datasetLowestZ}, datasetHighestZ: ${datasetHighestZ}`
+    );
     geometry.computeVertexNormals();
 
     // Add color attribute
@@ -334,7 +370,12 @@ function createPolygonGeometry(
     const clippedGeometry = clipGeometry(geometry);
 
     // Skip empty geometries
-    if (clippedGeometry && clippedGeometry.attributes && clippedGeometry.attributes.position && clippedGeometry.attributes.position.count > 0) {
+    if (
+      clippedGeometry &&
+      clippedGeometry.attributes &&
+      clippedGeometry.attributes.position &&
+      clippedGeometry.attributes.position.count > 0
+    ) {
       bufferGeometries.push(clippedGeometry);
     }
   });
@@ -343,12 +384,6 @@ function createPolygonGeometry(
 
   // Check and normalize geometries to ensure they all have the same attributes
   const normalizedGeometries: THREE.BufferGeometry[] = [];
-  const requiredAttributes = ['position', 'normal', 'color'];
-
-  // Function to check if a geometry has all required attributes
-  function hasAllAttributes(geometry: THREE.BufferGeometry): boolean {
-    return requiredAttributes.every(attr => geometry.attributes[attr] !== undefined);
-  }
 
   // First, find which attributes are missing from some geometries
   for (const geometry of bufferGeometries) {
