@@ -122,11 +122,11 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     }
     
     // Add other polygon geometries
-    if (polygonGeometries.geometries && polygonGeometries.geometries.length > 0) {
-      polygonGeometries.geometries.forEach((geometry, index) => {
-        if (!geometry) return;
+    if (polygonGeometries && polygonGeometries.length > 0) {
+      polygonGeometries.forEach((vtDataset, index) => {
+        if (!vtDataset.geometry) return;
         
-        const geomToUse = validateGeometries ? validateGeometry(geometry) : geometry;
+        const geomToUse = validateGeometries ? validateGeometry(vtDataset.geometry) : vtDataset.geometry;
         const material = new THREE.MeshStandardMaterial({
           color: 0x87ceeb, // Light sky blue
           flatShading: true
