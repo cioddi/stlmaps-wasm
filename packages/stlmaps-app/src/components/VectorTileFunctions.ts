@@ -19,8 +19,9 @@ export interface BuildingData {
   height: number;
   baseElevation: number; // Elevation at building position
 }
-export interface PolygonData {
+export interface GeometryData {
   geometry: number[][]; // Represents a single polygon ring
+  type: string; // Geometry type (e.g., Polygon, LineString)
   height: number;
   baseElevation: number; // Elevation at geometry position
 }
@@ -512,7 +513,7 @@ export interface FetchGeometryDataOptions {
   gridSize: GridSize;
 }
 /**
- * Fetch geometry data from a specified source layer in vector tiles and convert it to PolygonData.
+ * Fetch geometry data from a specified source layer in vector tiles and convert it to GeometryData.
  * @param minLng Minimum longitude of the bounding box.
  * @param minLat Minimum latitude of the bounding box.
  * @param maxLng Maximum longitude of the bounding box.
@@ -521,11 +522,11 @@ export interface FetchGeometryDataOptions {
  * @param sourceLayer The source layer to extract geometry from.
  * @param elevationGrid The elevation grid for calculating base elevation.
  * @param gridSize The size of the elevation grid.
- * @returns An array of PolygonData.
+ * @returns An array of GeometryData.
  */
 export const fetchGeometryData = async (
   config: FetchGeometryDataOptions
-): Promise<PolygonData[]> => {
+): Promise<GeometryData[]> => {
   const { bbox, vtDataset, zoom, elevationGrid, gridSize } = config;
   const [minLng, minLat, maxLng, maxLat] = bbox;
 
@@ -545,7 +546,7 @@ export const fetchGeometryData = async (
   const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
   console.log(`Fetching geometry data from ${tiles.length} tiles`);
 
-  const polygonData: PolygonData[] = [];
+  const geometryData: GeometryData[] = [];
 
   try {
     await Promise.all(
@@ -573,6 +574,11 @@ export const fetchGeometryData = async (
           for (let i = 0; i < layer.length; i++) {
             const feature = layer.feature(i).toGeoJSON(tile.x, tile.y, tile.z);
 
+            // Filter by subclass if specified
+            if (vtDataset?.subClass && vtDataset.subClass.indexOf(feature.properties.subclass) !== -1) {
+              continue;
+            }
+
             if (feature.geometry.type === "Polygon") {
               feature.geometry.coordinates.forEach((ring) => {
                 const baseElevation = calculateBaseElevation(
@@ -585,8 +591,9 @@ export const fetchGeometryData = async (
                   maxLat
                 );
 
-                polygonData.push({
+                geometryData.push({
                   geometry: ring,
+                  type: "Polygon",
                   height: 5, // Default height
                   baseElevation,
                 });
@@ -604,11 +611,87 @@ export const fetchGeometryData = async (
                     maxLat
                   );
 
-                  polygonData.push({
+                  geometryData.push({
                     geometry: ring,
+                    type: "Polygon",
                     height: 5, // Default height
                     baseElevation,
                   });
+                });
+              });
+            } else if (feature.geometry.type === "LineString") {
+
+              console.log("LineString geometry detected", feature.geometry);
+              const baseElevation = calculateBaseElevation(
+                feature.geometry.coordinates,
+                elevationGrid,
+                gridSize,
+                minLng,
+                minLat,
+                maxLng,
+                maxLat
+              );
+
+              geometryData.push({
+                geometry: feature.geometry.coordinates,
+                type: "LineString",
+                height: 0, // No height for lines
+                baseElevation,
+              });
+            } else if (feature.geometry.type === "Point") {
+              const baseElevation = calculateBaseElevation(
+                [feature.geometry.coordinates],
+                elevationGrid,
+                gridSize,
+                minLng,
+                minLat,
+                maxLng,
+                maxLat
+              );
+
+              geometryData.push({
+                geometry: [feature.geometry.coordinates],
+                type: "Point",
+                height: 0, // No height for points
+                baseElevation,
+              });
+            } else if (feature.geometry.type === "MultiLineString") {
+              console.log("MultiLineString geometry detected", feature.geometry);
+              feature.geometry.coordinates.forEach((lineString) => {
+                const baseElevation = calculateBaseElevation(
+                  lineString,
+                  elevationGrid,
+                  gridSize,
+                  minLng,
+                  minLat,
+                  maxLng,
+                  maxLat
+                );
+
+                geometryData.push({
+                  geometry: lineString,
+                  type: "LineString",
+                  height: 0, // No height for lines
+                  baseElevation,
+                });
+              });
+            } else if (feature.geometry.type === "MultiPoint") {
+              feature.geometry.coordinates.forEach((point) => {
+                const baseElevation = calculateBaseElevation(
+                  [point],
+                  elevationGrid,
+                  gridSize,
+                  minLng,
+                  minLat,
+                  maxLng,
+                  maxLat
+                );
+
+                geometryData.push({
+                  geometry: [point],
+                  type: "Point",
+                  height: 0, // No height for points
+                  baseElevation,
                 });
               });
             }
@@ -619,8 +702,8 @@ export const fetchGeometryData = async (
       })
     );
 
-    console.log(`Fetched ${polygonData.length} polygons from source layer "${vtDataset.sourceLayer}"`);
-    return polygonData;
+    console.log(`Fetched ${geometryData.length} polygons from source layer "${vtDataset.sourceLayer}"`);
+    return geometryData;
   } catch (error) {
     console.error("Error fetching geometry data:", error);
     return [];

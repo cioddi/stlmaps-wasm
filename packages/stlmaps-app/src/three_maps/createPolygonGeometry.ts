@@ -127,9 +127,6 @@ function createPolygonGeometry({
   }
 
   const datasetElevationRange = datasetHighestZ - datasetLowestZ;
-  console.log(
-    `Dataset elevation range: ${datasetElevationRange}, lowest: ${datasetLowestZ}, highest: ${datasetHighestZ}, minElevation: ${minElevation}, maxElevation: ${maxElevation}`
-  );
 
   // Create a clipping box for all geometries
   // Size and position based on the terrain size (typically 200x200)
@@ -321,16 +318,7 @@ function createPolygonGeometry({
       lowestTerrainZ +
       (typeof vtDataSet?.zOffset !== "undefined" ? vtDataSet.zOffset : 0) -
       BUILDING_SUBMERGE_OFFSET;
-    console.log(
-      "zBottom:",
-      zBottom,
-      "lowestTerrainZ:",
-      lowestTerrainZ,
-      "terrainDifference:",
-      terrainDifference,
-      "terrainBaseHeight:",
-      terrainBaseHeight
-    );
+
 
     const shape = new THREE.Shape();
     shape.moveTo(meshCoords[0][0], meshCoords[0][1]);
@@ -346,9 +334,6 @@ function createPolygonGeometry({
     };
     const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     geometry.translate(0, 0, zBottom);
-    console.log(
-      `Polygon ${polyIndex} height: ${validatedHeight}, zBottom: ${zBottom}, terrainBaseHeight: ${terrainBaseHeight}, lowestTerrainZ: ${lowestTerrainZ}, terrainDifference: ${terrainDifference}, using dataset elevation: ${terrainDifference < 0.1}, datasetLowestZ: ${datasetLowestZ}, datasetHighestZ: ${datasetHighestZ}`
-    );
     geometry.computeVertexNormals();
 
     // Add color attribute

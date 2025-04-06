@@ -204,11 +204,11 @@ const ModelPreview = ({
           modelGroup.add(buildingMesh);
         }
         if (polygonGeometries) {
-          polygonGeometries.forEach((geometry) => {
+          polygonGeometries.forEach(({geometry, ...vtDataset}) => {
             const polygonMesh = new THREE.Mesh(
               geometry,
               new THREE.MeshPhongMaterial({
-                color: new THREE.Color(0x87ceeb), // Light sky blue
+                color: vtDataset.color, // Light sky blue
                 //VertexColors: true,
                 flatShading: true, // Use flat shading for better definition
                 shininess: 0, // Remove shininess for a matte look

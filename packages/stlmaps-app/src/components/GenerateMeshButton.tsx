@@ -15,6 +15,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { CSG } from "three-csg-ts";
 import createPolygonGeometry from "../three_maps/createPolygonGeometry";
+import * as turf from "@turf/turf";
 
 // Define interfaces for our data structures
 export interface GridSize {
@@ -24,6 +25,7 @@ export interface GridSize {
 
 export interface VtDataSet {
   sourceLayer: string;
+  subClass?: string[];
   color: THREE.Color;
   data?: PolygonData[];
   geometry?: THREE.BufferGeometry;
@@ -218,15 +220,17 @@ export const GenerateMeshButton = function ({
           sourceLayer: "water",
           color: new THREE.Color(0x0077ff), // Lighter blue color for water
           extrusionDepth: 1, // Thin extrusion for water
-          zOffset: -.5,
+          zOffset: -0.5,
         },
-        // Add a land layer for testing
-        //{
-        //  sourceLayer: "landuse",
-        //  color: new THREE.Color(0x00ff00), // Green color for land use
-        //  extrudeDepth: 1, // Standard extrusion for land
-        //},
+        {
+          sourceLayer: "transportation",
+          //subClass: ["primary","secondary","tertiary","trunk","us-interstate","us-state"],
+          color: new THREE.Color(0xaaaaaa), // Gray color for streets
+          extrusionDepth: 2, // Thin extrusion for streets
+          zOffset: -0.2,
+        },
       ];
+
       const vtPolygonGeometries: THREE.BufferGeometry[] = [];
 
       for (let i = 0; i < vtGeometries.length; i++) {
@@ -245,21 +249,26 @@ export const GenerateMeshButton = function ({
 
         if (vtGeometries[i].data && vtGeometries[i].data.length > 0) {
           const TERRAIN_SIZE = 200;
-          // Set appropriate clip boundaries based on feature type
           const clipBoundaries = {
             minX: -TERRAIN_SIZE / 2,
             maxX: TERRAIN_SIZE / 2,
             minY: -TERRAIN_SIZE / 2,
             maxY: TERRAIN_SIZE / 2,
-            minZ: terrainBaseHeight - 20, // Ensure lower elements are included
-            maxZ: terrainBaseHeight + 100, // High enough for all buildings
+            minZ: terrainBaseHeight - 20,
+            maxZ: terrainBaseHeight + 100,
           };
-          console.log(
-            "processedMinElevation",
-            processedMinElevation,
-            "processedMaxElevation",
-            processedMaxElevation
-          );
+
+          if (vtGeometries[i].sourceLayer === "transportation") {
+            // Convert LineString geometries to polygons using a buffer
+            vtGeometries[i].data = vtGeometries[i].data.map((feature) => {
+              if (feature.type === "LineString") {
+                const bufferedPolygon = bufferLineString(feature.geometry, 0.5); // Adjust buffer size as needed
+                return { ...feature, type: 'Polygon', geometry: bufferedPolygon };
+              }
+              return feature;
+            });
+          }
+
           vtGeometries[i].geometry = createPolygonGeometry({
             polygons: vtGeometries[i].data as PolygonData[],
             terrainBaseHeight,
@@ -272,7 +281,6 @@ export const GenerateMeshButton = function ({
             useSameZOffset: true,
           });
 
-          // Check if we got a valid geometry
           if (
             vtGeometries[i].geometry &&
             vtGeometries[i].geometry.attributes &&
@@ -282,7 +290,7 @@ export const GenerateMeshButton = function ({
             console.log(
               `Created valid ${vtGeometries[i].sourceLayer} geometry with ${vtGeometries[i].geometry.attributes.position.count} vertices`
             );
-            vtPolygonGeometries.push(vtGeometries[i].geometry);
+            vtPolygonGeometries.push(vtGeometries[i]);
           } else {
             console.warn(
               `Failed to create valid ${vtGeometries[i].sourceLayer} geometry or all features were clipped out`
@@ -293,24 +301,7 @@ export const GenerateMeshButton = function ({
         }
       }
 
-      const waterClipGeometry = createPolygonGeometry({
-        polygons: vtGeometries[0].data as PolygonData[],
-        terrainBaseHeight,
-        bbox: [minLng, minLat, maxLng, maxLat],
-        elevationGrid: processedElevationGrid,
-        gridSize,
-        minElevation: processedMinElevation,
-        maxElevation: processedMaxElevation,
-        vtDataSet: {
-          sourceLayer: "water",
-          color: new THREE.Color(0x0077ff), // Lighter blue color for water
-          extrusionDepth: 20, // Thin extrusion for water
-          zOffset: -0.9,
-        },
-      });
-
-      terrainGeometry = clipFromTerrain(waterClipGeometry, terrainGeometry);
-
+      
       props.setTerrainGeometry(terrainGeometry);
       props.setBuildingsGeometry(buildingsGeometry);
 
@@ -1178,3 +1169,19 @@ function createBuildingsGeometry({
   );
   return mergedGeometry || new THREE.BufferGeometry();
 }
+function bufferLineString(geometry: {coordinates: number[][] }, bufferSize: number) {
+
+
+  // Convert the LineString to a Turf.js feature
+  const lineString = turf.lineString(geometry);
+
+  // Buffer the LineString using the provided buffer size
+  const buffered = turf.buffer(lineString, bufferSize, { units: "meters" });
+
+  if (!buffered || buffered.geometry.type !== "Polygon") {
+    throw new Error("Failed to buffer LineString into a Polygon");
+  }
+
+  return buffered.geometry.coordinates;
+}
+
