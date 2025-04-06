@@ -122,8 +122,8 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     }
     
     // Add other polygon geometries
-    if (polygonGeometries && polygonGeometries.length > 0) {
-      polygonGeometries.forEach((geometry, index) => {
+    if (polygonGeometries.geometries && polygonGeometries.geometries.length > 0) {
+      polygonGeometries.geometries.forEach((geometry, index) => {
         if (!geometry) return;
         
         const geomToUse = validateGeometries ? validateGeometry(geometry) : geometry;

@@ -223,6 +223,8 @@ function createPolygonGeometry({
             result.geometry.attributes.position &&
             result.geometry.attributes.position.count > 0
           ) {
+
+
             // Add back the colors after CSG operation is complete
             if (geometry.attributes.color) {
               const originalColors = geometry.attributes.color;
@@ -266,7 +268,8 @@ function createPolygonGeometry({
 
   // Process each polygon individually
   polygons.forEach((poly, polyIndex) => {
-    const height = vtDataSet.extrusionDepth || poly.height || 10;
+    //poly.height ||
+    const height = vtDataSet.extrusionDepth ||  (datasetHighestZ - datasetLowestZ + 0.1);
     const footprint: PolygonData["geometry"] = poly.geometry;
 
     if (!footprint || footprint.length < 3) {

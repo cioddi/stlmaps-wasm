@@ -224,9 +224,9 @@ export const GenerateMeshButton = function ({
         },
         {
           sourceLayer: "transportation",
-          //subClass: ["primary","secondary","tertiary","trunk","us-interstate","us-state"],
+          subClass: ["primary","secondary","trunk"],
           color: new THREE.Color(0xaaaaaa), // Gray color for streets
-          extrusionDepth: 2, // Thin extrusion for streets
+          //extrusionDepth: 1, // Thin extrusion for streets
           zOffset: -0.2,
         },
       ];
@@ -262,7 +262,7 @@ export const GenerateMeshButton = function ({
             // Convert LineString geometries to polygons using a buffer
             vtGeometries[i].data = vtGeometries[i].data.map((feature) => {
               if (feature.type === "LineString") {
-                const bufferedPolygon = bufferLineString(feature.geometry, 0.5); // Adjust buffer size as needed
+                const bufferedPolygon = bufferLineString(feature.geometry, 1); // Adjust buffer size as needed
                 return { ...feature, type: 'Polygon', geometry: bufferedPolygon };
               }
               return feature;
@@ -1182,6 +1182,6 @@ function bufferLineString(geometry: {coordinates: number[][] }, bufferSize: numb
     throw new Error("Failed to buffer LineString into a Polygon");
   }
 
-  return buffered.geometry.coordinates;
+  return buffered.geometry.coordinates[0];
 }
 
