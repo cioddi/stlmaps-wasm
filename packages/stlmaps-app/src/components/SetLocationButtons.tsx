@@ -8,12 +8,12 @@ interface SetLocationButtonsProps {
 }
 
 const locations = [
-    { label: "New York", coords: [-74.006, 40.7128], zoom: 16 },
-    { label: "Paris", coords: [2.3522, 48.8566], zoom: 16 },
-    { label: "Tokyo", coords: [139.6503, 35.6762], zoom: 16 },
-    { label: "Cologne", coords: [6.9603, 50.9375], zoom: 16 },
-    { label: "Sofia", coords: [23.3219, 42.6977], zoom: 16 },
-    { label: "Berlin", coords: [13.405, 52.52], zoom: 16 },
+    { label: "New York", coords: [-74.006, 40.7128], zoom: 14 },
+    { label: "Paris", coords: [2.3522, 48.8566], zoom: 15 },
+    { label: "Tokyo", coords: [139.6503, 35.6762], zoom: 14 },
+    { label: "Cologne", coords: [6.9603, 50.9375], zoom: 15 },
+    { label: "Sofia", coords: [23.3219, 42.6977], zoom: 14 },
+    { label: "Berlin", coords: [13.405, 52.52], zoom: 14 },
 ];
 
 const SetLocationButtons: React.FC<SetLocationButtonsProps> = ({
