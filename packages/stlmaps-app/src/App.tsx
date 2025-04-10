@@ -19,6 +19,8 @@ import { GenerateMeshButton } from "./components/GenerateMeshButton";
 import SetLocationButtons from "./components/SetLocationButtons";
 import ExportButtons from "./components/ExportButtons";
 import AttributionDialog from "./components/AttributionDialog";
+import CitySearch from "./components/CitySearch";
+import { City } from "./data/cities";
 
 const SIDEBAR_WIDTH = 240;
 
@@ -46,8 +48,17 @@ const App: React.FC = () => {
         position="fixed"
         sx={{ zIndex: (theme) => theme.zIndex.drawer + 10000 }}
       >
-        <Toolbar>
+        <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Typography variant="h6" color="primary">STLmaps</Typography>
+          <CitySearch 
+            onCitySelect={(city) => {
+              if (city) {
+                // Only update bbox center, map center is handled by CitySearch component
+                setBboxCenter(city.coordinates);
+              }
+            }} 
+          />
+          <Box sx={{ width: SIDEBAR_WIDTH }} /> {/* Spacer to balance the layout */}
         </Toolbar>
       </AppBar>
 
