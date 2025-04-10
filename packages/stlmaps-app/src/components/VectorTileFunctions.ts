@@ -579,6 +579,11 @@ export const fetchGeometryData = async (
               continue;
             }
 
+            // Apply filter expression if provided
+            if (vtDataset.filter && !evaluateFilter(vtDataset.filter, feature)) {
+              continue;
+            }
+
             if (feature.geometry.type === "Polygon") {
               feature.geometry.coordinates.forEach((ring) => {
                 const baseElevation = calculateBaseElevation(
@@ -746,3 +751,82 @@ const calculateBaseElevation = (
 
   return validPoints > 0 ? totalElevation / validPoints : 0;
 };
+
+// Add this new filter evaluation function
+/**
+ * Evaluates a MapLibre filter expression against a feature
+ * @param filter The filter expression array
+ * @param feature The feature to test against the filter
+ * @returns Boolean indicating if the feature passes the filter
+ */
+export function evaluateFilter(
+  filter: any[] | undefined,
+  feature: GeoJSON.Feature
+): boolean {
+  if (!filter) return true;
+  
+  // Get operator type (first element in the array)
+  const operator = filter[0];
+  
+  if (operator === "all") {
+    // All conditions must be true
+    for (let i = 1; i < filter.length; i++) {
+      if (!evaluateFilter(filter[i], feature)) return false;
+    }
+    return true;
+  } else if (operator === "any") {
+    // At least one condition must be true
+    for (let i = 1; i < filter.length; i++) {
+      if (evaluateFilter(filter[i], feature)) return true;
+    }
+    return false;
+  } else if (operator === "none") {
+    // None of the conditions should be true
+    for (let i = 1; i < filter.length; i++) {
+      if (evaluateFilter(filter[i], feature)) return false;
+    }
+    return true;
+  } else if (operator === "==") {
+    const [_, key, value] = filter;
+    
+    if (key === "$type") {
+      return feature.geometry.type === value;
+    } else {
+      return feature.properties?.[key] === value;
+    }
+  } else if (operator === "!=") {
+    const [_, key, value] = filter;
+    
+    if (key === "$type") {
+      return feature.geometry.type !== value;
+    } else {
+      return feature.properties?.[key] !== value;
+    }
+  } else if (operator === "in") {
+    const [_, key, ...values] = filter;
+    
+    if (key === "$type") {
+      return values.includes(feature.geometry.type);
+    } else {
+      return values.includes(feature.properties?.[key]);
+    }
+  } else if (operator === "!in") {
+    const [_, key, ...values] = filter;
+    
+    if (key === "$type") {
+      return !values.includes(feature.geometry.type);
+    } else {
+      return !values.includes(feature.properties?.[key]);
+    }
+  } else if (operator === "has") {
+    const key = filter[1];
+    return key in (feature.properties || {});
+  } else if (operator === "!has") {
+    const key = filter[1];
+    return !(key in (feature.properties || {}));
+  }
+  
+  // Return true for unsupported operators
+  console.warn(`Unsupported filter operator: ${operator}`);
+  return true;
+}

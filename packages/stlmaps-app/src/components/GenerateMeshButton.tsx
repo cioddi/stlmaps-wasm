@@ -32,6 +32,7 @@ export interface VtDataSet {
   extrusionDepth?: number;
   zOffset?: number;
   bufferSize?: number;
+  filter?: any[]; // Add support for MapLibre-style filter expressions
 }
 
 export interface Tile {
@@ -225,19 +226,14 @@ export const GenerateMeshButton = function ({
         },
         {
           sourceLayer: "transportation",
-          subClass: ["primary"],
           color: new THREE.Color(0xaaaaaa), // Gray color for streets
-          //extrusionDepth: 1, // Thin extrusion for streets
           zOffset: -0.2,
           bufferSize: 2,
-        },
-        {
-          sourceLayer: "transportation",
-          subClass: ["secondary"],
-          color: new THREE.Color(0xdddddd), // Gray color for streets
-          //extrusionDepth: 1, // Thin extrusion for streets
-          zOffset: -0.2,
-          bufferSize: 1,
+          // Updated filter to include more street types
+          filter: [
+            "all",
+            ["in", "class", "motorway", "trunk", "primary", "secondary", "tertiary", "residential", "service", "minor", "unclassified", "track", "path"],
+          ]
         },
       ];
 
