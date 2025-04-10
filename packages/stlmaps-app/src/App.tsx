@@ -136,7 +136,7 @@ const App: React.FC = () => {
             }}
             options={{
               center: mapCenter,
-              zoom: 12,
+              zoom: 16,
               style:
                 "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
             }}

@@ -149,18 +149,7 @@ function createPolygonGeometry({
   const clipBox = new THREE.Box3();
   clipBox.setFromObject(clipBoxMesh);
 
-  // For debug visualization
-  const wireframeGeometry = new THREE.WireframeGeometry(clipBoxGeometry);
-  const wireframeMaterial = new THREE.LineBasicMaterial({
-    color: 0xff0000,
-    transparent: true,
-    opacity: 0.5,
-  });
-  const wireframe = new THREE.LineSegments(
-    wireframeGeometry,
-    wireframeMaterial
-  );
-  wireframe.position.copy(clipBoxMesh.position);
+
 
   function transformToMeshCoordinates(
     lng: number,
@@ -215,7 +204,15 @@ function createPolygonGeometry({
         try {
           // Perform CSG intersection without colors
           const result = CSG.intersect(mesh, clipBoxMesh);
-
+            // Check if any point in the resulting geometry has a z-coordinate below 0
+            const positions = result.geometry.attributes.position.array;
+            for (let i = 2; i < positions.length; i += 3) {
+            if (positions[i] < 0) {
+              console.warn("Resulting geometry has a point below z=0, returning original geometry", geometry, );
+              return null;
+              return geometry;
+            }
+            }
           if (
             result &&
             result.geometry &&
@@ -406,7 +403,6 @@ function createPolygonGeometry({
     }
   }
 
-  // Add the wireframe to the geometries for debugging
   console.log(`Merging ${normalizedGeometries.length} normalized geometries`);
 
   // If we have no valid geometries, return an empty one

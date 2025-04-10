@@ -8,12 +8,12 @@ interface SetLocationButtonsProps {
 }
 
 const locations = [
-    { label: "New York", coords: [-74.006, 40.7128], zoom: 14 },
-    { label: "Paris", coords: [2.3522, 48.8566], zoom: 15 },
-    { label: "Tokyo", coords: [139.6503, 35.6762], zoom: 14 },
-    { label: "Cologne", coords: [6.9603, 50.9375], zoom: 15 },
-    { label: "Sofia", coords: [23.3219, 42.6977], zoom: 14 },
-    { label: "Berlin", coords: [13.405, 52.52], zoom: 14 },
+    { label: "New York", coords: [-74.006, 40.7128], zoom: 16 },
+    { label: "Paris", coords: [2.3522, 48.8566], zoom: 16 },
+    { label: "Tokyo", coords: [139.6503, 35.6762], zoom: 16 },
+    { label: "Cologne", coords: [6.9603, 50.9375], zoom: 16 },
+    { label: "Sofia", coords: [23.3219, 42.6977], zoom: 16 },
+    { label: "Berlin", coords: [13.405, 52.52], zoom: 16 },
 ];
 
 const SetLocationButtons: React.FC<SetLocationButtonsProps> = ({
@@ -30,11 +30,9 @@ const SetLocationButtons: React.FC<SetLocationButtonsProps> = ({
             setBboxCenter(loc.coords);
             setMapCenter(loc.coords);
             if (mapHook.map) {
-              mapHook.map.flyTo({
-                center: loc.coords,
-                zoom: loc.zoom,
-                speed: 1000,
-              });
+              mapHook.map.setZoom(loc.zoom);
+              mapHook.map.setCenter(loc.coords);
+              
             }
           }}
         >

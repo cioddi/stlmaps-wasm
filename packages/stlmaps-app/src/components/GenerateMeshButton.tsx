@@ -31,6 +31,7 @@ export interface VtDataSet {
   geometry?: THREE.BufferGeometry;
   extrusionDepth?: number;
   zOffset?: number;
+  bufferSize?: number;
 }
 
 export interface Tile {
@@ -218,16 +219,25 @@ export const GenerateMeshButton = function ({
       const vtGeometries: VtDataSet[] = [
         {
           sourceLayer: "water",
-          color: new THREE.Color(0x0077ff), // Lighter blue color for water
+          color: new THREE.Color(0x76bcff), // Lighter blue color for water
           extrusionDepth: 1, // Thin extrusion for water
           zOffset: -0.5,
         },
         {
           sourceLayer: "transportation",
-          subClass: ["primary","secondary","trunk"],
+          subClass: ["primary"],
           color: new THREE.Color(0xaaaaaa), // Gray color for streets
           //extrusionDepth: 1, // Thin extrusion for streets
           zOffset: -0.2,
+          bufferSize: 2,
+        },
+        {
+          sourceLayer: "transportation",
+          subClass: ["secondary"],
+          color: new THREE.Color(0xdddddd), // Gray color for streets
+          //extrusionDepth: 1, // Thin extrusion for streets
+          zOffset: -0.2,
+          bufferSize: 1,
         },
       ];
 
@@ -262,7 +272,7 @@ export const GenerateMeshButton = function ({
             // Convert LineString geometries to polygons using a buffer
             vtGeometries[i].data = vtGeometries[i].data.map((feature) => {
               if (feature.type === "LineString") {
-                const bufferedPolygon = bufferLineString(feature.geometry, 1); // Adjust buffer size as needed
+                const bufferedPolygon = bufferLineString(feature.geometry, vtGeometries[i].bufferSize || 1); // Adjust buffer size as needed
                 return { ...feature, type: 'Polygon', geometry: bufferedPolygon };
               }
               return feature;
