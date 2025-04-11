@@ -93,10 +93,9 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                 { title: "Generate 3D building extrusions", done: true },
                 { title: "Add water polygons", done: true },
                 { title: "Implement road networks (LineString support)", done: true },
-                { title: "Add land use polygons", done: false },
+                { title: "Add land use polygons", done: true },
                 { title: "Add trees (Point support)", done: false },
                 { title: "Support MapLibre style specification", done: false },
-                { title: "Fix building height", done: false },
             ]
         },
         {

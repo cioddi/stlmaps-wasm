@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { Slider, Typography, Box } from "@mui/material";
 import {
-  BuildingData,
-  PolygonData,
+  GeometryData,
   calculateTileCount,
   fetchBuildingData,
   fetchBuildingDataDirect,
@@ -29,7 +28,7 @@ export interface VtDataSet {
   sourceLayer: string;
   subClass?: string[];
   color: THREE.Color;
-  data?: PolygonData[];
+  data?: GeometryData[];
   geometry?: THREE.BufferGeometry;
   extrusionDepth?: number;
   zOffset?: number;
