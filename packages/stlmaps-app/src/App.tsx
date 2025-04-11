@@ -4,31 +4,30 @@ import {
   Toolbar,
   Typography,
   Button,
-  Container,
   CssBaseline,
   CircularProgress,
   Box,
   Drawer,
   Divider,
-  Paper,
 } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import BboxSelector from "./components/BboxSelector";
 import ModelPreview from "./components/ModelPreview";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
-import SetLocationButtons from "./components/SetLocationButtons";
 import ExportButtons from "./components/ExportButtons";
 import AttributionDialog from "./components/AttributionDialog";
+import ProjectTodoList from "./components/ProjectTodoList";
 import CitySearch from "./components/CitySearch";
-import { City } from "./data/cities";
 
 const SIDEBAR_WIDTH = 240;
+const mapCenter = [-74.00599999999997, 40.71279999999999];
 
 const App: React.FC = () => {
   const bboxRef = useRef<GeoJSON.Feature | undefined>(undefined);
   const [bbox, setBbox] = useState<GeoJSON.Feature | undefined>(undefined);
-  const [polygonGeometries, setPolygonGeometries] =
-    useState<THREE.BufferGeometry[] | null>(null);
+  const [polygonGeometries, setPolygonGeometries] = useState<
+    THREE.BufferGeometry[] | null
+  >(null);
   const [terrainGeometry, setTerrainGeometry] =
     useState<THREE.BufferGeometry | null>(null);
   const [buildingsGeometry, setBuildingsGeometry] =
@@ -36,10 +35,8 @@ const App: React.FC = () => {
   const [bboxCenter, setBboxCenter] = useState<[number, number]>([
     -74.00599999999997, 40.71279999999999,
   ]);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([
-    -74.00599999999997, 40.71279999999999,
-  ]);
   const [openAttribution, setOpenAttribution] = useState(false);
+  const [openTodoList, setOpenTodoList] = useState(false);
 
   return (
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
@@ -48,17 +45,20 @@ const App: React.FC = () => {
         position="fixed"
         sx={{ zIndex: (theme) => theme.zIndex.drawer + 10000 }}
       >
-        <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Typography variant="h6" color="primary">STLmaps</Typography>
-          <CitySearch 
+        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
+          <Typography variant="h6" color="primary">
+            STLmaps
+          </Typography>
+          <CitySearch
             onCitySelect={(city) => {
               if (city) {
                 // Only update bbox center, map center is handled by CitySearch component
                 setBboxCenter(city.coordinates);
               }
-            }} 
+            }}
           />
-          <Box sx={{ width: SIDEBAR_WIDTH }} /> {/* Spacer to balance the layout */}
+          <Box sx={{ width: SIDEBAR_WIDTH }} />{" "}
+          {/* Spacer to balance the layout */}
         </Toolbar>
       </AppBar>
 
@@ -101,11 +101,6 @@ const App: React.FC = () => {
               setPolygonGeometries={setPolygonGeometries}
             />
           </Box>
-          <SetLocationButtons
-            setBboxCenter={setBboxCenter}
-            setMapCenter={setMapCenter}
-          />
-
           {terrainGeometry && (
             <ExportButtons
               terrainGeometry={terrainGeometry}
@@ -113,12 +108,27 @@ const App: React.FC = () => {
               polygonGeometries={polygonGeometries}
             />
           )}
-          <Button variant="outlined" onClick={() => setOpenAttribution(true)}>
+          <Button variant="outlined" onClick={() => setOpenAttribution(true)} sx={{ mb: 1 }}
+            color="secondary"
+            fullWidth
+          >
             Attribution
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => setOpenTodoList(true)}
+            color="secondary"
+            fullWidth
+          >
+            Roadmap
           </Button>
           <AttributionDialog
             open={openAttribution}
             onClose={() => setOpenAttribution(false)}
+          />
+          <ProjectTodoList
+            open={openTodoList}
+            onClose={() => setOpenTodoList(false)}
           />
         </Box>
       </Drawer>

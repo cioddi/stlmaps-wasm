@@ -72,5 +72,8 @@ button:focus-visible {
 }
 
 .MuiPopper-root {
-  z-index: 100000;
+  z-index: 100000 !important;
+}
+.MuiDialog-root {
+  z-index: 100000 !important;
 }
