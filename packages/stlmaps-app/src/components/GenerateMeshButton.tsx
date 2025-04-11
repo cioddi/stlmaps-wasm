@@ -222,11 +222,39 @@ export const GenerateMeshButton = function ({
           sourceLayer: "water",
           color: new THREE.Color(0x76bcff), // Lighter blue color for water
           extrusionDepth: 1, // Thin extrusion for water
-          zOffset: -0.5,
-        },
-        {
-          sourceLayer: "transportation",
-          color: new THREE.Color(0xaaaaaa), // Gray color for streets
+            zOffset: -0.5,
+          },
+          {
+            sourceLayer: "landcover",
+            color: new THREE.Color(0x4CDF54), // Green color for landuse
+            extrusionDepth: 1.2, // Thin extrusion for landuse
+            zOffset: -0.3,
+            bufferSize: 2,
+          },
+          {
+            sourceLayer: "park",
+            color: new THREE.Color(0x4CDF54), // Green color for landuse
+            extrusionDepth: 0.8, // Thin extrusion for landuse
+            zOffset: -0.3,
+            bufferSize: 2,
+          },
+          {
+            sourceLayer: "landuse",
+            color: new THREE.Color(0x4CAF50), // Green color for landuse
+            extrusionDepth: 0.8, // Thin extrusion for landuse
+            zOffset: -0.3,
+            bufferSize: 2,
+            // Filter to include green areas
+            filter: [
+            "in", 
+            "class", 
+            "commercial",
+            "residential",
+            ]
+          },
+          {
+            sourceLayer: "transportation",
+            color: new THREE.Color(0xaaaaaa), // Gray color for streets
           zOffset: -0.2,
           bufferSize: 2,
           // Updated filter to include more street types
@@ -905,8 +933,10 @@ function createTerrainGeometry(
       const normalizedZ =
         (elevationGrid[y][x] - minElevation) /
         Math.max(1, maxElevation - minElevation);
-      // Simple HSL gradient
-      const c = new THREE.Color().setHSL(0.3 + 0.15 * normalizedZ, 0.5, 0.5);
+      // Light brown terrain color inspired by Zelda/Disney style
+      const lightBrown = new THREE.Color(0xd2b48c);  // Tan/sand color
+      const darkBrown = new THREE.Color(0xa87b4d);   // Medium earthy brown
+      const c = new THREE.Color().lerpColors(lightBrown, darkBrown, normalizedZ);
       colors.push(c.r, c.g, c.b);
       const meshX = (x / (width - 1) - 0.5) * 200;
       const meshY = (y / (height - 1) - 0.5) * 200;
