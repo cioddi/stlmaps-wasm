@@ -96,6 +96,7 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                 { title: "Add land use polygons", done: false },
                 { title: "Add trees (Point support)", done: false },
                 { title: "Support MapLibre style specification", done: false },
+                { title: "Fix building height", done: false },
             ]
         },
         {
