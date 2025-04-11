@@ -22,12 +22,8 @@ const CitySearch: React.FC<CitySearchProps> = ({ onCitySelect }) => {
 
   const jumpToCity = (city: City | null) => {
     if (city && map) {
-      // Fly to the selected city's coordinates with animation
-      map.flyTo({
-        center: city.coordinates,
-        zoom: 14,
-        essential: true, // this animation is considered essential for the user experience
-      });
+      map.setZoom(14);
+      map.setCenter(city.coordinates);
       
       // Optional callback for parent component if needed
       if (onCitySelect) {
@@ -61,6 +57,7 @@ const CitySearch: React.FC<CitySearchProps> = ({ onCitySelect }) => {
         freeSolo
         selectOnFocus
         handleHomeEndKeys
+        sx={{ zIndex: 10000 }}
         getOptionLabel={(option) => typeof option === 'string' ? option : option.name}
         filterOptions={(options, state) => {
           const inputValue = state.inputValue.toLowerCase().trim();

@@ -70,3 +70,7 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+.MuiPopper-root {
+  z-index: 100000;
+}
