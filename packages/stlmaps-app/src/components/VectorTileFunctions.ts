@@ -351,7 +351,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
         geometryData.push({
           geometry: feature.geometry.coordinates,
           type: "LineString",
-          height: 0, // No height for lines
+          height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
           baseElevation,
         });
       } else if (feature.geometry.type === "Point") {
@@ -368,7 +368,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
         geometryData.push({
           geometry: [feature.geometry.coordinates],
           type: "Point",
-          height: 0, // No height for points
+          height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
           baseElevation,
         });
       } else if (feature.geometry.type === "MultiLineString") {
@@ -387,7 +387,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
           geometryData.push({
             geometry: lineString,
             type: "LineString",
-            height: 0, // No height for lines
+            height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
             baseElevation,
           });
         });
@@ -406,7 +406,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
           geometryData.push({
             geometry: [point],
             type: "Point",
-            height: 0, // No height for points
+            height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
             baseElevation,
           });
         });

@@ -23,10 +23,6 @@ type Props = {
    */
   mapId?: string;
   /**
-   * Polygon GeoJson Feature representing the printing area
-   */
-  geojsonRef: React.MutableRefObject<Feature | undefined>;
-  /**
    * a state variable containing the PDF previews current state
    */
   options: BboxSelectorOptions;
@@ -333,7 +329,6 @@ export default function BboxSelector(props: Props) {
       } as Feature;
       console.log("update bbox", _geoJson);
       setBbox(_geoJson);
-      props.geojsonRef.current = _geoJson;
     }
 
     return undefined;
@@ -343,7 +338,6 @@ export default function BboxSelector(props: Props) {
     options?.orientation,
     options?.height,
     options?.width,
-    props.geojsonRef,
     transformOrigin,
     mapState?.viewport?.center,
   ]);
