@@ -270,6 +270,12 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
   const { bbox, vectorTiles, vtDataset, elevationGrid, gridSize } = config;
   const [minLng, minLat, maxLng, maxLat] = bbox;
 
+  // Skip processing if the layer is explicitly disabled
+  if (vtDataset.enabled === false) {
+    console.log(`Skipping disabled layer "${vtDataset.sourceLayer}"`);
+    return [];
+  }
+
   const geometryData: GeometryData[] = [];
 
   vectorTiles.forEach((vtEl) => {

@@ -35,6 +35,7 @@ export interface VtDataSet {
   filter?: any[]; // Add support for MapLibre-style filter expressions
   useAdaptiveScaleFactor?: boolean;
   heightScaleFactor?: number;
+  alignVerticesToTerrain?: boolean;
   enabled?: boolean;
 }
 
