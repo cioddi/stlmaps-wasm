@@ -2,11 +2,8 @@ import { useState, useEffect } from "react";
 import { Button, Box } from "@mui/material";
 import * as THREE from "three";
 import useLayerStore from "../stores/useLayerStore";
-// @ts-expect-error
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
-// @ts-expect-error
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
-// @ts-expect-error
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 
 const ExportButtons: React.FC = () => {
