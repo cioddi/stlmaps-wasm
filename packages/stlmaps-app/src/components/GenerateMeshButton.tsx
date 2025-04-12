@@ -73,7 +73,6 @@ interface GenerateMeshButtonProps {
 }
 
 export const GenerateMeshButton = function () {
-  const [generating, setGenerating] = useState<boolean>(false);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Get settings and setter functions directly from Zustand store
@@ -82,12 +81,7 @@ export const GenerateMeshButton = function () {
     vtLayers,
     terrainSettings,
     buildingSettings,
-    setTerrainVerticalExaggeration,
-    setTerrainBaseHeight,
-    setBuildingScaleFactor,
-    setTerrainGeometry,
-    setBuildingsGeometry,
-    setPolygonGeometries
+    setGeometryDataSets
   } = useLayerStore();
 
   // Modify generate3DModel function to include buildings
@@ -102,7 +96,6 @@ export const GenerateMeshButton = function () {
     console.log("Using terrain settings:", terrainSettings);
     console.log("Using building settings:", buildingSettings);
     console.log("Using vector tile layers:", vtLayers);
-    setGenerating(true);
 
     try {
       // Extract bbox coordinates from the feature
@@ -110,7 +103,6 @@ export const GenerateMeshButton = function () {
 
       if (!feature.geometry || feature.geometry.type !== "Polygon") {
         console.error("Invalid geometry: expected a Polygon");
-        setGenerating(false);
         return;
       }
 
@@ -202,7 +194,7 @@ export const GenerateMeshButton = function () {
         buildingsEnabled: buildingSettings.enabled,
       });
 
-      setTerrainGeometry(terrainSettings.enabled ? terrainGeometry : undefined);
+      //setTerrainGeometry(terrainSettings.enabled ? terrainGeometry : undefined);
 
       // Process vector tile layers
       const vtPolygonGeometries: VtDataSet[] = [];
@@ -302,13 +294,15 @@ export const GenerateMeshButton = function () {
         //vtPolygonGeometries.push(boxGeometry);
       }
 
-      setPolygonGeometries(vtPolygonGeometries);
+      //setPolygonGeometries(vtPolygonGeometries);
+      setGeometryDataSets({
+        terrainGeometry,
+        polygonGeometries: vtPolygonGeometries
+      })
       console.log("3D model generation complete!");
 
     } catch (error) {
       console.error("Error generating 3D model:", error);
-    } finally {
-      setGenerating(false);
     }
   };
 

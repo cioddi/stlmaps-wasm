@@ -20,12 +20,14 @@ interface LayerState {
   terrainSettings: TerrainSettings;
   buildingSettings: BuildingSettings;
   bbox: GeoJSON.Feature | undefined;
-  
+
   // Geometry data
-  polygonGeometries: VtDataSet[] | null;
-  terrainGeometry: THREE.BufferGeometry | undefined;
-  buildingsGeometry: THREE.BufferGeometry | undefined;
-  
+  geometryDataSets: {
+
+    polygonGeometries: VtDataSet[] | null;
+    terrainGeometry: THREE.BufferGeometry | undefined;
+  }
+
   // Actions for layers
   setVtLayers: (layers: VtDataSet[]) => void;
   updateVtLayer: (index: number, updates: Partial<VtDataSet>) => void;
@@ -34,26 +36,27 @@ interface LayerState {
   setLayerExtrusionDepth: (index: number, value: number) => void;
   setLayerZOffset: (index: number, value: number) => void;
   setLayerBufferSize: (index: number, value: number) => void;
-  
+
   // Actions for bbox
   setBbox: (bbox: GeoJSON.Feature | undefined) => void;
-  
+
   // Actions for terrain
   setTerrainSettings: (settings: Partial<TerrainSettings>) => void;
   toggleTerrainEnabled: () => void;
   setTerrainVerticalExaggeration: (value: number) => void;
   setTerrainBaseHeight: (value: number) => void;
-  
+
   // Actions for buildings
   setBuildingSettings: (settings: Partial<BuildingSettings>) => void;
   toggleBuildingsEnabled: () => void;
   setBuildingScaleFactor: (value: number) => void;
-  
+
   // Geometry actions
-  setPolygonGeometries: (geometries: VtDataSet[] | null) => void;
-  setTerrainGeometry: (geometry: THREE.BufferGeometry | undefined) => void;
-  setBuildingsGeometry: (geometry: THREE.BufferGeometry | undefined) => void;
-  
+  setGeometryDataSets: (geometryDataSets: {
+    polygonGeometries: VtDataSet[] | null;
+    terrainGeometry: THREE.BufferGeometry | undefined;
+  }) => void;
+
   // Reset actions
   resetToDefaults: () => void;
 }
@@ -70,6 +73,11 @@ function hexToRgb(hex: string) {
 
 // Create the store with initial values and actions
 const useLayerStore = create<LayerState>((set) => ({
+  geometryDataSets: {
+    polygonGeometries: null,
+    terrainGeometry: undefined
+  },
+  setGeometryDataSets: (geometryDataSets) => set({ geometryDataSets: { ...geometryDataSets} }),
   vtLayers: [...defaultVtGeometries],
   terrainSettings: {
     enabled: true,
@@ -81,113 +89,105 @@ const useLayerStore = create<LayerState>((set) => ({
     scaleFactor: 0.5
   },
   bbox: undefined,
-  
-  // Geometry states
-  polygonGeometries: null,
-  terrainGeometry: undefined,
-  buildingsGeometry: undefined,
-  
+
+
   // Layer actions
   setVtLayers: (layers) => set({ vtLayers: layers }),
-  
+
   updateVtLayer: (index, updates) => set((state) => {
     const updatedLayers = [...state.vtLayers];
     updatedLayers[index] = { ...updatedLayers[index], ...updates };
     return { vtLayers: updatedLayers };
   }),
-  
+
   toggleLayerEnabled: (index) => set((state) => {
     const updatedLayers = [...state.vtLayers];
-    updatedLayers[index] = { 
-      ...updatedLayers[index], 
-      enabled: !updatedLayers[index].enabled 
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      enabled: !updatedLayers[index].enabled
     };
     return { vtLayers: updatedLayers };
   }),
-  
+
   setLayerColor: (index, hexColor) => set((state) => {
     const rgbColor = hexToRgb(hexColor);
     if (!rgbColor) return state;
-    
+
     const updatedLayers = [...state.vtLayers];
-    updatedLayers[index] = { 
-      ...updatedLayers[index], 
+    updatedLayers[index] = {
+      ...updatedLayers[index],
       color: new THREE.Color(rgbColor.r, rgbColor.g, rgbColor.b)
     };
     return { vtLayers: updatedLayers };
   }),
-  
+
   setLayerExtrusionDepth: (index, value) => set((state) => {
     const updatedLayers = [...state.vtLayers];
-    updatedLayers[index] = { 
-      ...updatedLayers[index], 
-      extrusionDepth: value 
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      extrusionDepth: value
     };
     return { vtLayers: updatedLayers };
   }),
-  
+
   setLayerZOffset: (index, value) => set((state) => {
     const updatedLayers = [...state.vtLayers];
-    updatedLayers[index] = { 
-      ...updatedLayers[index], 
-      zOffset: value 
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      zOffset: value
     };
     return { vtLayers: updatedLayers };
   }),
-  
+
   setLayerBufferSize: (index, value) => set((state) => {
     const updatedLayers = [...state.vtLayers];
-    updatedLayers[index] = { 
-      ...updatedLayers[index], 
-      bufferSize: value 
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      bufferSize: value
     };
     return { vtLayers: updatedLayers };
   }),
-  
+
   // Terrain actions
   setTerrainSettings: (settings) => set((state) => ({
     terrainSettings: { ...state.terrainSettings, ...settings }
   })),
-  
+
   toggleTerrainEnabled: () => set((state) => ({
-    terrainSettings: { 
-      ...state.terrainSettings, 
-      enabled: !state.terrainSettings.enabled 
+    terrainSettings: {
+      ...state.terrainSettings,
+      enabled: !state.terrainSettings.enabled
     }
   })),
-  
+
   setTerrainVerticalExaggeration: (value) => set((state) => ({
     terrainSettings: { ...state.terrainSettings, verticalExaggeration: value }
   })),
-  
+
   setTerrainBaseHeight: (value) => set((state) => ({
     terrainSettings: { ...state.terrainSettings, baseHeight: value }
   })),
-  
+
   // Building actions
   setBuildingSettings: (settings) => set((state) => ({
     buildingSettings: { ...state.buildingSettings, ...settings }
   })),
-  
+
   toggleBuildingsEnabled: () => set((state) => ({
-    buildingSettings: { 
-      ...state.buildingSettings, 
-      enabled: !state.buildingSettings.enabled 
+    buildingSettings: {
+      ...state.buildingSettings,
+      enabled: !state.buildingSettings.enabled
     }
   })),
-  
+
   setBuildingScaleFactor: (value) => set((state) => ({
     buildingSettings: { ...state.buildingSettings, scaleFactor: value }
   })),
-  
+
   // Bbox action
   setBbox: (bbox) => set({ bbox }),
-  
-  // Geometry actions
-  setPolygonGeometries: (polygonGeometries) => set({ polygonGeometries }),
-  setTerrainGeometry: (terrainGeometry) => set({ terrainGeometry }),
-  setBuildingsGeometry: (buildingsGeometry) => set({ buildingsGeometry }),
-  
+
+
   // Reset to defaults
   resetToDefaults: () => set({
     vtLayers: [...defaultVtGeometries],
@@ -201,9 +201,10 @@ const useLayerStore = create<LayerState>((set) => ({
       scaleFactor: 0.5
     },
     bbox: undefined,
-    polygonGeometries: null,
-    terrainGeometry: undefined,
-    buildingsGeometry: undefined
+    geometryDataSets: {
+      polygonGeometries: null,
+      terrainGeometry: undefined
+    },
   })
 }));
 

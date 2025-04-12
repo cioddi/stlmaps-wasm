@@ -12,7 +12,7 @@ interface ModelPreviewProps {
 const ModelPreview = ({
 }: ModelPreviewProps) => {
   // Get geometry data directly from the Zustand store
-  const { terrainGeometry, buildingsGeometry, polygonGeometries } = useLayerStore();
+  const { geometryDataSets } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -171,25 +171,13 @@ const ModelPreview = ({
 
         const modelGroup = new THREE.Group();
         const geometryMesh = new THREE.Mesh(
-          terrainGeometry,
+          geometryDataSets.terrainGeometry,
           new THREE.MeshPhongMaterial({ vertexColors: true })
         );
         modelGroup.add(geometryMesh);
 
-        if (buildingsGeometry) {
-          const buildingMesh = new THREE.Mesh(
-            buildingsGeometry,
-            new THREE.MeshPhongMaterial({
-              color: new THREE.Color(0xe1e1e1), // Light sky blue
-              vertexColors: true,
-              flatShading: true, // Use flat shading for better definition
-              shininess: 0, // Remove shininess for a matte look
-            })
-          );
-          modelGroup.add(buildingMesh);
-        }
-        if (polygonGeometries) {
-          polygonGeometries.forEach(({geometry, ...vtDataset}) => {
+        if (geometryDataSets.polygonGeometries) {
+          geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
             const polygonMesh = new THREE.Mesh(
               geometry,
               new THREE.MeshPhongMaterial({
@@ -241,7 +229,7 @@ const ModelPreview = ({
     return () => {
       clearTimeout(initTimer);
     };
-  }, [terrainGeometry, buildingsGeometry]);
+  }, [geometryDataSets.polygonGeometries, geometryDataSets.terrainGeometry]);
 
   return (
     <div

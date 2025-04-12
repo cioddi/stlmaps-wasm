@@ -8,14 +8,14 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 
 const ExportButtons: React.FC = () => {
   // Get geometry data directly from the Zustand store
-  const { terrainGeometry, buildingsGeometry, polygonGeometries } = useLayerStore();
+  const { geometryDataSets} = useLayerStore();
   const [objDownloadUrl, setObjDownloadUrl] = useState<string>("");
   const [stlDownloadUrl, setStlDownloadUrl] = useState<string>("");
   const [gltfDownloadUrl, setGltfDownloadUrl] = useState<string>("");
 
   useEffect(() => {
     // Generate export files when geometries change
-    if (terrainGeometry) {
+    if (geometryDataSets.terrainGeometry) {
       generateExports();
     }
     
@@ -25,7 +25,7 @@ const ExportButtons: React.FC = () => {
       if (stlDownloadUrl) URL.revokeObjectURL(stlDownloadUrl);
       if (gltfDownloadUrl) URL.revokeObjectURL(gltfDownloadUrl);
     };
-  }, [terrainGeometry, buildingsGeometry, polygonGeometries]);
+  }, [geometryDataSets]);
 
   // Helper function to validate and fix geometry indices
   const validateGeometry = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => {
@@ -88,8 +88,8 @@ const ExportButtons: React.FC = () => {
     const scene = new THREE.Scene();
     
     // Add terrain
-    if (terrainGeometry) {
-      const geomToUse = validateGeometries ? validateGeometry(terrainGeometry) : terrainGeometry;
+    if (geometryDataSets.terrainGeometry) {
+      const geomToUse = validateGeometries ? validateGeometry(geometryDataSets.terrainGeometry) : geometryDataSets.terrainGeometry;
       const terrainMaterial = new THREE.MeshStandardMaterial({ 
         vertexColors: true,
         flatShading: true
@@ -99,21 +99,9 @@ const ExportButtons: React.FC = () => {
       scene.add(terrainMesh);
     }
     
-    // Add buildings
-    if (buildingsGeometry) {
-      const geomToUse = validateGeometries ? validateGeometry(buildingsGeometry) : buildingsGeometry;
-      const buildingsMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0xaaaaaa,
-        flatShading: true
-      });
-      const buildingsMesh = new THREE.Mesh(geomToUse, buildingsMaterial);
-      buildingsMesh.name = "Buildings";
-      scene.add(buildingsMesh);
-    }
-    
     // Add other polygon geometries
-    if (polygonGeometries && polygonGeometries.length > 0) {
-      polygonGeometries.forEach((vtDataset, index) => {
+    if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
+      geometryDataSets.polygonGeometries.forEach((vtDataset, index) => {
         if (!vtDataset?.geometry) return;
         
         const geomToUse = validateGeometries ? validateGeometry(vtDataset.geometry) : vtDataset.geometry;
@@ -146,7 +134,7 @@ const ExportButtons: React.FC = () => {
   };
   
   const generateOBJFile = (): void => {
-    if (!terrainGeometry) return;
+    if (!geometryDataSets.terrainGeometry) return;
     
     try {
       // Create scene with standard (non-validated) geometries for OBJ
@@ -170,7 +158,7 @@ const ExportButtons: React.FC = () => {
   };
   
   const generateSTLFile = (): void => {
-    if (!terrainGeometry) return;
+    if (!geometryDataSets.terrainGeometry) return;
     
     try {
       // Create scene with standard (non-validated) geometries for STL
@@ -194,7 +182,7 @@ const ExportButtons: React.FC = () => {
   };
   
   const generateGLTFFile = (): void => {
-    if (!terrainGeometry) return;
+    if (!geometryDataSets.terrainGeometry) return;
     
     try {
       // Create scene with validated geometries for GLTF/GLB
@@ -235,7 +223,7 @@ const ExportButtons: React.FC = () => {
   };
 
   // Only show buttons when we have geometries to export
-  if (!terrainGeometry) return null;
+  if (!geometryDataSets.terrainGeometry) return null;
 
   return (
     <Box sx={{ mt: 2, mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>

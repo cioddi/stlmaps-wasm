@@ -94,11 +94,7 @@ const App: React.FC = () => {
           sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 10000 }}
         >
           <Suspense fallback={<CircularProgress />}>
-            {(terrainGeometry) && (
-              <>
                 <ModelPreview />
-              </>
-            )}
           </Suspense>
         </Box>
       </Box>
