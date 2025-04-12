@@ -177,6 +177,7 @@ export default function BboxSelector(props: Props) {
     mapHook.map.map.setPitch(0);
     const _maxPitch = mapHook.map.map.getMaxPitch();
     mapHook.map.map.setMaxPitch(0);
+    updateBbox();
     return () => {
       mapHook.map?.map.setMaxPitch(_maxPitch);
     };

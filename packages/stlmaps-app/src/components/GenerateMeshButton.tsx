@@ -91,6 +91,7 @@ export const GenerateMeshButton = function () {
     setIsProcessing,
     setProcessingProgress,
     setProcessingStatus,
+    updateProcessingState
   } = useLayerStore();
 
   // Modify generate3DModel function to include buildings
@@ -100,8 +101,7 @@ export const GenerateMeshButton = function () {
       return;
     }
     setIsProcessing(true);
-    setProcessingStatus("Starting 3D model generation...");
-    setProcessingProgress(0);
+    updateProcessingState({ status: "Starting 3D model generation...", progress: 0 });
 
     console.log("%c 🏗️ STARTING 3D MODEL GENERATION", "background: #4CAF50; color: white; padding: 4px; font-weight: bold;");
 
@@ -183,16 +183,14 @@ export const GenerateMeshButton = function () {
       console.log(`Using zoom level ${zoom} for the 3D model`);
 
       // Update processing status
-      setProcessingStatus("Calculating tile coordinates...");
-      setProcessingProgress(10);
+      updateProcessingState({ status: "Calculating tile coordinates...", progress: 10 });
 
       // Get tile coordinates
       const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
       console.log(`Downloading ${tiles.length} tiles`);
 
       // Update processing status
-      setProcessingStatus(`Downloading ${tiles.length} elevation tiles...`);
-      setProcessingProgress(20);
+      updateProcessingState({ status: `Downloading ${tiles.length} elevation tiles...`, progress: 20 });
 
       // Download tile data
       console.log("🌐 Downloading tile data for tiles:", tiles);
@@ -202,8 +200,7 @@ export const GenerateMeshButton = function () {
       console.log("✅ Successfully downloaded all tile data:", tileData.length);
 
       // Update processing status
-      setProcessingStatus("Processing elevation data...");
-      setProcessingProgress(35);
+      updateProcessingState({ status: "Processing elevation data...", progress: 35 });
 
       // Process elevation data to create a grid
       console.log("🏔️ Processing elevation data...");
@@ -212,8 +209,7 @@ export const GenerateMeshButton = function () {
       console.log("✅ Elevation data processed:", { gridSize, minElevation, maxElevation });
 
       // Update processing status
-      setProcessingStatus("Fetching vector tile data...");
-      setProcessingProgress(50);
+      updateProcessingState({ status: "Fetching vector tile data...", progress: 50 });
 
       // Always use zoom level 14 for building data, since that's where buildings are available
       const buildingZoom = 14; // Force zoom 14 for buildings
@@ -227,8 +223,7 @@ export const GenerateMeshButton = function () {
       });
 
       // Update processing status
-      setProcessingStatus("Generating terrain geometry...");
-      setProcessingProgress(65);
+      updateProcessingState({ status: "Generating terrain geometry...", progress: 65 });
 
       // Check if terrain needs to be regenerated
       let terrainGeometry = terrainSettings.enabled ? geometryDataSets.terrainGeometry : undefined;
@@ -311,8 +306,7 @@ export const GenerateMeshButton = function () {
       // Process vector tile layers
       for (let i = 0; i < vtLayers.length; i++) {
         const currentLayer = vtLayers[i];
-        setProcessingStatus("Processing vector tile layers " + currentLayer.sourceLayer + "...");
-        setProcessingProgress(75 + (i * 10) / vtLayers.length);
+        updateProcessingState({ status: "Processing vector tile layers " + currentLayer.sourceLayer + "...", progress: 75 + (i * 10) / vtLayers.length });
 
         // Skip disabled layers
         if (currentLayer.enabled === false) {
@@ -442,8 +436,7 @@ export const GenerateMeshButton = function () {
       setLastLayerHashes(currentLayerHashes);
 
       // Update processing state to show completion
-      setProcessingStatus("3D model generation complete!");
-      setProcessingProgress(100);
+      updateProcessingState({ status: "3D model generation complete!", progress: 100 });
 
       console.log("%c ✅ 3D model generation complete!", "background: #4CAF50; color: white; padding: 4px; font-weight: bold;");
 
@@ -456,8 +449,7 @@ export const GenerateMeshButton = function () {
       console.error("Error generating 3D model:", error);
 
       // Show error in processing indicator
-      setProcessingStatus(`Error: ${error.message || 'Failed to generate 3D model'}`);
-      setProcessingProgress(100);
+      updateProcessingState({ status: `Error: ${error.message || 'Failed to generate 3D model'}`, progress: 100 });
 
       // Hide the indicator after showing the error
       setTimeout(() => {
