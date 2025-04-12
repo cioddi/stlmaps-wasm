@@ -144,6 +144,7 @@ const cities: City[] = [
   { name: "Innsbruck", country: "Austria", coordinates: [11.4041, 47.2692], population: 132493 },
   { name: "Graz", country: "Austria", coordinates: [15.4395, 47.0707], population: 291134 },
   { name: "Linz", country: "Austria", coordinates: [14.2856, 48.3069], population: 204846 },
+  { name: "Cologne", country: "Germany", coordinates: [6.9578, 50.9413], population: 1085664 },
   { name: "Ljubljana", country: "Slovenia", coordinates: [14.5057, 46.0569], population: 289518 },
   { name: "Zagreb", country: "Croatia", coordinates: [15.9819, 45.8150], population: 806341 },
   { name: "Split", country: "Croatia", coordinates: [16.4402, 43.5081], population: 178102 },

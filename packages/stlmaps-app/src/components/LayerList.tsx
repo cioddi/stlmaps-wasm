@@ -141,12 +141,8 @@ const LayerList: React.FC<LayerListProps> = () => {
 
   return (
     <Box sx={{ width: '100%', maxHeight: '100%', overflowY: 'auto', px: 1 }}>
-      <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
-        Layer Settings
-      </Typography>
-      
       {/* Terrain Layer */}
-      <StyledPaper>
+      <StyledPaper sx={{marginTop: 2}}>
         <LayerHeader active={terrainSettings.enabled} onClick={() => toggleExpand('terrain')}>
           <ListItemIcon>
             <TerrainIcon color={terrainSettings.enabled ? "primary" : "disabled"} />
@@ -202,51 +198,6 @@ const LayerList: React.FC<LayerListProps> = () => {
                 { value: 0, label: "0" },
                 { value: 50, label: "50" },
                 { value: 100, label: "100" },
-              ]}
-            />
-          </Box>
-        </Collapse>
-      </StyledPaper>
-      
-      {/* Buildings Layer */}
-      <StyledPaper>
-        <LayerHeader active={buildingSettings.enabled} onClick={() => toggleExpand('buildings')}>
-          <ListItemIcon>
-            <BusinessIcon color={buildingSettings.enabled ? "primary" : "disabled"} />
-          </ListItemIcon>
-          <ListItemText primary="Buildings" />
-          <FormControlLabel
-            control={
-              <Switch 
-                checked={buildingSettings.enabled} 
-                onChange={() => setBuildingSettings({
-                  enabled: !buildingSettings.enabled
-                })}
-                onClick={(e) => e.stopPropagation()}
-              />
-            }
-            label=""
-          />
-          {expandedLayers.buildings ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-        </LayerHeader>
-        
-        <Collapse in={expandedLayers.buildings} timeout="auto" unmountOnExit>
-          <Box sx={{ p: 2 }}>
-            <Typography gutterBottom>
-              Height Scale Factor: {buildingSettings.scaleFactor}
-            </Typography>
-            <Slider
-              value={buildingSettings.scaleFactor}
-              onChange={(_, newValue) => setBuildingSettings({
-                scaleFactor: newValue as number
-              })}
-              min={0}
-              max={15}
-              step={0.1}
-              marks={[
-                { value: 0, label: "0" },
-                { value: 5, label: "5" },
-                { value: 15, label: "15" },
               ]}
             />
           </Box>

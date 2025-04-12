@@ -7,12 +7,16 @@ import {
   CircularProgress,
   Box,
   Divider,
+  Button,
 } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import ModelPreview from "./components/ModelPreview";
 import CitySearch from "./components/CitySearch";
 import useLayerStore from "./stores/useLayerStore";
 import { Sidebar } from "./components/Sidebar";
+import ExportButtons from "./components/ExportButtons";
+import AttributionDialog from "./components/AttributionDialog";
+import ProjectTodoList from "./components/ProjectTodoList";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 440;
@@ -21,6 +25,8 @@ const App: React.FC = () => {
   const [bboxCenter, setBboxCenter] = useState<[number, number]>([
     -74.00599999999997, 40.71279999999999,
   ]);
+  const [openAttribution, setOpenAttribution] = useState(false);
+  const [openTodoList, setOpenTodoList] = useState(false);
 
   // Get layer settings and geometries from Zustand store
   const {
@@ -32,7 +38,7 @@ const App: React.FC = () => {
   } = useLayerStore();
 
 
-  return (
+  return (<>
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <CssBaseline />
       <AppBar
@@ -51,8 +57,25 @@ const App: React.FC = () => {
               }
             }}
           />
-          <Box sx={{ width: SIDEBAR_WIDTH }} />{" "}
-          {/* Spacer to balance the layout */}
+          
+          {/* Right side topbar buttons */}
+          <Box sx={{ display: "flex", gap: 1 }}>
+            <ExportButtons />
+            <Button
+              variant="outlined"
+              onClick={() => setOpenAttribution(true)}
+              color="secondary"
+            >
+              Attribution
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => setOpenTodoList(true)}
+              color="secondary"
+            >
+              Roadmap
+            </Button>
+          </Box>
         </Toolbar>
       </AppBar>
 
@@ -99,6 +122,17 @@ const App: React.FC = () => {
         </Box>
       </Box>
     </Box>
+    
+    {/* Dialogs */}
+    <AttributionDialog
+      open={openAttribution}
+      onClose={() => setOpenAttribution(false)}
+    />
+    <ProjectTodoList
+      open={openTodoList}
+      onClose={() => setOpenTodoList(false)}
+    />
+    </>
   );
 };
 

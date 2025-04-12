@@ -17,6 +17,10 @@ const ModelPreview = ({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Store camera position and target to persist across re-renders
+  const [cameraPosition, setCameraPosition] = useState<THREE.Vector3 | null>(null);
+  const [cameraTarget, setCameraTarget] = useState<THREE.Vector3 | null>(null);
 
   // Clean up previous renderer when component unmounts or dialog closes
   useEffect(() => {
@@ -194,15 +198,33 @@ const ModelPreview = ({
         scene.add(modelGroup);
 
         modelGroup.position.set(0, 0, 0);
-        camera.position.set(0, -145, 30);
-
-        //camera.position.set(80, 200, 600);
+        
+        // Set camera position - use saved position if available, otherwise use default
+        if (cameraPosition && cameraTarget) {
+          // Restore saved camera position and target
+          camera.position.copy(cameraPosition);
+          controls.target.copy(cameraTarget);
+        } else {
+          // Use default position
+          camera.position.set(0, -145, 30);
+        }
+        
         camera.updateProjectionMatrix();
 
-        // Animation loop
+        // Animation loop with camera position saving
         const animate = () => {
           if (!rendererRef.current) return;
-
+          
+          // Save camera position and target periodically when it changes
+          if (controls.target && camera.position) {
+            if (!cameraPosition || 
+                !camera.position.equals(cameraPosition) || 
+                !controls.target.equals(cameraTarget || new THREE.Vector3())) {
+              setCameraPosition(camera.position.clone());
+              setCameraTarget(controls.target.clone());
+            }
+          }
+          
           animationFrameId = requestAnimationFrame(animate);
           controls.update();
           rendererRef.current.render(scene, camera);

@@ -668,7 +668,7 @@ export const GenerateMeshButton = function () {
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [bbox]); // Only trigger on bbox changes, not on store state changes
+  }, [bbox, vtLayers, terrainSettings ]); // Only trigger on bbox changes, not on store state changes
 
   return (
     <>

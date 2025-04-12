@@ -1,31 +1,89 @@
 import { useState, useEffect } from "react";
-import { Button, Box } from "@mui/material";
+import { 
+  Button, 
+  Box, 
+  Dialog, 
+  DialogTitle, 
+  DialogContent, 
+  DialogActions, 
+  Typography, 
+  Paper, 
+  Grid, 
+  Divider, 
+  Chip, 
+  useTheme
+} from "@mui/material";
 import * as THREE from "three";
 import useLayerStore from "../stores/useLayerStore";
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import ModelTrainingIcon from '@mui/icons-material/ModelTraining';
+import ScatterPlotIcon from '@mui/icons-material/ScatterPlot';
+import ThreeDRotationIcon from '@mui/icons-material/ThreeDRotation';
+
+interface ExportFormat {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ReactNode;
+  fileExtension: string;
+}
 
 const ExportButtons: React.FC = () => {
   // Get geometry data directly from the Zustand store
-  const { geometryDataSets} = useLayerStore();
+  const { geometryDataSets } = useLayerStore();
+  const theme = useTheme();
+  
+  // State for dialog
+  const [dialogOpen, setDialogOpen] = useState<boolean>(false);
+  
+  // State for download URLs
   const [objDownloadUrl, setObjDownloadUrl] = useState<string>("");
   const [stlDownloadUrl, setStlDownloadUrl] = useState<string>("");
   const [gltfDownloadUrl, setGltfDownloadUrl] = useState<string>("");
-
-  useEffect(() => {
-    // Generate export files when geometries change
-    if (geometryDataSets.terrainGeometry) {
-      generateExports();
+  
+  // State for loading indicators
+  const [loading, setLoading] = useState<{obj: boolean, stl: boolean, gltf: boolean}>({
+    obj: false,
+    stl: false,
+    gltf: false
+  });
+  
+  // Define export formats with their metadata
+  const exportFormats: ExportFormat[] = [
+    {
+      id: 'obj',
+      name: 'Wavefront OBJ',
+      description: 'Standard 3D file format supported by most 3D applications. Good for general-purpose 3D models.',
+      icon: <ScatterPlotIcon fontSize="large" />,
+      fileExtension: 'obj'
+    },
+    {
+      id: 'stl',
+      name: 'STL',
+      description: '3D printing industry standard format. Ideal for 3D printing and CNC manufacturing.',
+      icon: <ModelTrainingIcon fontSize="large" />,
+      fileExtension: 'stl'
+    },
+    {
+      id: 'glb',
+      name: 'glTF/GLB',
+      description: 'Modern, efficient 3D format with material support. Best for web and game engines.',
+      icon: <ThreeDRotationIcon fontSize="large" />,
+      fileExtension: 'glb'
     }
-    
-    // Cleanup function to revoke object URLs when component unmounts
+  ];
+
+  // Cleanup function to revoke object URLs when component unmounts
+  useEffect(() => {
     return () => {
       if (objDownloadUrl) URL.revokeObjectURL(objDownloadUrl);
       if (stlDownloadUrl) URL.revokeObjectURL(stlDownloadUrl);
       if (gltfDownloadUrl) URL.revokeObjectURL(gltfDownloadUrl);
     };
-  }, [geometryDataSets]);
+  }, [objDownloadUrl, stlDownloadUrl, gltfDownloadUrl]);
 
   // Helper function to validate and fix geometry indices
   const validateGeometry = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => {
@@ -206,9 +264,13 @@ const ExportButtons: React.FC = () => {
           const url = URL.createObjectURL(blob);
           setGltfDownloadUrl(url);
           console.log("GLTF/GLB file generated successfully");
+          
+          // Update loading state when complete
+          setLoading(prev => ({ ...prev, gltf: false }));
         },
         (error) => {
           console.error("Error during GLTF export:", error);
+          setLoading(prev => ({ ...prev, gltf: false }));
         },
         { 
           binary: true, // Use binary GLB format for better compatibility
@@ -219,42 +281,204 @@ const ExportButtons: React.FC = () => {
       );
     } catch (error) {
       console.error("Error generating GLTF file:", error);
+      setLoading(prev => ({ ...prev, gltf: false }));
     }
   };
 
-  // Only show buttons when we have geometries to export
-  if (!geometryDataSets.terrainGeometry) return null;
+  // Handle generating and downloading OBJ
+  const handleObjExport = () => {
+    setLoading(prev => ({ ...prev, obj: true }));
+    generateOBJFile();
+    setLoading(prev => ({ ...prev, obj: false }));
+  };
+
+  // Handle generating and downloading STL
+  const handleStlExport = () => {
+    setLoading(prev => ({ ...prev, stl: true }));
+    generateSTLFile();
+    setLoading(prev => ({ ...prev, stl: false }));
+  };
+
+  // Handle generating and downloading GLTF/GLB
+  const handleGltfExport = () => {
+    setLoading(prev => ({ ...prev, gltf: true }));
+    generateGLTFFile();
+  };
+
+  const isDisabled = !geometryDataSets.terrainGeometry;
+
+  // Handle dialog open/close
+  const handleOpenDialog = () => {
+    setDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+  };
+
+  // Get download URL and handler for a specific format
+  const getFormatData = (formatId: string) => {
+    switch(formatId) {
+      case 'obj':
+        return {
+          url: objDownloadUrl,
+          isLoading: loading.obj,
+          handler: handleObjExport,
+        };
+      case 'stl':
+        return {
+          url: stlDownloadUrl,
+          isLoading: loading.stl,
+          handler: handleStlExport,
+        };
+      case 'glb':
+        return {
+          url: gltfDownloadUrl,
+          isLoading: loading.gltf,
+          handler: handleGltfExport,
+        };
+      default:
+        return { url: '', isLoading: false, handler: () => {} };
+    }
+  };
 
   return (
-    <Box sx={{ mt: 2, mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-      {objDownloadUrl && (
-        <Button
-          variant="outlined"
-          href={objDownloadUrl}
-          download="model.obj"
-        >
-          Download OBJ
-        </Button>
-      )}
-      {stlDownloadUrl && (
-        <Button
-          variant="outlined"
-          href={stlDownloadUrl}
-          download="model.stl"
-        >
-          Download STL
-        </Button>
-      )}
-      {gltfDownloadUrl && (
-        <Button
-          variant="outlined"
-          href={gltfDownloadUrl}
-          download="model.glb"
-        >
-          Download GLB
-        </Button>
-      )}
-    </Box>
+    <>
+      <Button 
+        variant="contained" 
+        color="primary"
+        onClick={handleOpenDialog}
+        disabled={isDisabled}
+        startIcon={<FileDownloadIcon />}
+      >
+        Export 3D Model
+      </Button>
+      
+      <Dialog 
+        open={dialogOpen} 
+        onClose={handleCloseDialog} 
+        maxWidth="md" 
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            overflow: 'hidden'
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          bgcolor: theme.palette.primary.main, 
+          color: 'white', 
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1
+        }}>
+          <ThreeDRotationIcon /> Export 3D Model
+        </DialogTitle>
+        
+        <DialogContent sx={{ p: 3 }}>
+          <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+            Export your 3D terrain model in various formats for use in external applications.
+          </Typography>
+          
+          <Divider sx={{ my: 2 }} />
+          
+          <Grid container spacing={3}>
+            {exportFormats.map((format) => {
+              const { url, isLoading, handler } = getFormatData(format.id);
+              return (
+                <Grid item xs={12} key={format.id}>
+                  <Paper 
+                    elevation={2}
+                    sx={{
+                      p: 3,
+                      borderRadius: 2,
+                      display: 'flex',
+                      flexDirection: { xs: 'column', sm: 'row' },
+                      alignItems: 'center',
+                      gap: 3,
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': {
+                        boxShadow: 6,
+                        transform: 'translateY(-2px)'
+                      }
+                    }}
+                  >
+                    <Box 
+                      sx={{ 
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        bgcolor: theme.palette.action.hover,
+                        borderRadius: '50%',
+                        p: 2,
+                        color: theme.palette.primary.main
+                      }}
+                    >
+                      {format.icon}
+                    </Box>
+                    
+                    <Box flex={1}>
+                      <Box display="flex" alignItems="center" mb={0.5}>
+                        <Typography variant="h6" fontWeight="bold">
+                          {format.name}
+                        </Typography>
+                        <Chip 
+                          label={`.${format.fileExtension}`}
+                          size="small"
+                          sx={{ ml: 1 }}
+                          color="primary"
+                        />
+                      </Box>
+                      <Typography variant="body2" color="text.secondary" mb={1}>
+                        {format.description}
+                      </Typography>
+                      {url ? (
+                        <Button
+                          component="a"
+                          variant="contained"
+                          disabled={isDisabled || isLoading}
+                          href={url}
+                          download={`model.${format.fileExtension}`}
+                          startIcon={<FileDownloadIcon />}
+                        >
+                          Download {format.fileExtension.toUpperCase()}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outlined"
+                          onClick={handler}
+                          disabled={isDisabled || isLoading}
+                          startIcon={isLoading ? null : <ModelTrainingIcon />}
+                        >
+                          {isLoading ? "Generating..." : `Generate ${format.fileExtension.toUpperCase()}`}
+                        </Button>
+                      )}
+                    </Box>
+                  </Paper>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </DialogContent>
+        
+        <DialogActions sx={{ p: 2, bgcolor: theme.palette.grey[100] }}>
+          <Button onClick={handleCloseDialog} color="primary">
+            Close
+          </Button>
+          <Button 
+            onClick={() => {
+              generateExports();
+            }} 
+            variant="contained" 
+            color="primary"
+            disabled={isDisabled || loading.obj || loading.stl || loading.gltf}
+          >
+            Generate All Formats
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 };
 

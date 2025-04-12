@@ -43,16 +43,27 @@ export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
                 variant="fullWidth"
                 sx={{ borderBottom: 1, borderColor: 'divider' }}
             >
-                <Tab label="Controls" />
                 <Tab label="Layers" />
+                <Tab label="Controls" />
             </Tabs>
+
+            {/* Layers Tab */}
+            <Box
+                sx={{
+                    overflow: "auto",
+                    display: activeTab === 0 ? 'block' : 'none',
+                    height: 'calc(100% - 48px)'
+                }}
+            >
+                <LayerList />
+            </Box>
 
             {/* Controls Tab */}
             <Box
                 sx={{
                     overflow: "auto",
                     p: 2,
-                    display: activeTab === 0 ? 'block' : 'none',
+                    display: activeTab === 1 ? 'block' : 'none',
                     height: 'calc(100% - 48px)'
                 }}
             >
@@ -73,48 +84,6 @@ export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
                 <Box sx={{ mt: 2 }}>
                     <GenerateMeshButton />
                 </Box>
-                <ExportButtons
-                />
-
-                <Box sx={{ mt: 2 }}>
-                    <Button
-                        variant="outlined"
-                        onClick={() => setOpenAttribution(true)}
-                        sx={{ mb: 1 }}
-                        color="secondary"
-                        fullWidth
-                    >
-                        Attribution
-                    </Button>
-                    <Button
-                        variant="outlined"
-                        onClick={() => setOpenTodoList(true)}
-                        color="secondary"
-                        fullWidth
-                    >
-                        Roadmap
-                    </Button>
-                </Box>
-
-                <AttributionDialog
-                    open={openAttribution}
-                    onClose={() => setOpenAttribution(false)}
-                />
-                <ProjectTodoList
-                    open={openTodoList}
-                    onClose={() => setOpenTodoList(false)}
-                />
-            </Box>
-
-            {/* Layers Tab */}
-            <Box
-                sx={{
-                    overflow: "auto",
-                    display: activeTab === 1 ? 'block' : 'none',
-                    height: 'calc(100% - 48px)'
-                }}
-            >
-                <LayerList />
             </Box>
         </Drawer>
     );
