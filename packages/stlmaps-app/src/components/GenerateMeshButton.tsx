@@ -78,7 +78,7 @@ export const GenerateMeshButton = function () {
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
   const [lastFullConfigHash, setLastFullConfigHash] = useState<string>("");
   const [lastTerrainHash, setLastTerrainHash] = useState<string>("");
-  const [lastLayerHashes, setLastLayerHashes] = useState<{index: number, hash: string}[]>([]);
+  const [lastLayerHashes, setLastLayerHashes] = useState<{ index: number, hash: string }[]>([]);
 
   // Get settings and setter functions directly from Zustand store
   const {
@@ -87,7 +87,10 @@ export const GenerateMeshButton = function () {
     terrainSettings,
     buildingSettings,
     setGeometryDataSets,
-    geometryDataSets
+    geometryDataSets,
+    setIsProcessing,
+    setProcessingProgress,
+    setProcessingStatus,
   } = useLayerStore();
 
   // Modify generate3DModel function to include buildings
@@ -96,24 +99,27 @@ export const GenerateMeshButton = function () {
       console.error("Cannot generate 3D model: bbox is undefined");
       return;
     }
+    setIsProcessing(true);
+    setProcessingStatus("Starting 3D model generation...");
+    setProcessingProgress(0);
 
     console.log("%c 🏗️ STARTING 3D MODEL GENERATION", "background: #4CAF50; color: white; padding: 4px; font-weight: bold;");
-    
+
     // Generate configuration hashes for efficiency checks
     const currentFullConfigHash = createConfigHash(bbox, terrainSettings, vtLayers);
     const { terrainHash: currentTerrainHash, layerHashes: currentLayerHashes } = createComponentHashes(bbox, terrainSettings, vtLayers);
-    
+
     // Skip full regeneration if configuration hasn't changed
     if (currentFullConfigHash === lastFullConfigHash) {
       console.log("%c ✅ SKIPPING 3D MODEL GENERATION - No config changes detected", "background: #2196F3; color: white; padding: 4px; font-weight: bold;");
       return;
     }
-    
+
     // Log what components have changed
     console.log("Generating 3D model for:", bbox);
     console.log("Using terrain settings:", terrainSettings);
     console.log("Using building settings:", buildingSettings);
-    
+
     // Check which specific components need regeneration
     const terrainChanged = currentTerrainHash !== lastTerrainHash;
     const changedLayerIndices = currentLayerHashes
@@ -122,15 +128,15 @@ export const GenerateMeshButton = function () {
         return previousHash !== layerHash.hash;
       })
       .map(lh => lh.index);
-    
+
     if (terrainChanged) {
       console.log("%c 🏔️ Terrain configuration changed - regenerating terrain", "color: #FF9800;");
     } else if (terrainSettings.enabled && geometryDataSets.terrainGeometry) {
       console.log("%c ✅ Terrain configuration unchanged - reusing existing terrain geometry", "color: #4CAF50;");
     }
-    
+
     if (changedLayerIndices.length > 0) {
-      console.log("%c 🔄 Changed layers:", "color: #FF9800;", 
+      console.log("%c 🔄 Changed layers:", "color: #FF9800;",
         changedLayerIndices.map(i => vtLayers[i]?.sourceLayer || `Layer ${i}`).join(", ")
       );
     }
@@ -176,9 +182,17 @@ export const GenerateMeshButton = function () {
 
       console.log(`Using zoom level ${zoom} for the 3D model`);
 
+      // Update processing status
+      setProcessingStatus("Calculating tile coordinates...");
+      setProcessingProgress(10);
+
       // Get tile coordinates
       const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
       console.log(`Downloading ${tiles.length} tiles`);
+
+      // Update processing status
+      setProcessingStatus(`Downloading ${tiles.length} elevation tiles...`);
+      setProcessingProgress(20);
 
       // Download tile data
       console.log("🌐 Downloading tile data for tiles:", tiles);
@@ -187,11 +201,19 @@ export const GenerateMeshButton = function () {
       );
       console.log("✅ Successfully downloaded all tile data:", tileData.length);
 
+      // Update processing status
+      setProcessingStatus("Processing elevation data...");
+      setProcessingProgress(35);
+
       // Process elevation data to create a grid
       console.log("🏔️ Processing elevation data...");
       const { elevationGrid, gridSize, minElevation, maxElevation } =
         processElevationData(tileData, tiles, minLng, minLat, maxLng, maxLat);
       console.log("✅ Elevation data processed:", { gridSize, minElevation, maxElevation });
+
+      // Update processing status
+      setProcessingStatus("Fetching vector tile data...");
+      setProcessingProgress(50);
 
       // Always use zoom level 14 for building data, since that's where buildings are available
       const buildingZoom = 14; // Force zoom 14 for buildings
@@ -204,18 +226,22 @@ export const GenerateMeshButton = function () {
         gridSize,
       });
 
+      // Update processing status
+      setProcessingStatus("Generating terrain geometry...");
+      setProcessingProgress(65);
+
       // Check if terrain needs to be regenerated
       let terrainGeometry = terrainSettings.enabled ? geometryDataSets.terrainGeometry : undefined;
       let processedElevationGrid: number[][] | undefined;
       let processedMinElevation = minElevation;
       let processedMaxElevation = maxElevation;
-      
+
       // Re-calculate the current terrain hash here to ensure it's available
       const { terrainHash: currentTerrainHashHere } = createComponentHashes(bbox, terrainSettings, vtLayers);
-      
+
       // Compare current and previous terrain hash
       const terrainConfigChanged = currentTerrainHashHere !== lastTerrainHash;
-      
+
       if (!terrainGeometry || terrainConfigChanged) {
         // Generate three.js geometry from elevation grid
         console.log("🗻 Creating terrain geometry...");
@@ -228,12 +254,12 @@ export const GenerateMeshButton = function () {
           terrainSettings.verticalExaggeration,
           terrainSettings.baseHeight
         );
-        
+
         terrainGeometry = terrainResult.geometry;
         processedElevationGrid = terrainResult.processedElevationGrid;
         processedMinElevation = terrainResult.processedMinElevation;
         processedMaxElevation = terrainResult.processedMaxElevation;
-        
+
         console.log("✅ Terrain geometry created successfully:", {
           geometryExists: !!terrainGeometry,
           vertexCount: terrainGeometry?.attributes?.position?.count || 0
@@ -265,45 +291,49 @@ export const GenerateMeshButton = function () {
 
       // Initialize or get existing polygon geometries
       let vtPolygonGeometries: VtDataSet[] = [];
-      
+
       // Check if we have existing geometries to reuse
       const existingGeometries = geometryDataSets.polygonGeometries || [];
-      
+
       // Get changed layer indices from our hash comparison
-      const { terrainHash: currentTerrainHash, layerHashes: currentLayerHashes } = 
+      const { terrainHash: currentTerrainHash, layerHashes: currentLayerHashes } =
         createComponentHashes(bbox, terrainSettings, vtLayers);
-      
+
       const changedLayerIndices = currentLayerHashes
         .filter((layerHash) => {
           const previousHash = lastLayerHashes.find(lh => lh.index === layerHash.index)?.hash;
           return previousHash !== layerHash.hash;
         })
         .map(lh => lh.index);
-      
+
+      // Update processing status
+
       // Process vector tile layers
       for (let i = 0; i < vtLayers.length; i++) {
         const currentLayer = vtLayers[i];
-        
+        setProcessingStatus("Processing vector tile layers " + currentLayer.sourceLayer + "...");
+        setProcessingProgress(75 + (i * 10) / vtLayers.length);
+
         // Skip disabled layers
         if (currentLayer.enabled === false) {
           console.log(`Skipping disabled layer: ${currentLayer.sourceLayer}`);
           continue;
         }
-        
+
         // Check if this layer's configuration has changed
         const layerNeedsUpdate = changedLayerIndices.includes(i);
         const existingLayerGeometry = existingGeometries.find(
-          g => g.sourceLayer === currentLayer.sourceLayer && 
-               g.subClass?.toString() === currentLayer.subClass?.toString()
+          g => g.sourceLayer === currentLayer.sourceLayer &&
+            g.subClass?.toString() === currentLayer.subClass?.toString()
         );
-        
+
         // If layer config hasn't changed and we have existing geometry, reuse it
         if (!layerNeedsUpdate && existingLayerGeometry?.geometry) {
           console.log(
             `%c ♻️ Reusing existing ${currentLayer.sourceLayer} geometry - configuration unchanged`,
             "color: #4CAF50;"
           );
-          
+
           // Update with the current color but keep the existing geometry
           vtPolygonGeometries.push({
             ...currentLayer,
@@ -311,7 +341,7 @@ export const GenerateMeshButton = function () {
           });
           continue;
         }
-        
+
         // Otherwise, regenerate the geometry
         console.log(`%c 🔄 Generating ${currentLayer.sourceLayer} geometry - configuration changed`, "color: #FF9800;");
         console.log(`Fetching ${currentLayer.sourceLayer} data...`);
@@ -342,7 +372,7 @@ export const GenerateMeshButton = function () {
           // Convert LineString geometries to polygons using a buffer
           layerData = layerData.map((feature) => {
             if (feature.type === "LineString") {
-              const bufferedPolygon = bufferLineString(feature.geometry, currentLayer.bufferSize || 1); 
+              const bufferedPolygon = bufferLineString(feature.geometry, currentLayer.bufferSize || 1);
               return { ...feature, type: 'Polygon', geometry: bufferedPolygon };
             }
             return feature;
@@ -404,16 +434,35 @@ export const GenerateMeshButton = function () {
         terrainGeometry: terrainSettings.enabled ? terrainGeometry : undefined,
         polygonGeometries: vtPolygonGeometries
       });
-      
+      setIsProcessing(false);
+
       // Store the hashes for future comparisons
       setLastFullConfigHash(currentFullConfigHash);
       setLastTerrainHash(currentTerrainHash);
       setLastLayerHashes(currentLayerHashes);
-      
+
+      // Update processing state to show completion
+      setProcessingStatus("3D model generation complete!");
+      setProcessingProgress(100);
+
       console.log("%c ✅ 3D model generation complete!", "background: #4CAF50; color: white; padding: 4px; font-weight: bold;");
+
+      // Hide the processing indicator after a short delay to let users see the completion
+      setTimeout(() => {
+        setIsProcessing(false);
+      }, 2000);
 
     } catch (error) {
       console.error("Error generating 3D model:", error);
+
+      // Show error in processing indicator
+      setProcessingStatus(`Error: ${error.message || 'Failed to generate 3D model'}`);
+      setProcessingProgress(100);
+
+      // Hide the indicator after showing the error
+      setTimeout(() => {
+        setIsProcessing(false);
+      }, 3000);
     }
   };
 
@@ -779,7 +828,7 @@ export const GenerateMeshButton = function () {
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [bbox, vtLayers, terrainSettings ]); // Only trigger on bbox changes, not on store state changes
+  }, [bbox, vtLayers, terrainSettings]); // Only trigger on bbox changes, not on store state changes
 
   return (
     <>

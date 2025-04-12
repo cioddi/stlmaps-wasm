@@ -268,8 +268,8 @@ export default function BboxSelector(props: Props) {
     }));
   }, [mapHook.map, options.width, options.center, options.fixedScale]);
 
-  // update props.geoJsonRef
-  useEffect(() => {
+  // Helper function to update the bbox based on current state
+  const updateBbox = React.useCallback(() => {
     if (targetRef.current && mapHook.map && transformOrigin?.[0]) {
       // apply orientation
       let _width = options.width;
@@ -330,16 +330,28 @@ export default function BboxSelector(props: Props) {
       console.log("update bbox", _geoJson);
       setBbox(_geoJson);
     }
+  }, [mapHook.map, options.width, options.height, options.orientation, transformOrigin]);
 
-    return undefined;
+  // Update element styling and position when needed without updating bbox
+  useEffect(() => {
+    if (targetRef.current && mapHook.map && transformOrigin?.[0]) {
+      // apply orientation
+      if (options.orientation === "portrait") {
+        targetRef.current.style.width = options.width + "px";
+        targetRef.current.style.height = options.height + "px";
+      } else {
+        targetRef.current.style.width = options.height + "px";
+        targetRef.current.style.height = options.width + "px";
+      }
+      moveableRef.current?.updateTarget();
+    }
   }, [
-    mapHook.map,
-    transform,
     options?.orientation,
     options?.height,
     options?.width,
     transformOrigin,
-    mapState?.viewport?.center,
+    mapHook.map,
+    transform,
   ]);
 
   return mapHook?.map?.map?._canvas?.parentNode?.parentNode ? (
@@ -376,6 +388,9 @@ export default function BboxSelector(props: Props) {
               }));
             }
           }}
+          onDragEnd={() => {
+            updateBbox();
+          }}
           /* scalable */
           scalable={options.fixedScale ? false : true}
           onScale={(e) => {
@@ -400,6 +415,9 @@ export default function BboxSelector(props: Props) {
               }));
             }
           }}
+          onScaleEnd={() => {
+            updateBbox();
+          }}
           /* rotatable */
           rotatable={true}
           onRotate={(e) => {
@@ -415,6 +433,9 @@ export default function BboxSelector(props: Props) {
                 rotate: parseFloat(_transformPartString) + viewportBearing,
               }));
             }
+          }}
+          onRotateEnd={() => {
+            updateBbox();
           }}
         />
       </>,

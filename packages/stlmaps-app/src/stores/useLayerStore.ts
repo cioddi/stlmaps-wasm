@@ -21,9 +21,13 @@ interface LayerState {
   buildingSettings: BuildingSettings;
   bbox: GeoJSON.Feature | undefined;
 
+  // Processing state
+  isProcessing: boolean;
+  processingStatus: string | null;
+  processingProgress: number | null;
+
   // Geometry data
   geometryDataSets: {
-
     polygonGeometries: VtDataSet[] | null;
     terrainGeometry: THREE.BufferGeometry | undefined;
   }
@@ -59,6 +63,12 @@ interface LayerState {
     terrainGeometry: THREE.BufferGeometry | undefined;
   }) => void;
 
+  // Processing state actions
+  setIsProcessing: (isProcessing: boolean) => void;
+  setProcessingStatus: (status: string | null) => void;
+  setProcessingProgress: (progress: number | null) => void;
+  updateProcessingState: (state: { isProcessing?: boolean; status?: string | null; progress?: number | null }) => void;
+
   // Reset actions
   resetToDefaults: () => void;
 }
@@ -75,6 +85,11 @@ function hexToRgb(hex: string) {
 
 // Create the store with initial values and actions
 const useLayerStore = create<LayerState>((set) => ({
+  // Processing state
+  isProcessing: false,
+  processingStatus: null,
+  processingProgress: null,
+  
   geometryDataSets: {
     polygonGeometries: null,
     terrainGeometry: undefined
@@ -207,6 +222,15 @@ const useLayerStore = create<LayerState>((set) => ({
   // Bbox action
   setBbox: (bbox) => set({ bbox }),
 
+  // Processing state actions
+  setIsProcessing: (isProcessing) => set({ isProcessing }),
+  setProcessingStatus: (processingStatus) => set({ processingStatus }),
+  setProcessingProgress: (processingProgress) => set({ processingProgress }),
+  updateProcessingState: (state) => set((currentState) => ({
+    isProcessing: state.isProcessing !== undefined ? state.isProcessing : currentState.isProcessing,
+    processingStatus: state.status !== undefined ? state.status : currentState.processingStatus,
+    processingProgress: state.progress !== undefined ? state.progress : currentState.processingProgress
+  })),
 
   // Reset to defaults
   resetToDefaults: () => set({

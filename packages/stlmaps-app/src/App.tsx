@@ -17,6 +17,7 @@ import { Sidebar } from "./components/Sidebar";
 import ExportButtons from "./components/ExportButtons";
 import AttributionDialog from "./components/AttributionDialog";
 import ProjectTodoList from "./components/ProjectTodoList";
+import ProcessingIndicator from "./components/ProcessingIndicator";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 440;
@@ -57,7 +58,7 @@ const App: React.FC = () => {
               }
             }}
           />
-          
+
           {/* Right side topbar buttons */}
           <Box sx={{ display: "flex", gap: 1 }}>
             <ExportButtons />
@@ -75,6 +76,8 @@ const App: React.FC = () => {
             >
               Roadmap
             </Button>
+            {/* Processing Indicator - appears when generating 3D model */}
+            <ProcessingIndicator />
           </Box>
         </Toolbar>
       </AppBar>
@@ -117,12 +120,12 @@ const App: React.FC = () => {
           sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 10000 }}
         >
           <Suspense fallback={<CircularProgress />}>
-                <ModelPreview />
+            <ModelPreview />
           </Suspense>
         </Box>
       </Box>
     </Box>
-    
+
     {/* Dialogs */}
     <AttributionDialog
       open={openAttribution}
@@ -132,7 +135,8 @@ const App: React.FC = () => {
       open={openTodoList}
       onClose={() => setOpenTodoList(false)}
     />
-    </>
+
+  </>
   );
 };
 
