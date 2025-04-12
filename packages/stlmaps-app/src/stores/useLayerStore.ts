@@ -33,9 +33,11 @@ interface LayerState {
   updateVtLayer: (index: number, updates: Partial<VtDataSet>) => void;
   toggleLayerEnabled: (index: number) => void;
   setLayerColor: (index: number, hexColor: string) => void;
-  setLayerExtrusionDepth: (index: number, value: number) => void;
+  setLayerExtrusionDepth: (index: number, value: number | undefined) => void;
   setLayerZOffset: (index: number, value: number) => void;
   setLayerBufferSize: (index: number, value: number) => void;
+  toggleLayerUseAdaptiveScaleFactor: (index: number) => void;
+  setLayerHeightScaleFactor: (index: number, value: number) => void;
 
   // Actions for bbox
   setBbox: (bbox: GeoJSON.Feature | undefined) => void;
@@ -144,6 +146,24 @@ const useLayerStore = create<LayerState>((set) => ({
     updatedLayers[index] = {
       ...updatedLayers[index],
       bufferSize: value
+    };
+    return { vtLayers: updatedLayers };
+  }),
+
+  toggleLayerUseAdaptiveScaleFactor: (index) => set((state) => {
+    const updatedLayers = [...state.vtLayers];
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      useAdaptiveScaleFactor: !updatedLayers[index].useAdaptiveScaleFactor
+    };
+    return { vtLayers: updatedLayers };
+  }),
+
+  setLayerHeightScaleFactor: (index, value) => set((state) => {
+    const updatedLayers = [...state.vtLayers];
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      heightScaleFactor: value
     };
     return { vtLayers: updatedLayers };
   }),

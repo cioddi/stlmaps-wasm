@@ -92,6 +92,8 @@ const LayerList: React.FC<LayerListProps> = () => {
     setLayerExtrusionDepth,
     setLayerZOffset,
     setLayerBufferSize,
+    toggleLayerUseAdaptiveScaleFactor,
+    setLayerHeightScaleFactor,
     setTerrainSettings,
     setBuildingSettings,
   } = useLayerStore();
@@ -112,6 +114,14 @@ const LayerList: React.FC<LayerListProps> = () => {
   const handleExtrusionChange = (index: number, value: number) => {
     setLayerExtrusionDepth(index, value);
   };
+
+  const handleExtrusionToggle = (index: number, enabled: boolean) => {
+    if (enabled) {
+      setLayerExtrusionDepth(index, 1); // Default value when enabling
+    } else {
+      setLayerExtrusionDepth(index, undefined);
+    }
+  };
   
   const handleZOffsetChange = (index: number, value: number) => {
     setLayerZOffset(index, value);
@@ -119,6 +129,14 @@ const LayerList: React.FC<LayerListProps> = () => {
   
   const handleBufferSizeChange = (index: number, value: number) => {
     setLayerBufferSize(index, value);
+  };
+  
+  const handleAdaptiveScaleFactorToggle = (index: number) => {
+    toggleLayerUseAdaptiveScaleFactor(index);
+  };
+  
+  const handleHeightScaleFactorChange = (index: number, value: number) => {
+    setLayerHeightScaleFactor(index, value);
   };
 
   const toggleExpand = (layerId: string) => {
@@ -255,29 +273,43 @@ const LayerList: React.FC<LayerListProps> = () => {
                   />
                 </Box>
                 
-                {layer.extrusionDepth !== undefined && (
-                  <>
-                    <Typography gutterBottom>
-                      Extrusion Depth: {layer.extrusionDepth.toFixed(1)}
-                    </Typography>
-                    <Slider
-                      value={layer.extrusionDepth}
-                      onChange={(_, newValue) => handleExtrusionChange(index, newValue as number)}
-                      min={0}
-                      max={10}
-                      step={0.1}
-                      marks={[
-                        { value: 0, label: "0" },
-                        { value: 5, label: "5" },
-                        { value: 10, label: "10" },
-                      ]}
-                    />
-                  </>
-                )}
+                {/* Extrusion Depth with enable/disable checkbox */}
+                <Box sx={{ mt: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={layer.extrusionDepth !== undefined}
+                        onChange={(e) => handleExtrusionToggle(index, e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label="Enable Extrusion Depth"
+                  />
+                  
+                  {layer.extrusionDepth !== undefined && (
+                    <>
+                      <Typography gutterBottom>
+                        Extrusion Depth: {layer.extrusionDepth.toFixed(1)}
+                      </Typography>
+                      <Slider
+                        value={layer.extrusionDepth}
+                        onChange={(_, newValue) => handleExtrusionChange(index, newValue as number)}
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        marks={[
+                          { value: 0, label: "0" },
+                          { value: 5, label: "5" },
+                          { value: 10, label: "10" },
+                        ]}
+                      />
+                    </>
+                  )}
+                </Box>
                 
                 {layer.zOffset !== undefined && (
-                  <>
-                    <Typography gutterBottom sx={{ mt: 2 }}>
+                  <Box sx={{ mt: 2 }}>
+                    <Typography gutterBottom>
                       Z-Offset: {layer.zOffset.toFixed(1)}
                     </Typography>
                     <Slider
@@ -292,12 +324,12 @@ const LayerList: React.FC<LayerListProps> = () => {
                         { value: 10, label: "10" },
                       ]}
                     />
-                  </>
+                  </Box>
                 )}
                 
                 {layer.bufferSize !== undefined && (
-                  <>
-                    <Typography gutterBottom sx={{ mt: 2 }}>
+                  <Box sx={{ mt: 2 }}>
+                    <Typography gutterBottom>
                       Buffer Size: {layer.bufferSize.toFixed(1)}
                     </Typography>
                     <Slider
@@ -312,8 +344,41 @@ const LayerList: React.FC<LayerListProps> = () => {
                         { value: 10, label: "10" },
                       ]}
                     />
-                  </>
+                  </Box>
                 )}
+                
+                {/* Adaptive Scale Factor */}
+                <Box sx={{ mt: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={layer.useAdaptiveScaleFactor === true}
+                        onChange={() => handleAdaptiveScaleFactorToggle(index)}
+                        size="small"
+                      />
+                    }
+                    label="Use Adaptive Scale Factor"
+                  />
+                </Box>
+                
+                {/* Height Scale Factor */}
+                <Box sx={{ mt: 2 }}>
+                  <Typography gutterBottom>
+                    Height Scale Factor: {(layer.heightScaleFactor || 1).toFixed(2)}
+                  </Typography>
+                  <Slider
+                    value={layer.heightScaleFactor || 1}
+                    onChange={(_, newValue) => handleHeightScaleFactorChange(index, newValue as number)}
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    marks={[
+                      { value: 0, label: "0" },
+                      { value: 1, label: "1" },
+                      { value: 5, label: "5" },
+                    ]}
+                  />
+                </Box>
               </Box>
             </Collapse>
           </StyledPaper>

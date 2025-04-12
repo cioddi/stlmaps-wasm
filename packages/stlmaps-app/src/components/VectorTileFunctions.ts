@@ -310,7 +310,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
           geometryData.push({
             geometry: ring,
             type: "Polygon",
-            height: feature?.properties?.height || feature?.properties?.render_height || 5, // Default height
+            height: feature?.properties?.height || feature?.properties?.render_height, // Default height
             baseElevation,
           });
         });
@@ -330,7 +330,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
             geometryData.push({
               geometry: ring,
               type: "Polygon",
-              height: feature?.properties?.height || feature?.properties?.render_height || 5, // Default height
+              height: feature?.properties?.height || feature?.properties?.render_height, // Default height
               baseElevation,
             });
           });
