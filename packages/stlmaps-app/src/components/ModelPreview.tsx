@@ -4,11 +4,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 import { Vertex } from "three-csg-ts/lib/esm/Vertex";
+import { VtDataSet } from "./GenerateMeshButton";
 
 interface ModelPreviewProps {
   terrainGeometry: THREE.BufferGeometry | null;
   buildingsGeometry: THREE.BufferGeometry | null;
-  polygonGeometry: THREE.BufferGeometry[] | null;
+  polygonGeometry: VtDataSet[] | null;
   open: boolean;
   onClose: () => void;
 }

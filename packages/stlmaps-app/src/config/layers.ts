@@ -52,4 +52,10 @@ export const vtGeometries: VtDataSet[] = [
             ["in", "class", "motorway", "trunk", "primary", "secondary", "tertiary", "residential", "service", "minor", "unclassified", "track", "path"],
         ]
     },
+    //{
+        //sourceLayer: "buildings",
+        //color: new THREE.Color(0xaaaaaa), // Gray color for streets
+        //zOffset: -0.2,
+        //enabled: true,
+    //},
 ];

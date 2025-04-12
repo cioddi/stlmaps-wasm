@@ -2,17 +2,6 @@ import { VectorTile } from "@mapbox/vector-tile";
 import Pbf from "pbf";
 import { Tile, GridSize, VtDataSet } from "./GenerateMeshButton";
 
-// Add new interfaces for building data
-export interface BuildingFeature {
-  geometry: {
-    coordinates: number[][][]; // Polygon coordinates
-    type: string;
-  };
-  properties: {
-    render_height?: number; // Height data
-    height?: number; // Alternative height property
-  };
-}
 
 export interface BuildingData {
   footprint: number[][]; // Simplified to single polygon ring
@@ -34,157 +23,6 @@ export interface PointData {
   coordinates: number[]; // Represents a point
 }
 
-// Function to fetch building data from vector tiles
-export const fetchBuildingData = async (
-  minLng: number,
-  minLat: number,
-  maxLng: number,
-  maxLat: number,
-  zoom: number
-): Promise<BuildingFeature[]> => {
-  // Calculate number of tiles and check if there are too many
-  const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
-  if (tileCount > 9) {
-    console.warn(
-      `Skipping building data fetch: area too large (${tileCount} tiles, max allowed: 9)`
-    );
-    return [];
-  }
-
-  // Get tiles that cover the bounding box
-  const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-  console.log(`Fetching building data from ${tiles.length} tiles`);
-
-  const buildingFeatures: BuildingFeature[] = [];
-
-  try {
-    // Get the current map style to extract building layer source
-    const map = document._map;
-    if (!map) {
-      console.error("Map instance not found");
-      return buildingFeatures;
-    }
-
-    // Find building source from map style
-    const style = map.getStyle();
-    let buildingSource = null;
-    let buildingSourceLayer = null;
-
-    // Find a layer containing buildings
-    for (const layerId in style.layers) {
-      const layer = style.layers[layerId];
-      if (
-        layer.id.toLowerCase().includes("building") ||
-        (layer["source-layer"] &&
-          layer["source-layer"].toLowerCase().includes("building"))
-      ) {
-        buildingSource = layer.source;
-        buildingSourceLayer = layer["source-layer"];
-        break;
-      }
-    }
-
-    if (!buildingSource || !buildingSourceLayer) {
-      console.warn("Could not find building source layer in map style");
-      // Fallback to OpenMapTiles source
-      buildingSource = "openmaptiles";
-      buildingSourceLayer = "building";
-    }
-
-    // Get source URL template
-    const sourceInfo = style.sources[buildingSource];
-    if (!sourceInfo || !sourceInfo.tiles) {
-      console.warn("Building source doesn't have tile URLs");
-      return buildingFeatures;
-    }
-
-    const tileUrlTemplate = sourceInfo.tiles[0];
-
-    await Promise.all(
-      tiles.map(async (tile) => {
-        // Replace placeholders in URL template with tile coordinates
-        const url = tileUrlTemplate
-          .replace("{z}", tile.z.toString())
-          .replace("{x}", tile.x.toString())
-          .replace("{y}", tile.y.toString());
-
-        console.log(`Fetching buildings from: ${url}`);
-
-        try {
-          const response = await fetch(url);
-
-          if (!response.ok) {
-            console.warn(`Failed to fetch building tile: ${response.status}`);
-            return;
-          }
-
-          const arrayBuffer = await response.arrayBuffer();
-
-          // Parse MVT tile
-          const vectorTile = parseVectorTile(arrayBuffer);
-
-          // Extract building features
-          const buildings = extractBuildingsFromVectorTile(
-            vectorTile,
-            tile,
-            buildingSourceLayer
-          );
-
-          // Add to collection
-          buildingFeatures.push(...buildings);
-        } catch (error) {
-          console.error(
-            `Error fetching building tile ${tile.z}/${tile.x}/${tile.y}:`,
-            error
-          );
-        }
-      })
-    );
-
-    console.log(`Found ${buildingFeatures.length} buildings`);
-
-    // Filter out any building features with invalid geometry
-    const validBuildingFeatures = buildingFeatures.filter((feature) => {
-      // Must have a Polygon geometry
-      if (
-        !feature.geometry ||
-        (feature.geometry.type !== "Polygon" &&
-          feature.geometry.type !== "MultiPolygon")
-      ) {
-        return false;
-      }
-
-      // Check each coordinate for NaN or non-finite values
-      if (feature.geometry.type === "Polygon") {
-        for (const ring of feature.geometry.coordinates) {
-          for (const [lng, lat] of ring) {
-            if (!isFinite(lng) || !isFinite(lat)) return false;
-          }
-        }
-      } else {
-        // MultiPolygon
-        for (const polygon of feature.geometry.coordinates) {
-          for (const ring of polygon) {
-            for (const [lng, lat] of ring) {
-              if (!isFinite(lng) || !isFinite(lat)) return false;
-            }
-          }
-        }
-      }
-
-      return true;
-    });
-
-    console.log(
-      `Filtered out invalid buildings, remaining: ${validBuildingFeatures.length}`
-    );
-    return validBuildingFeatures;
-  } catch (error) {
-    console.error("Error fetching building data:", error);
-    return [];
-  }
-};
-
 // Function to parse MVT
 export const parseVectorTile = (arrayBuffer: ArrayBuffer): any => {
   try {
@@ -203,8 +41,8 @@ const extractBuildingsFromVectorTile = (
   vectorTile: any,
   tile: Tile,
   sourceLayer: string
-): BuildingFeature[] => {
-  const features: BuildingFeature[] = [];
+): GeometryData[] => {
+  const features: GeometryData[] = [];
 
   try {
     // Check if the tile has the building layer
@@ -213,7 +51,6 @@ const extractBuildingsFromVectorTile = (
     }
 
     const buildingLayer = vectorTile.layers[sourceLayer];
-    const tileSize = 4096; // Standard MVT tile size
 
     // Iterate through building features in this layer
     for (let i = 0; i < buildingLayer.length; i++) {
@@ -238,35 +75,27 @@ const extractBuildingsFromVectorTile = (
       if (geojson.geometry.type === "MultiPolygon") {
         geojson.geometry.coordinates.forEach((polygonCoords) => {
           features.push({
-            geometry: {
-              type: "Polygon",
-              coordinates: polygonCoords,
-            },
-            properties: {
-              render_height:
-                feature.properties.render_height || feature.properties.height,
-              height:
-                feature.properties.height ||
-                feature.properties.render_height ||
-                5,
-            },
+            geometry: polygonCoords,
+
+            type: "Polygon",
+            baseElevation: 0,
+            height:
+              feature.properties.height ||
+              feature.properties.render_height ||
+              5,
+
           });
         });
       } else {
         // Single polygon
         features.push({
-          geometry: {
-            type: "Polygon",
-            coordinates: geojson.geometry.coordinates,
-          },
-          properties: {
-            render_height:
-              feature.properties.render_height || feature.properties.height,
-            height:
-              feature.properties.height ||
-              feature.properties.render_height ||
-              5,
-          },
+          geometry: geojson.geometry.coordinates,
+          type: "Polygon",
+          baseElevation: 0,
+          height:
+            feature.properties.height ||
+            feature.properties.render_height ||
+            5,
         });
       }
     }
@@ -278,81 +107,9 @@ const extractBuildingsFromVectorTile = (
   }
 };
 
-// Alternative implementation for direct building fetch if the map instance doesn't expose the needed APIs
-export const fetchBuildingDataDirect = async (
-  minLng: number,
-  minLat: number,
-  maxLng: number,
-  maxLat: number,
-  zoom: number
-): Promise<BuildingFeature[]> => {
-  // Calculate number of tiles and check if there are too many
-  const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
-  if (tileCount > 9) {
-    console.warn(
-      `Skipping direct building data fetch: area too large (${tileCount} tiles, max allowed: 9)`
-    );
-    return [];
-  }
-
-  // Get tiles that cover the bounding box
-  const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-  console.log(
-    `Fetching building data from ${tiles.length} tiles using direct method`
-  );
-
-  const buildingFeatures: BuildingFeature[] = [];
-
-  try {
-    // Use OpenMapTiles or OSM vector tile source
-    const baseUrl = "https://wms.wheregroup.com/tileserver/tile/world-0-14";
-
-    await Promise.all(
-      tiles.map(async (tile) => {
-        const url = `${baseUrl}/${tile.z}/${tile.x}/${tile.y}.pbf`;
-
-        console.log(`Fetching buildings from: ${url}`);
-
-        try {
-          const response = await fetch(url);
-
-          if (!response.ok) {
-            console.warn(`Failed to fetch building tile: ${response.status}`);
-            return;
-          }
-
-          const arrayBuffer = await response.arrayBuffer();
-          const vectorTile = parseVectorTile(arrayBuffer);
-
-          // Building layer name in OpenMapTiles
-          const buildings = extractBuildingsFromVectorTile(
-            vectorTile,
-            tile,
-            "building"
-          );
-
-          // Add to collection
-          buildingFeatures.push(...buildings);
-        } catch (error) {
-          console.error(
-            `Error fetching building tile ${tile.z}/${tile.x}/${tile.y}:`,
-            error
-          );
-        }
-      })
-    );
-
-    console.log(`Found ${buildingFeatures.length} buildings`);
-    return buildingFeatures;
-  } catch (error) {
-    console.error("Error fetching building data:", error);
-    return [];
-  }
-};
-
 // Process building data to map to the terrain
 export const processBuildings = (
-  buildingFeatures: BuildingFeature[],
+  buildingFeatures: GeometryData[],
   elevationGrid: number[][],
   gridSize: GridSize,
   minLng: number,
@@ -365,12 +122,12 @@ export const processBuildings = (
 
   // Filter out invalid or empty building features
   buildingFeatures = buildingFeatures
-    .filter((feature) => feature && feature.geometry && feature.geometry.type === "Polygon")
-    .filter((feature) => feature.geometry.coordinates?.[0]?.length);
+    .filter((feature) => feature && feature.geometry && feature.type === "Polygon")
+    .filter((feature) => feature.geometry?.[0]?.length);
 
   buildingFeatures.forEach((feature) => {
     // Get building footprint
-    const footprint = feature.geometry.coordinates[0];
+    const footprint = feature.geometry;
     if (!footprint?.length) return;
 
     // Check if ALL points are within bounds
@@ -387,15 +144,10 @@ export const processBuildings = (
     // Determine building height
     let buildingHeight = 5;
     if (
-      feature.properties.render_height !== undefined &&
-      !isNaN(feature.properties.render_height)
+      feature.height !== undefined &&
+      !isNaN(feature.height)
     ) {
-      buildingHeight = feature.properties.render_height;
-    } else if (
-      feature.properties.height !== undefined &&
-      !isNaN(feature.properties.height)
-    ) {
-      buildingHeight = feature.properties.height;
+      buildingHeight = feature.height;
     }
     buildingHeight = Math.max(5, Math.min(500, buildingHeight));
 
@@ -506,28 +258,176 @@ export const getTilesForBbox = (
 };
 
 export interface FetchGeometryDataOptions {
-  bbox: [number, number, number, number];
+  vectorTiles: { tile: Tile, data: VectorTile }[];
   vtDataset: VtDataSet;
-  zoom: number;
   elevationGrid: number[][];
   gridSize: GridSize;
+  bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
 }
-/**
- * Fetch geometry data from a specified source layer in vector tiles and convert it to GeometryData.
- * @param minLng Minimum longitude of the bounding box.
- * @param minLat Minimum latitude of the bounding box.
- * @param maxLng Maximum longitude of the bounding box.
- * @param maxLat Maximum latitude of the bounding box.
- * @param zoom Zoom level for the tiles.
- * @param sourceLayer The source layer to extract geometry from.
- * @param elevationGrid The elevation grid for calculating base elevation.
- * @param gridSize The size of the elevation grid.
- * @returns An array of GeometryData.
- */
-export const fetchGeometryData = async (
+export const extractGeojsonFeaturesFromVectorTiles = async (
   config: FetchGeometryDataOptions
 ): Promise<GeometryData[]> => {
-  const { bbox, vtDataset, zoom, elevationGrid, gridSize } = config;
+  const { bbox, vectorTiles, vtDataset, elevationGrid, gridSize } = config;
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+
+  const geometryData: GeometryData[] = [];
+
+  vectorTiles.forEach((vtEl) => {
+    let vectorTile = vtEl.data;
+    let tile = vtEl.tile;
+
+    if (!vectorTile.layers || !vectorTile.layers[vtDataset.sourceLayer]) {
+      console.warn(`Source layer "${vtDataset.sourceLayer}" not found in tile`);
+      return;
+    }
+
+    const layer = vectorTile.layers[vtDataset.sourceLayer];
+    for (let i = 0; i < layer.length; i++) {
+      const feature = layer.feature(i).toGeoJSON(tile.x, tile.y, tile.z);
+
+      // Filter by subclass if specified
+      if (vtDataset?.subClass && vtDataset.subClass.indexOf(feature.properties?.subclass) !== -1) {
+        continue;
+      }
+
+      // Apply filter expression if provided
+      if (vtDataset.filter && !evaluateFilter(vtDataset.filter, feature)) {
+        continue;
+      }
+
+      if (feature.geometry.type === "Polygon") {
+        feature.geometry.coordinates.forEach((ring) => {
+          const baseElevation = calculateBaseElevation(
+            ring,
+            elevationGrid,
+            gridSize,
+            minLng,
+            minLat,
+            maxLng,
+            maxLat
+          );
+
+          geometryData.push({
+            geometry: ring,
+            type: "Polygon",
+            height: feature?.properties?.height || feature?.properties?.render_height || 10, // Default height
+            baseElevation,
+          });
+        });
+      } else if (feature.geometry.type === "MultiPolygon") {
+        feature.geometry.coordinates.forEach((polygon) => {
+          polygon.forEach((ring) => {
+            const baseElevation = calculateBaseElevation(
+              ring,
+              elevationGrid,
+              gridSize,
+              minLng,
+              minLat,
+              maxLng,
+              maxLat
+            );
+
+            geometryData.push({
+              geometry: ring,
+              type: "Polygon",
+              height: feature?.properties?.height || feature?.properties?.render_height || 10, // Default height
+              baseElevation,
+            });
+          });
+        });
+      } else if (feature.geometry.type === "LineString") {
+
+        //console.log("LineString geometry detected", feature.geometry);
+        const baseElevation = calculateBaseElevation(
+          feature.geometry.coordinates,
+          elevationGrid,
+          gridSize,
+          minLng,
+          minLat,
+          maxLng,
+          maxLat
+        );
+
+        geometryData.push({
+          geometry: feature.geometry.coordinates,
+          type: "LineString",
+          height: 0, // No height for lines
+          baseElevation,
+        });
+      } else if (feature.geometry.type === "Point") {
+        const baseElevation = calculateBaseElevation(
+          [feature.geometry.coordinates],
+          elevationGrid,
+          gridSize,
+          minLng,
+          minLat,
+          maxLng,
+          maxLat
+        );
+
+        geometryData.push({
+          geometry: [feature.geometry.coordinates],
+          type: "Point",
+          height: 0, // No height for points
+          baseElevation,
+        });
+      } else if (feature.geometry.type === "MultiLineString") {
+        //console.log("MultiLineString geometry detected", feature.geometry);
+        feature.geometry.coordinates.forEach((lineString) => {
+          const baseElevation = calculateBaseElevation(
+            lineString,
+            elevationGrid,
+            gridSize,
+            minLng,
+            minLat,
+            maxLng,
+            maxLat
+          );
+
+          geometryData.push({
+            geometry: lineString,
+            type: "LineString",
+            height: 0, // No height for lines
+            baseElevation,
+          });
+        });
+      } else if (feature.geometry.type === "MultiPoint") {
+        feature.geometry.coordinates.forEach((point) => {
+          const baseElevation = calculateBaseElevation(
+            [point],
+            elevationGrid,
+            gridSize,
+            minLng,
+            minLat,
+            maxLng,
+            maxLat
+          );
+
+          geometryData.push({
+            geometry: [point],
+            type: "Point",
+            height: 0, // No height for points
+            baseElevation,
+          });
+        });
+      }
+    }
+
+    console.log(`Fetched ${geometryData.length} polygons from source layer "${vtDataset.sourceLayer}"`);
+  });
+  return geometryData;
+};
+
+export interface FetchVtDataOptions {
+  bbox: number[]; // [minLng, minLat, maxLng, maxLat]
+  zoom: number;
+  gridSize: GridSize;
+}
+
+export const fetchVtData = async (
+  config: FetchVtDataOptions
+): Promise<{ tile: Tile, data: VectorTile }[]> => {
+  const { bbox, zoom, gridSize } = config;
   const [minLng, minLat, maxLng, maxLat] = bbox;
 
   if (!gridSize || !gridSize.width || !gridSize.height) {
@@ -546,173 +446,30 @@ export const fetchGeometryData = async (
   const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
   console.log(`Fetching geometry data from ${tiles.length} tiles`);
 
-  const geometryData: GeometryData[] = [];
+  let vtData: { tile: Tile, data: VectorTile[] }[] = [];
 
-  try {
-    await Promise.all(
-      tiles.map(async (tile) => {
-        const url = `https://wms.wheregroup.com/tileserver/tile/world-0-14/${tile.z}/${tile.x}/${tile.y}.pbf`;
+  return (await Promise.all(
+    tiles.map(async (tile) => {
+      const url = `https://wms.wheregroup.com/tileserver/tile/world-0-14/${tile.z}/${tile.x}/${tile.y}.pbf`;
 
-        console.log(`Fetching geometry from: ${url}`);
+      console.log(`Fetching geometry from: ${url}`);
 
-        try {
-          const response = await fetch(url);
-          if (!response.ok) {
-            console.warn(`Failed to fetch tile: ${response.status}`);
-            return;
-          }
-
-          const arrayBuffer = await response.arrayBuffer();
-          const vectorTile = parseVectorTile(arrayBuffer);
-
-          if (!vectorTile.layers || !vectorTile.layers[vtDataset.sourceLayer]) {
-            console.warn(`Source layer "${vtDataset.sourceLayer}" not found in tile`);
-            return;
-          }
-
-          const layer = vectorTile.layers[vtDataset.sourceLayer];
-          for (let i = 0; i < layer.length; i++) {
-            const feature = layer.feature(i).toGeoJSON(tile.x, tile.y, tile.z);
-
-            // Filter by subclass if specified
-            if (vtDataset?.subClass && vtDataset.subClass.indexOf(feature.properties.subclass) !== -1) {
-              continue;
-            }
-
-            // Apply filter expression if provided
-            if (vtDataset.filter && !evaluateFilter(vtDataset.filter, feature)) {
-              continue;
-            }
-
-            if (feature.geometry.type === "Polygon") {
-              feature.geometry.coordinates.forEach((ring) => {
-                const baseElevation = calculateBaseElevation(
-                  ring,
-                  elevationGrid,
-                  gridSize,
-                  minLng,
-                  minLat,
-                  maxLng,
-                  maxLat
-                );
-
-                geometryData.push({
-                  geometry: ring,
-                  type: "Polygon",
-                  height: 5, // Default height
-                  baseElevation,
-                });
-              });
-            } else if (feature.geometry.type === "MultiPolygon") {
-              feature.geometry.coordinates.forEach((polygon) => {
-                polygon.forEach((ring) => {
-                  const baseElevation = calculateBaseElevation(
-                    ring,
-                    elevationGrid,
-                    gridSize,
-                    minLng,
-                    minLat,
-                    maxLng,
-                    maxLat
-                  );
-
-                  geometryData.push({
-                    geometry: ring,
-                    type: "Polygon",
-                    height: 5, // Default height
-                    baseElevation,
-                  });
-                });
-              });
-            } else if (feature.geometry.type === "LineString") {
-
-              console.log("LineString geometry detected", feature.geometry);
-              const baseElevation = calculateBaseElevation(
-                feature.geometry.coordinates,
-                elevationGrid,
-                gridSize,
-                minLng,
-                minLat,
-                maxLng,
-                maxLat
-              );
-
-              geometryData.push({
-                geometry: feature.geometry.coordinates,
-                type: "LineString",
-                height: 0, // No height for lines
-                baseElevation,
-              });
-            } else if (feature.geometry.type === "Point") {
-              const baseElevation = calculateBaseElevation(
-                [feature.geometry.coordinates],
-                elevationGrid,
-                gridSize,
-                minLng,
-                minLat,
-                maxLng,
-                maxLat
-              );
-
-              geometryData.push({
-                geometry: [feature.geometry.coordinates],
-                type: "Point",
-                height: 0, // No height for points
-                baseElevation,
-              });
-            } else if (feature.geometry.type === "MultiLineString") {
-              console.log("MultiLineString geometry detected", feature.geometry);
-              feature.geometry.coordinates.forEach((lineString) => {
-                const baseElevation = calculateBaseElevation(
-                  lineString,
-                  elevationGrid,
-                  gridSize,
-                  minLng,
-                  minLat,
-                  maxLng,
-                  maxLat
-                );
-
-                geometryData.push({
-                  geometry: lineString,
-                  type: "LineString",
-                  height: 0, // No height for lines
-                  baseElevation,
-                });
-              });
-            } else if (feature.geometry.type === "MultiPoint") {
-              feature.geometry.coordinates.forEach((point) => {
-                const baseElevation = calculateBaseElevation(
-                  [point],
-                  elevationGrid,
-                  gridSize,
-                  minLng,
-                  minLat,
-                  maxLng,
-                  maxLat
-                );
-
-                geometryData.push({
-                  geometry: [point],
-                  type: "Point",
-                  height: 0, // No height for points
-                  baseElevation,
-                });
-              });
-            }
-          }
-        } catch (error) {
-          console.error(`Error fetching tile ${tile.z}/${tile.x}/${tile.y}:`, error);
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.warn(`Failed to fetch tile: ${response.status}`);
+          return;
         }
-      })
-    );
 
-    console.log(`Fetched ${geometryData.length} polygons from source layer "${vtDataset.sourceLayer}"`);
-    return geometryData;
-  } catch (error) {
-    console.error("Error fetching geometry data:", error);
-    return [];
-  }
+        const arrayBuffer = await response.arrayBuffer();
+        const vectorTile = parseVectorTile(arrayBuffer);
+
+        return { tile, data: vectorTile };
+      } catch (error) {
+        console.error(`Error fetching tile ${tile.z}/${tile.x}/${tile.y}:`, error);
+      }
+    })
+  )).filter((tile) => tile !== undefined);
 };
 
 /**
@@ -764,10 +521,10 @@ export function evaluateFilter(
   feature: GeoJSON.Feature
 ): boolean {
   if (!filter) return true;
-  
+
   // Get operator type (first element in the array)
   const operator = filter[0];
-  
+
   if (operator === "all") {
     // All conditions must be true
     for (let i = 1; i < filter.length; i++) {
@@ -788,7 +545,7 @@ export function evaluateFilter(
     return true;
   } else if (operator === "==") {
     const [_, key, value] = filter;
-    
+
     if (key === "$type") {
       return feature.geometry.type === value;
     } else {
@@ -796,7 +553,7 @@ export function evaluateFilter(
     }
   } else if (operator === "!=") {
     const [_, key, value] = filter;
-    
+
     if (key === "$type") {
       return feature.geometry.type !== value;
     } else {
@@ -804,7 +561,7 @@ export function evaluateFilter(
     }
   } else if (operator === "in") {
     const [_, key, ...values] = filter;
-    
+
     if (key === "$type") {
       return values.includes(feature.geometry.type);
     } else {
@@ -812,7 +569,7 @@ export function evaluateFilter(
     }
   } else if (operator === "!in") {
     const [_, key, ...values] = filter;
-    
+
     if (key === "$type") {
       return !values.includes(feature.geometry.type);
     } else {
@@ -825,7 +582,7 @@ export function evaluateFilter(
     const key = filter[1];
     return !(key in (feature.properties || {}));
   }
-  
+
   // Return true for unsupported operators
   console.warn(`Unsupported filter operator: ${operator}`);
   return true;

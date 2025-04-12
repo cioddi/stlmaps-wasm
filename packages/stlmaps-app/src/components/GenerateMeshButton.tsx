@@ -3,9 +3,11 @@ import { Slider, Typography, Box } from "@mui/material";
 import {
   GeometryData,
   calculateTileCount,
+  extractGeojsonFeaturesFromVectorTiles,
   fetchBuildingData,
   fetchBuildingDataDirect,
   fetchGeometryData,
+  fetchVtData,
   getTilesForBbox,
   processBuildings,
 } from "./VectorTileFunctions";
@@ -72,7 +74,7 @@ interface GenerateMeshButtonProps {
   bbox: GeoJSONFeature | undefined;
   setTerrainGeometry: (geometry: THREE.BufferGeometry | null) => void;
   setBuildingsGeometry: (geometry: THREE.BufferGeometry | null) => void;
-  setPolygonGeometries: (geometry: THREE.BufferGeometry[] | null) => void;
+  setPolygonGeometries: (geometry: VtDataSet[] | null) => void;
   // Optional props for controlling from parent component
   vtLayers?: VtDataSet[];
 }
@@ -171,28 +173,23 @@ export const GenerateMeshButton = function ({
       const buildingZoom = 14; // Force zoom 14 for buildings
       console.log(`Fetching buildings at fixed zoom level ${buildingZoom}`);
 
-      // Try both building data fetching methods
-      let buildingFeatures = await fetchBuildingData(
-        minLng,
-        minLat,
-        maxLng,
-        maxLat,
-        buildingZoom
-      );
+      // Fetch vt data for this bbox
+      let vtData= await fetchVtData({
+        bbox: [minLng, minLat, maxLng, maxLat],
+        zoom: 14,
+        gridSize,
+      });
 
-      // If primary method fails, try direct fetch
-      if (buildingFeatures.length === 0) {
-        console.log(
-          "No buildings found with primary method, trying direct fetch"
-        );
-        buildingFeatures = await fetchBuildingDataDirect(
-          minLng,
-          minLat,
-          maxLng,
-          maxLat,
-          buildingZoom
-        );
-      }
+      let buildingFeatures = await extractGeojsonFeaturesFromVectorTiles({
+        bbox: [minLng, minLat, maxLng, maxLat],
+        vectorTiles: vtData,
+        vtDataset: {
+          sourceLayer: "building",
+          color: new THREE.Color(0xaaaaaa), // Gray color for buildings
+        },
+        elevationGrid: elevationGrid,
+        gridSize
+      })
 
       console.log(`Successfully fetched ${buildingFeatures.length} buildings`);
 
@@ -245,14 +242,13 @@ export const GenerateMeshButton = function ({
         terrainEnabled: terrainSettings.enabled,
         terrainGeometryExists: !!terrainGeometry,
         buildingsEnabled: buildingSettings.enabled,
-        buildingsGeometryExists: !!buildingsGeometry
       });
 
       props.setTerrainGeometry(terrainSettings.enabled ? terrainGeometry : null);
       props.setBuildingsGeometry(buildingSettings.enabled ? buildingsGeometry : null);
 
       // Process vector tile layers
-      const vtPolygonGeometries: THREE.BufferGeometry[] = [];
+      const vtPolygonGeometries: VtDataSet[] = [];
 
       // Use layers from Zustand store
       for (let i = 0; i < vtLayers.length; i++) {
@@ -267,10 +263,10 @@ export const GenerateMeshButton = function ({
         console.log(`Fetching ${currentLayer.sourceLayer} data...`);
 
         // Fetch data for this layer
-        let layerData = await fetchGeometryData({
+        let layerData = await extractGeojsonFeaturesFromVectorTiles({
           bbox: [minLng, minLat, maxLng, maxLat],
           vtDataset: currentLayer,
-          zoom: 14,
+          vectorTiles: vtData,
           elevationGrid: processedElevationGrid,
           gridSize,
         });
@@ -298,8 +294,8 @@ export const GenerateMeshButton = function ({
             return feature;
           });
 
-          vtLayers[i].geometry = createPolygonGeometry({
-            polygons: layerData as PolygonData[],
+          const layerGeometry = createPolygonGeometry({
+            polygons: layerData as GeometryData[],
             terrainBaseHeight: terrainSettings.baseHeight,
             bbox: [minLng, minLat, maxLng, maxLat],
             elevationGrid: processedElevationGrid,
@@ -311,15 +307,17 @@ export const GenerateMeshButton = function ({
           });
 
           if (
-            vtLayers[i].geometry &&
-            vtLayers[i].geometry.attributes &&
-            vtLayers[i].geometry.attributes.position &&
-            vtLayers[i].geometry.attributes.position.count > 0
+            layerGeometry &&
+            layerGeometry.attributes &&
+            layerGeometry.attributes.position &&
+            layerGeometry.attributes.position.count > 0
           ) {
             console.log(
-              `Created valid ${vtLayers[i].sourceLayer} geometry with ${vtLayers[i].geometry.attributes.position.count} vertices`
+              `Created valid ${vtLayers[i].sourceLayer} geometry with ${layerGeometry.attributes.position.count} vertices`
             );
-            vtPolygonGeometries.push(vtLayers[i]);
+            vtPolygonGeometries.push({
+              ...vtLayers[i],
+            geometry: layerGeometry} as VtDataSet);
           } else {
             console.warn(
               `Failed to create valid ${vtLayers[i].sourceLayer} geometry or all features were clipped out`
@@ -331,8 +329,6 @@ export const GenerateMeshButton = function ({
       }
 
 
-      props.setTerrainGeometry(terrainGeometry);
-      props.setBuildingsGeometry(buildingsGeometry);
 
       // Create debug visualization for the terrain area if needed
       if (vtPolygonGeometries.length > 0) {
@@ -742,7 +738,7 @@ export const GenerateMeshButton = function ({
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [bbox, terrainSettings, buildingSettings, vtLayers]);
+  }, [bbox]); // Only trigger on bbox changes, not on store state changes
 
   return (
     <>
