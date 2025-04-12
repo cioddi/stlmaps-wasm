@@ -13,10 +13,10 @@ import * as THREE from "three";
 //@ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import createPolygonGeometry from "../three_maps/createPolygonGeometry";
-import { vtGeometries } from "../config/layers";
 import { createBuildingsGeometry } from "../three_maps/createBuildingsGeometry";
 import { createTerrainGeometry } from "../three_maps/createTerrainGeometry";
 import { bufferLineString } from "../three_maps/bufferLineString";
+import useLayerStore from "../stores/useLayerStore";
 
 // Define interfaces for our data structures
 export interface GridSize {
@@ -34,6 +34,7 @@ export interface VtDataSet {
   zOffset?: number;
   bufferSize?: number;
   filter?: any[]; // Add support for MapLibre-style filter expressions
+  enabled?: boolean;
 }
 
 export interface Tile {
@@ -72,26 +73,39 @@ interface GenerateMeshButtonProps {
   setTerrainGeometry: (geometry: THREE.BufferGeometry | null) => void;
   setBuildingsGeometry: (geometry: THREE.BufferGeometry | null) => void;
   setPolygonGeometries: (geometry: THREE.BufferGeometry[] | null) => void;
+  // Optional props for controlling from parent component
+  vtLayers?: VtDataSet[];
 }
-
 
 export const GenerateMeshButton = function ({
   bbox,
   ...props
 }: GenerateMeshButtonProps) {
   const [generating, setGenerating] = useState<boolean>(false);
-  const [verticalExaggeration, setVerticalExaggeration] =
-    useState<number>(0.06);
-  const [buildingScaleFactor, setBuildingScaleFactor] = useState<number>(0.5);
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
-    null
-  );
-  const [terrainBaseHeight, setTerrainBaseHeight] = useState<number>(5);
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+
+  // Get settings directly from Zustand store
+  const {
+    vtLayers,
+    terrainSettings,
+    buildingSettings,
+    setTerrainVerticalExaggeration,
+    setTerrainBaseHeight,
+    setBuildingScaleFactor
+  } = useLayerStore();
 
   // Modify generate3DModel function to include buildings
   const generate3DModel = async (): Promise<void> => {
-    if (!bbox) return;
+    if (!bbox) {
+      console.error("Cannot generate 3D model: bbox is undefined");
+      return;
+    }
+
+    console.log("%c 🏗️ STARTING 3D MODEL GENERATION", "background: #4CAF50; color: white; padding: 4px; font-weight: bold;");
     console.log("Generating 3D model for:", bbox);
+    console.log("Using terrain settings:", terrainSettings);
+    console.log("Using building settings:", buildingSettings);
+    console.log("Using vector tile layers:", vtLayers);
     setGenerating(true);
 
     try {
@@ -141,13 +155,17 @@ export const GenerateMeshButton = function ({
       console.log(`Downloading ${tiles.length} tiles`);
 
       // Download tile data
+      console.log("🌐 Downloading tile data for tiles:", tiles);
       const tileData = await Promise.all(
         tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
       );
+      console.log("✅ Successfully downloaded all tile data:", tileData.length);
 
       // Process elevation data to create a grid
+      console.log("🏔️ Processing elevation data...");
       const { elevationGrid, gridSize, minElevation, maxElevation } =
         processElevationData(tileData, tiles, minLng, minLat, maxLng, maxLat);
+      console.log("✅ Elevation data processed:", { gridSize, minElevation, maxElevation });
 
       // Always use zoom level 14 for building data, since that's where buildings are available
       const buildingZoom = 14; // Force zoom 14 for buildings
@@ -190,6 +208,8 @@ export const GenerateMeshButton = function ({
       );
 
       // Generate three.js geometry from elevation grid and buildings
+      console.log("🗻 Creating terrain geometry...");
+      // Use settings from the Zustand store
       let {
         geometry: terrainGeometry,
         processedElevationGrid,
@@ -200,15 +220,19 @@ export const GenerateMeshButton = function ({
         gridSize,
         minElevation,
         maxElevation,
-        verticalExaggeration,
-        terrainBaseHeight
+        terrainSettings.verticalExaggeration,
+        terrainSettings.baseHeight
       );
+      console.log("✅ Terrain geometry created successfully:", {
+        geometryExists: !!terrainGeometry,
+        vertexCount: terrainGeometry?.attributes?.position?.count || 0
+      });
 
       const buildingsGeometry = createBuildingsGeometry({
         buildings,
-        buildingScaleFactor,
-        verticalExaggeration,
-        terrainBaseHeight, // pass desired base height
+        buildingScaleFactor: buildingSettings.scaleFactor,
+        verticalExaggeration: terrainSettings.verticalExaggeration,
+        terrainBaseHeight: terrainSettings.baseHeight,
         bbox: [minLng, minLat, maxLng, maxLat],
         elevationGrid: processedElevationGrid,
         gridSize,
@@ -216,74 +240,93 @@ export const GenerateMeshButton = function ({
         maxElevation,
       });
 
+      // Set generated geometries based on settings
+      console.log("🔄 Setting output geometries:", {
+        terrainEnabled: terrainSettings.enabled,
+        terrainGeometryExists: !!terrainGeometry,
+        buildingsEnabled: buildingSettings.enabled,
+        buildingsGeometryExists: !!buildingsGeometry
+      });
 
+      props.setTerrainGeometry(terrainSettings.enabled ? terrainGeometry : null);
+      props.setBuildingsGeometry(buildingSettings.enabled ? buildingsGeometry : null);
+
+      // Process vector tile layers
       const vtPolygonGeometries: THREE.BufferGeometry[] = [];
 
-      for (let i = 0; i < vtGeometries.length; i++) {
-        console.log(`Fetching ${vtGeometries[i].sourceLayer} data...`);
-        vtGeometries[i].data = await fetchGeometryData({
+      // Use layers from Zustand store
+      for (let i = 0; i < vtLayers.length; i++) {
+        const currentLayer = vtLayers[i];
+
+        // Skip disabled layers
+        if (currentLayer.enabled === false) {
+          console.log(`Skipping disabled layer: ${currentLayer.sourceLayer}`);
+          continue;
+        }
+
+        console.log(`Fetching ${currentLayer.sourceLayer} data...`);
+
+        // Fetch data for this layer
+        let layerData = await fetchGeometryData({
           bbox: [minLng, minLat, maxLng, maxLat],
-          vtDataset: vtGeometries[i],
+          vtDataset: currentLayer,
           zoom: 14,
           elevationGrid: processedElevationGrid,
           gridSize,
         });
 
-        console.log(
-          `Received ${vtGeometries[i].data?.length || 0} ${vtGeometries[i].sourceLayer} features`
-        );
+        console.log(`Received ${layerData?.length || 0} ${currentLayer.sourceLayer} features`);
 
-        if (vtGeometries[i].data && vtGeometries[i].data.length > 0) {
+        if (layerData && layerData.length > 0) {
+          // Define clipping boundaries
           const TERRAIN_SIZE = 200;
           const clipBoundaries = {
             minX: -TERRAIN_SIZE / 2,
             maxX: TERRAIN_SIZE / 2,
             minY: -TERRAIN_SIZE / 2,
             maxY: TERRAIN_SIZE / 2,
-            minZ: terrainBaseHeight - 20,
-            maxZ: terrainBaseHeight + 100,
+            minZ: terrainSettings.baseHeight - 20,
+            maxZ: terrainSettings.baseHeight + 100,
           };
 
-          if (vtGeometries[i].sourceLayer === "transportation") {
-            // Convert LineString geometries to polygons using a buffer
-            vtGeometries[i].data = vtGeometries[i].data.map((feature) => {
-              if (feature.type === "LineString") {
-                const bufferedPolygon = bufferLineString(feature.geometry, vtGeometries[i].bufferSize || 1); // Adjust buffer size as needed
-                return { ...feature, type: 'Polygon', geometry: bufferedPolygon };
-              }
-              return feature;
-            });
-          }
+          // Convert LineString geometries to polygons using a buffer
+          layerData = layerData.map((feature) => {
+            if (feature.type === "LineString") {
+              const bufferedPolygon = bufferLineString(feature.geometry, vtLayers[i].bufferSize || 1); // Adjust buffer size as needed
+              return { ...feature, type: 'Polygon', geometry: bufferedPolygon };
+            }
+            return feature;
+          });
 
-          vtGeometries[i].geometry = createPolygonGeometry({
-            polygons: vtGeometries[i].data as PolygonData[],
-            terrainBaseHeight,
+          vtLayers[i].geometry = createPolygonGeometry({
+            polygons: layerData as PolygonData[],
+            terrainBaseHeight: terrainSettings.baseHeight,
             bbox: [minLng, minLat, maxLng, maxLat],
             elevationGrid: processedElevationGrid,
             gridSize,
             minElevation: processedMinElevation,
             maxElevation: processedMaxElevation,
-            vtDataSet: vtGeometries[i],
+            vtDataSet: vtLayers[i],
             useSameZOffset: true,
           });
 
           if (
-            vtGeometries[i].geometry &&
-            vtGeometries[i].geometry.attributes &&
-            vtGeometries[i].geometry.attributes.position &&
-            vtGeometries[i].geometry.attributes.position.count > 0
+            vtLayers[i].geometry &&
+            vtLayers[i].geometry.attributes &&
+            vtLayers[i].geometry.attributes.position &&
+            vtLayers[i].geometry.attributes.position.count > 0
           ) {
             console.log(
-              `Created valid ${vtGeometries[i].sourceLayer} geometry with ${vtGeometries[i].geometry.attributes.position.count} vertices`
+              `Created valid ${vtLayers[i].sourceLayer} geometry with ${vtLayers[i].geometry.attributes.position.count} vertices`
             );
-            vtPolygonGeometries.push(vtGeometries[i]);
+            vtPolygonGeometries.push(vtLayers[i]);
           } else {
             console.warn(
-              `Failed to create valid ${vtGeometries[i].sourceLayer} geometry or all features were clipped out`
+              `Failed to create valid ${vtLayers[i].sourceLayer} geometry or all features were clipped out`
             );
           }
         } else {
-          console.warn(`No ${vtGeometries[i].sourceLayer} features found`);
+          console.warn(`No ${vtLayers[i].sourceLayer} features found`);
         }
       }
 
@@ -304,7 +347,10 @@ export const GenerateMeshButton = function ({
         // Add the box geometry to the geometries (optional, for debugging only)
         //vtPolygonGeometries.push(boxGeometry);
       }
+
       props.setPolygonGeometries(vtPolygonGeometries);
+      console.log("3D model generation complete!");
+
     } catch (error) {
       console.error("Error generating 3D model:", error);
     } finally {
@@ -650,11 +696,12 @@ export const GenerateMeshButton = function ({
     return result;
   };
 
+  // Handle UI slider changes - connect to Zustand store
   const handleExaggerationChange = (
     event: Event,
     newValue: number | number[]
   ) => {
-    setVerticalExaggeration(newValue as number);
+    setTerrainVerticalExaggeration(newValue as number);
   };
 
   const handleBuildingScaleChange = (
@@ -664,11 +711,29 @@ export const GenerateMeshButton = function ({
     setBuildingScaleFactor(newValue as number);
   };
 
+  const handleBaseHeightChange = (
+    event: Event,
+    newValue: number | number[]
+  ) => {
+    setTerrainBaseHeight(newValue as number);
+  };
+
   useEffect(() => {
+    console.log("GenerateMeshButton dependencies changed:", {
+      hasBbox: !!bbox,
+      terrainEnabled: terrainSettings?.enabled,
+      buildingsEnabled: buildingSettings?.enabled,
+      layerCount: vtLayers?.length
+    });
+
     if (debounceTimer) clearTimeout(debounceTimer);
-    if (!bbox) return;
+    if (!bbox) {
+      console.warn("No bbox available, skipping model generation");
+      return;
+    }
 
     const timer = setTimeout(() => {
+      console.log("Debounce timer expired, generating 3D model");
       generate3DModel();
     }, 1000);
 
@@ -677,16 +742,16 @@ export const GenerateMeshButton = function ({
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [bbox, verticalExaggeration, buildingScaleFactor, terrainBaseHeight]);
+  }, [bbox, terrainSettings, buildingSettings, vtLayers]);
 
   return (
     <>
       <Box sx={{ mb: 2 }}>
         <Typography id="vertical-exaggeration-slider" gutterBottom>
-          Vertical Exaggeration: {verticalExaggeration.toFixed(6)}
+          Vertical Exaggeration: {terrainSettings.verticalExaggeration.toFixed(2)}
         </Typography>
         <Slider
-          value={verticalExaggeration}
+          value={terrainSettings.verticalExaggeration}
           onChange={handleExaggerationChange}
           aria-labelledby="vertical-exaggeration-slider"
           min={0.01}
@@ -702,10 +767,10 @@ export const GenerateMeshButton = function ({
 
       <Box sx={{ mb: 2 }}>
         <Typography id="building-scale-slider" gutterBottom>
-          Building Height Scale: {buildingScaleFactor}
+          Building Height Scale: {buildingSettings.scaleFactor}
         </Typography>
         <Slider
-          value={buildingScaleFactor}
+          value={buildingSettings.scaleFactor}
           onChange={handleBuildingScaleChange}
           aria-labelledby="building-scale-slider"
           min={0}
@@ -713,19 +778,19 @@ export const GenerateMeshButton = function ({
           step={0.1}
           marks={[
             { value: 0, label: "0" },
-            { value: 50, label: "50" },
-            { value: 100, label: "100" },
+            { value: 5, label: "5" },
+            { value: 15, label: "15" },
           ]}
         />
       </Box>
 
       <Box sx={{ mb: 2 }}>
         <Typography id="terrain-base-height-slider" gutterBottom>
-          Base Height: {terrainBaseHeight}
+          Base Height: {terrainSettings.baseHeight}
         </Typography>
         <Slider
-          value={terrainBaseHeight}
-          onChange={(e, newVal) => setTerrainBaseHeight(newVal as number)}
+          value={terrainSettings.baseHeight}
+          onChange={handleBaseHeightChange}
           min={0}
           max={100}
           step={1}

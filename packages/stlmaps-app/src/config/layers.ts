@@ -7,6 +7,7 @@ export const vtGeometries: VtDataSet[] = [
         color: new THREE.Color(0x76bcff), // Lighter blue color for water
         extrusionDepth: 1, // Thin extrusion for water
         zOffset: -0.5,
+        enabled: true,
     },
     {
         sourceLayer: "landcover",
@@ -14,6 +15,7 @@ export const vtGeometries: VtDataSet[] = [
         extrusionDepth: 1.2, // Thin extrusion for landuse
         zOffset: -0.3,
         bufferSize: 2,
+        enabled: true,
     },
     {
         sourceLayer: "park",
@@ -21,6 +23,7 @@ export const vtGeometries: VtDataSet[] = [
         extrusionDepth: 0.8, // Thin extrusion for landuse
         zOffset: -0.3,
         bufferSize: 2,
+        enabled: true,
     },
     {
         sourceLayer: "landuse",
@@ -28,6 +31,7 @@ export const vtGeometries: VtDataSet[] = [
         extrusionDepth: 0.8, // Thin extrusion for landuse
         zOffset: -0.3,
         bufferSize: 2,
+        enabled: true,
         // Filter to include green areas
         filter: [
             "in",
@@ -41,6 +45,7 @@ export const vtGeometries: VtDataSet[] = [
         color: new THREE.Color(0xaaaaaa), // Gray color for streets
         zOffset: -0.2,
         bufferSize: 2,
+        enabled: true,
         // Updated filter to include more street types
         filter: [
             "all",

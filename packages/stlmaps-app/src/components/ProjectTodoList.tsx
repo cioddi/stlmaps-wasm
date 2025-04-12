@@ -94,7 +94,6 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                 { title: "Add water polygons", done: true },
                 { title: "Implement road networks (LineString support)", done: true },
                 { title: "Add land use polygons", done: true },
-                { title: "Add trees (Point support)", done: false },
                 { title: "Support MapLibre style specification", done: false },
             ]
         },
