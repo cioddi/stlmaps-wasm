@@ -4,9 +4,6 @@ import {
   GeometryData,
   calculateTileCount,
   extractGeojsonFeaturesFromVectorTiles,
-  fetchBuildingData,
-  fetchBuildingDataDirect,
-  fetchGeometryData,
   fetchVtData,
   getTilesForBbox,
   processBuildings,
@@ -36,6 +33,8 @@ export interface VtDataSet {
   zOffset?: number;
   bufferSize?: number;
   filter?: any[]; // Add support for MapLibre-style filter expressions
+  useAdaptiveScaleFactor?: boolean;
+  heightScaleFactor?: number;
   enabled?: boolean;
 }
 
@@ -71,29 +70,24 @@ interface ElevationProcessingResult {
 }
 
 interface GenerateMeshButtonProps {
-  bbox: GeoJSONFeature | undefined;
-  setTerrainGeometry: (geometry: THREE.BufferGeometry | null) => void;
-  setBuildingsGeometry: (geometry: THREE.BufferGeometry | null) => void;
-  setPolygonGeometries: (geometry: VtDataSet[] | null) => void;
-  // Optional props for controlling from parent component
-  vtLayers?: VtDataSet[];
 }
 
-export const GenerateMeshButton = function ({
-  bbox,
-  ...props
-}: GenerateMeshButtonProps) {
+export const GenerateMeshButton = function () {
   const [generating, setGenerating] = useState<boolean>(false);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
-  // Get settings directly from Zustand store
+  // Get settings and setter functions directly from Zustand store
   const {
+    bbox,
     vtLayers,
     terrainSettings,
     buildingSettings,
     setTerrainVerticalExaggeration,
     setTerrainBaseHeight,
-    setBuildingScaleFactor
+    setBuildingScaleFactor,
+    setTerrainGeometry,
+    setBuildingsGeometry,
+    setPolygonGeometries
   } = useLayerStore();
 
   // Modify generate3DModel function to include buildings
@@ -174,35 +168,11 @@ export const GenerateMeshButton = function ({
       console.log(`Fetching buildings at fixed zoom level ${buildingZoom}`);
 
       // Fetch vt data for this bbox
-      let vtData= await fetchVtData({
+      let vtData = await fetchVtData({
         bbox: [minLng, minLat, maxLng, maxLat],
         zoom: 14,
         gridSize,
       });
-
-      let buildingFeatures = await extractGeojsonFeaturesFromVectorTiles({
-        bbox: [minLng, minLat, maxLng, maxLat],
-        vectorTiles: vtData,
-        vtDataset: {
-          sourceLayer: "building",
-          color: new THREE.Color(0xaaaaaa), // Gray color for buildings
-        },
-        elevationGrid: elevationGrid,
-        gridSize
-      })
-
-      console.log(`Successfully fetched ${buildingFeatures.length} buildings`);
-
-      // Process building data
-      const buildings = processBuildings(
-        buildingFeatures,
-        elevationGrid,
-        gridSize,
-        minLng,
-        minLat,
-        maxLng,
-        maxLat
-      );
 
       // Generate three.js geometry from elevation grid and buildings
       console.log("🗻 Creating terrain geometry...");
@@ -225,18 +195,6 @@ export const GenerateMeshButton = function ({
         vertexCount: terrainGeometry?.attributes?.position?.count || 0
       });
 
-      const buildingsGeometry = createBuildingsGeometry({
-        buildings,
-        buildingScaleFactor: buildingSettings.scaleFactor,
-        verticalExaggeration: terrainSettings.verticalExaggeration,
-        terrainBaseHeight: terrainSettings.baseHeight,
-        bbox: [minLng, minLat, maxLng, maxLat],
-        elevationGrid: processedElevationGrid,
-        gridSize,
-        minElevation,
-        maxElevation,
-      });
-
       // Set generated geometries based on settings
       console.log("🔄 Setting output geometries:", {
         terrainEnabled: terrainSettings.enabled,
@@ -244,8 +202,7 @@ export const GenerateMeshButton = function ({
         buildingsEnabled: buildingSettings.enabled,
       });
 
-      props.setTerrainGeometry(terrainSettings.enabled ? terrainGeometry : null);
-      props.setBuildingsGeometry(buildingSettings.enabled ? buildingsGeometry : null);
+      setTerrainGeometry(terrainSettings.enabled ? terrainGeometry : undefined);
 
       // Process vector tile layers
       const vtPolygonGeometries: VtDataSet[] = [];
@@ -317,7 +274,8 @@ export const GenerateMeshButton = function ({
             );
             vtPolygonGeometries.push({
               ...vtLayers[i],
-            geometry: layerGeometry} as VtDataSet);
+              geometry: layerGeometry
+            } as VtDataSet);
           } else {
             console.warn(
               `Failed to create valid ${vtLayers[i].sourceLayer} geometry or all features were clipped out`
@@ -344,7 +302,7 @@ export const GenerateMeshButton = function ({
         //vtPolygonGeometries.push(boxGeometry);
       }
 
-      props.setPolygonGeometries(vtPolygonGeometries);
+      setPolygonGeometries(vtPolygonGeometries);
       console.log("3D model generation complete!");
 
     } catch (error) {
@@ -692,28 +650,6 @@ export const GenerateMeshButton = function ({
     return result;
   };
 
-  // Handle UI slider changes - connect to Zustand store
-  const handleExaggerationChange = (
-    event: Event,
-    newValue: number | number[]
-  ) => {
-    setTerrainVerticalExaggeration(newValue as number);
-  };
-
-  const handleBuildingScaleChange = (
-    event: Event,
-    newValue: number | number[]
-  ) => {
-    setBuildingScaleFactor(newValue as number);
-  };
-
-  const handleBaseHeightChange = (
-    event: Event,
-    newValue: number | number[]
-  ) => {
-    setTerrainBaseHeight(newValue as number);
-  };
-
   useEffect(() => {
     console.log("GenerateMeshButton dependencies changed:", {
       hasBbox: !!bbox,
@@ -742,56 +678,6 @@ export const GenerateMeshButton = function ({
 
   return (
     <>
-      <Box sx={{ mb: 2 }}>
-        <Typography id="vertical-exaggeration-slider" gutterBottom>
-          Vertical Exaggeration: {terrainSettings.verticalExaggeration.toFixed(2)}
-        </Typography>
-        <Slider
-          value={terrainSettings.verticalExaggeration}
-          onChange={handleExaggerationChange}
-          aria-labelledby="vertical-exaggeration-slider"
-          min={0.01}
-          max={1.0}
-          step={0.01}
-          marks={[
-            { value: 0.01, label: "Min" },
-            { value: 0.5, label: "Med" },
-            { value: 1.0, label: "Max" },
-          ]}
-        />
-      </Box>
-
-      <Box sx={{ mb: 2 }}>
-        <Typography id="building-scale-slider" gutterBottom>
-          Building Height Scale: {buildingSettings.scaleFactor}
-        </Typography>
-        <Slider
-          value={buildingSettings.scaleFactor}
-          onChange={handleBuildingScaleChange}
-          aria-labelledby="building-scale-slider"
-          min={0}
-          max={15}
-          step={0.1}
-          marks={[
-            { value: 0, label: "0" },
-            { value: 5, label: "5" },
-            { value: 15, label: "15" },
-          ]}
-        />
-      </Box>
-
-      <Box sx={{ mb: 2 }}>
-        <Typography id="terrain-base-height-slider" gutterBottom>
-          Base Height: {terrainSettings.baseHeight}
-        </Typography>
-        <Slider
-          value={terrainSettings.baseHeight}
-          onChange={handleBaseHeightChange}
-          min={0}
-          max={100}
-          step={1}
-        />
-      </Box>
     </>
   );
 };

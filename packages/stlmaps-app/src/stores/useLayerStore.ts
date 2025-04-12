@@ -21,6 +21,11 @@ interface LayerState {
   buildingSettings: BuildingSettings;
   bbox: GeoJSON.Feature | undefined;
   
+  // Geometry data
+  polygonGeometries: VtDataSet[] | null;
+  terrainGeometry: THREE.BufferGeometry | undefined;
+  buildingsGeometry: THREE.BufferGeometry | undefined;
+  
   // Actions for layers
   setVtLayers: (layers: VtDataSet[]) => void;
   updateVtLayer: (index: number, updates: Partial<VtDataSet>) => void;
@@ -43,6 +48,11 @@ interface LayerState {
   setBuildingSettings: (settings: Partial<BuildingSettings>) => void;
   toggleBuildingsEnabled: () => void;
   setBuildingScaleFactor: (value: number) => void;
+  
+  // Geometry actions
+  setPolygonGeometries: (geometries: VtDataSet[] | null) => void;
+  setTerrainGeometry: (geometry: THREE.BufferGeometry | undefined) => void;
+  setBuildingsGeometry: (geometry: THREE.BufferGeometry | undefined) => void;
   
   // Reset actions
   resetToDefaults: () => void;
@@ -71,6 +81,11 @@ const useLayerStore = create<LayerState>((set) => ({
     scaleFactor: 0.5
   },
   bbox: undefined,
+  
+  // Geometry states
+  polygonGeometries: null,
+  terrainGeometry: undefined,
+  buildingsGeometry: undefined,
   
   // Layer actions
   setVtLayers: (layers) => set({ vtLayers: layers }),
@@ -168,6 +183,11 @@ const useLayerStore = create<LayerState>((set) => ({
   // Bbox action
   setBbox: (bbox) => set({ bbox }),
   
+  // Geometry actions
+  setPolygonGeometries: (polygonGeometries) => set({ polygonGeometries }),
+  setTerrainGeometry: (terrainGeometry) => set({ terrainGeometry }),
+  setBuildingsGeometry: (buildingsGeometry) => set({ buildingsGeometry }),
+  
   // Reset to defaults
   resetToDefaults: () => set({
     vtLayers: [...defaultVtGeometries],
@@ -180,7 +200,10 @@ const useLayerStore = create<LayerState>((set) => ({
       enabled: true,
       scaleFactor: 0.5
     },
-    bbox: undefined
+    bbox: undefined,
+    polygonGeometries: null,
+    terrainGeometry: undefined,
+    buildingsGeometry: undefined
   })
 }));
 

@@ -73,7 +73,7 @@ const extractBuildingsFromVectorTile = (
 
       // For MultiPolygon, we treat each polygon as a separate building
       if (geojson.geometry.type === "MultiPolygon") {
-        geojson.geometry.coordinates.forEach((polygonCoords) => {
+        geojson.geometry.coordinates.forEach((polygonCoords:number[][]) => {
           features.push({
             geometry: polygonCoords,
 
@@ -257,7 +257,7 @@ export const getTilesForBbox = (
   return tiles;
 };
 
-export interface FetchGeometryDataOptions {
+export interface ExtractGeojsonFeaturesFromVectorTilesOptions {
   vectorTiles: { tile: Tile, data: VectorTile }[];
   vtDataset: VtDataSet;
   elevationGrid: number[][];
@@ -265,7 +265,7 @@ export interface FetchGeometryDataOptions {
   bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
 }
 export const extractGeojsonFeaturesFromVectorTiles = async (
-  config: FetchGeometryDataOptions
+  config: ExtractGeojsonFeaturesFromVectorTilesOptions
 ): Promise<GeometryData[]> => {
   const { bbox, vectorTiles, vtDataset, elevationGrid, gridSize } = config;
   const [minLng, minLat, maxLng, maxLat] = bbox;
@@ -310,7 +310,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
           geometryData.push({
             geometry: ring,
             type: "Polygon",
-            height: feature?.properties?.height || feature?.properties?.render_height || 10, // Default height
+            height: feature?.properties?.height || feature?.properties?.render_height || 5, // Default height
             baseElevation,
           });
         });
@@ -330,7 +330,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
             geometryData.push({
               geometry: ring,
               type: "Polygon",
-              height: feature?.properties?.height || feature?.properties?.render_height || 10, // Default height
+              height: feature?.properties?.height || feature?.properties?.render_height || 5, // Default height
               baseElevation,
             });
           });

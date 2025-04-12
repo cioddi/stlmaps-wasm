@@ -1,10 +1,12 @@
 import * as THREE from "three";
-import { PolygonData } from "../components/VectorTileFunctions";
 import { GridSize, VtDataSet } from "../components/GenerateMeshButton";
 import { CSG } from "three-csg-ts";
+// @ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { sampleTerrainElevationAtPoint } from "./sampleTerrainElevationAtPoint";
 import { transformToMeshCoordinates } from "./transformToMeshCoordinates";
+import { GeometryData } from "../components/VectorTileFunctions";
+import { calculateAdaptiveScaleFactor } from "./calculateAdaptiveScaleFactor";
 
 const BUILDING_SUBMERGE_OFFSET = 0.01;
 // Flag to enable/disable CSG operations - set to false by default due to errors
@@ -21,7 +23,7 @@ function createPolygonGeometry({
   vtDataSet,
   useSameZOffset = false,
 }: {
-  polygons: PolygonData[];
+  polygons: GeometryData[];
   terrainBaseHeight: number;
   bbox: number[];
   elevationGrid: number[][];
@@ -137,15 +139,15 @@ function createPolygonGeometry({
         try {
           // Perform CSG intersection without colors
           const result = CSG.intersect(mesh, clipBoxMesh);
-            // Check if any point in the resulting geometry has a z-coordinate below 0
-            const positions = result.geometry.attributes.position.array;
-            for (let i = 2; i < positions.length; i += 3) {
+          // Check if any point in the resulting geometry has a z-coordinate below 0
+          const positions = result.geometry.attributes.position.array;
+          for (let i = 2; i < positions.length; i += 3) {
             if (positions[i] < 0) {
-              console.warn("Resulting geometry has a point below z=0, returning original geometry", geometry, );
+              console.warn("Resulting geometry has a point below z=0, returning original geometry", geometry,);
               return null;
               return geometry;
             }
-            }
+          }
           if (
             result &&
             result.geometry &&
@@ -199,15 +201,16 @@ function createPolygonGeometry({
   // Process each polygon individually
   polygons.forEach((poly, polyIndex) => {
     //poly.height ||
-    const height = vtDataSet.extrusionDepth ||  (datasetHighestZ - datasetLowestZ + 0.1);
-    const footprint: PolygonData["geometry"] = poly.geometry;
+    const height = vtDataSet.extrusionDepth || poly.height || (datasetHighestZ - datasetLowestZ + 0.1);
+
+    const footprint: GeometryData["geometry"] = poly.geometry;
 
     if (!footprint || footprint.length < 3) {
       return;
     }
 
     // Ensure polygons are oriented clockwise
-    const path2D = footprint.map(([lng, lat]) => new THREE.Vector2(lng, lat));
+    const path2D = footprint.map(([lng, lat]: number[]) => new THREE.Vector2(lng, lat));
     if (!THREE.ShapeUtils.isClockWise(path2D)) {
       path2D.reverse();
     }
@@ -217,7 +220,7 @@ function createPolygonGeometry({
     let highestTerrainZ = -Infinity;
     const meshCoords: [number, number][] = [];
 
-    path2D.forEach((vec2) => {
+    path2D.forEach((vec2: THREE.Vector2) => {
       const lng = vec2.x;
       const lat = vec2.y;
       const tZ = sampleTerrainElevationAtPoint(
@@ -231,7 +234,7 @@ function createPolygonGeometry({
       );
       lowestTerrainZ = Math.min(lowestTerrainZ, tZ);
       highestTerrainZ = Math.max(highestTerrainZ, tZ);
-      meshCoords.push(transformToMeshCoordinates({lng, lat, bbox: [minLng, minLat, maxLng, maxLat]}));
+      meshCoords.push(transformToMeshCoordinates({ lng, lat, bbox: [minLng, minLat, maxLng, maxLat] }));
     });
 
     // Use dataset-wide elevation if the polygon's terrain difference is very small
@@ -243,7 +246,23 @@ function createPolygonGeometry({
     }
 
     // For water, use a fixed shallow depth; for other features, use the provided height
-    const validatedHeight = Math.min(Math.max(height, MIN_HEIGHT), MAX_HEIGHT);
+    let validatedHeight = Math.min(Math.max(height, MIN_HEIGHT), MAX_HEIGHT);
+    if (vtDataSet.useAdaptiveScaleFactor) {
+
+      const adaptiveScaleFactor = calculateAdaptiveScaleFactor(
+        minLng,
+        minLat,
+        maxLng,
+        maxLat,
+        minElevation,
+        maxElevation
+      );
+      validatedHeight = validatedHeight * adaptiveScaleFactor;
+    }
+
+    if (vtDataSet.heightScaleFactor) {
+      validatedHeight = validatedHeight * vtDataSet.heightScaleFactor;
+    }
     const terrainDifference = highestTerrainZ - lowestTerrainZ;
 
     // For water, position it slightly below terrain; for other features, use terrain base height

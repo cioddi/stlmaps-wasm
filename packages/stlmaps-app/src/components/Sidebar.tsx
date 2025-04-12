@@ -16,8 +16,9 @@ import LayerList from "./LayerList";
 import useLayerStore from "../stores/useLayerStore";
 
 const SIDEBAR_WIDTH = 440;
-export const Sidebar = ({bboxCenter}:{bboxCenter:[number,number]}) => {
-  const { terrainSettings, buildingSettings, vtLayers, bbox, setBbox } = useLayerStore();
+
+export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
+    const { terrainSettings, buildingSettings, vtLayers, bbox, setBbox } = useLayerStore();
     const [openAttribution, setOpenAttribution] = useState(false);
     const [openTodoList, setOpenTodoList] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
@@ -70,21 +71,10 @@ export const Sidebar = ({bboxCenter}:{bboxCenter:[number,number]}) => {
                     }}
                 />
                 <Box sx={{ mt: 2 }}>
-                    <GenerateMeshButton
-                        bbox={bbox}
-                        setTerrainGeometry={setTerrainGeometry}
-                        setBuildingsGeometry={setBuildingsGeometry}
-                        setPolygonGeometries={setPolygonGeometries}
-                        vtLayers={vtLayers}
-                    />
+                    <GenerateMeshButton />
                 </Box>
-                {terrainGeometry && (
-                    <ExportButtons
-                        terrainGeometry={terrainSettings.enabled ? terrainGeometry : null}
-                        buildingsGeometry={buildingSettings.enabled ? buildingsGeometry : null}
-                        polygonGeometries={polygonGeometries}
-                    />
-                )}
+                <ExportButtons
+                />
 
                 <Box sx={{ mt: 2 }}>
                     <Button

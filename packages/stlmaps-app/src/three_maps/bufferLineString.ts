@@ -1,6 +1,6 @@
 import * as turf from "@turf/turf";
 
-export function bufferLineString(geometry: { coordinates: number[][]; }, bufferSize: number) {
+export function bufferLineString(geometry:  number[][], bufferSize: number) {
 
 
     // Convert the LineString to a Turf.js feature

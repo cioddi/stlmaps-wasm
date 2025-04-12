@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button, Box } from "@mui/material";
 import * as THREE from "three";
+import useLayerStore from "../stores/useLayerStore";
 // @ts-expect-error
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 // @ts-expect-error
@@ -8,17 +9,9 @@ import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 // @ts-expect-error
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 
-interface ExportButtonsProps {
-  terrainGeometry: THREE.BufferGeometry | null;
-  buildingsGeometry: THREE.BufferGeometry | null;
-  polygonGeometries?: THREE.BufferGeometry[] | null;
-}
-
-const ExportButtons: React.FC<ExportButtonsProps> = ({
-  terrainGeometry,
-  buildingsGeometry,
-  polygonGeometries
-}) => {
+const ExportButtons: React.FC = () => {
+  // Get geometry data directly from the Zustand store
+  const { terrainGeometry, buildingsGeometry, polygonGeometries } = useLayerStore();
   const [objDownloadUrl, setObjDownloadUrl] = useState<string>("");
   const [stlDownloadUrl, setStlDownloadUrl] = useState<string>("");
   const [gltfDownloadUrl, setGltfDownloadUrl] = useState<string>("");
@@ -124,7 +117,7 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     // Add other polygon geometries
     if (polygonGeometries && polygonGeometries.length > 0) {
       polygonGeometries.forEach((vtDataset, index) => {
-        if (!vtDataset.geometry) return;
+        if (!vtDataset?.geometry) return;
         
         const geomToUse = validateGeometries ? validateGeometry(vtDataset.geometry) : vtDataset.geometry;
         const material = new THREE.MeshStandardMaterial({

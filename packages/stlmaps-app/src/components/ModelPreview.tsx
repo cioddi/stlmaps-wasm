@@ -1,31 +1,22 @@
 import { useEffect, useRef, useState, version } from "react";
 import { CircularProgress } from "@mui/material";
 import * as THREE from "three";
+// @ts-expect-error
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
-import { Vertex } from "three-csg-ts/lib/esm/Vertex";
-import { VtDataSet } from "./GenerateMeshButton";
+import useLayerStore from "../stores/useLayerStore";
 
 interface ModelPreviewProps {
-  terrainGeometry: THREE.BufferGeometry | null;
-  buildingsGeometry: THREE.BufferGeometry | null;
-  polygonGeometry: VtDataSet[] | null;
-  open: boolean;
-  onClose: () => void;
 }
 
 const ModelPreview = ({
-  terrainGeometry,
-  buildingsGeometry,
-  polygonGeometries,
-  open,
-  onClose,
 }: ModelPreviewProps) => {
+  // Get geometry data directly from the Zustand store
+  const { terrainGeometry, buildingsGeometry, polygonGeometries } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [dialogMounted, setDialogMounted] = useState<boolean>(false);
 
   // Clean up previous renderer when component unmounts or dialog closes
   useEffect(() => {
@@ -42,13 +33,6 @@ const ModelPreview = ({
       }
     };
   }, []);
-
-  // Reset dialog mounted state when dialog opens/closes
-  useEffect(() => {
-    if (!open) {
-      setDialogMounted(false);
-    }
-  }, [open]);
 
   // Initialize Three.js scene when dialog is fully mounted
   useEffect(() => {
@@ -197,7 +181,7 @@ const ModelPreview = ({
             buildingsGeometry,
             new THREE.MeshPhongMaterial({
               color: new THREE.Color(0xe1e1e1), // Light sky blue
-              VertexColors: true,
+              vertexColors: true,
               flatShading: true, // Use flat shading for better definition
               shininess: 0, // Remove shininess for a matte look
             })
@@ -236,7 +220,8 @@ const ModelPreview = ({
           rendererRef.current.render(scene, camera);
         };
 
-        document.camera = camera; // Expose camera to global scope for debugging
+        // @ts-expect-error
+        document.debug_camera = camera; // Expose camera to global scope for debugging
         animate();
         console.log("Animation started");
         setLoading(false);

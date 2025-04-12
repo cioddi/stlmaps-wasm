@@ -1,4 +1,4 @@
-import React, { useState, Suspense} from "react";
+import React, { useState, Suspense } from "react";
 import {
   AppBar,
   Toolbar,
@@ -14,22 +14,22 @@ import CitySearch from "./components/CitySearch";
 import useLayerStore from "./stores/useLayerStore";
 import { Sidebar } from "./components/Sidebar";
 
-const mapCenter = [-74.00599999999997, 40.71279999999999];
+const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
+const SIDEBAR_WIDTH = 440;
 
 const App: React.FC = () => {
-  const [polygonGeometries, setPolygonGeometries] = useState<
-    THREE.BufferGeometry[] | null
-  >(null);
-  const [terrainGeometry, setTerrainGeometry] =
-    useState<THREE.BufferGeometry | null>(null);
-  const [buildingsGeometry, setBuildingsGeometry] =
-    useState<THREE.BufferGeometry | null>(null);
   const [bboxCenter, setBboxCenter] = useState<[number, number]>([
     -74.00599999999997, 40.71279999999999,
   ]);
 
-  // Get layer settings from Zustand store
-  const { terrainSettings, buildingSettings, vtLayers, bbox, setBbox } = useLayerStore();
+  // Get layer settings and geometries from Zustand store
+  const {
+    terrainSettings,
+    buildingSettings,
+    polygonGeometries,
+    terrainGeometry,
+    buildingsGeometry
+  } = useLayerStore();
 
 
   return (
@@ -94,18 +94,9 @@ const App: React.FC = () => {
           sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 10000 }}
         >
           <Suspense fallback={<CircularProgress />}>
-            {(terrainGeometry || buildingsGeometry) && (
+            {(terrainGeometry) && (
               <>
-                {console.log("⚙️ Rendering ModelPreview with geometries:", {
-                  terrainGeometry: !!terrainGeometry,
-                  buildingsGeometry: !!buildingsGeometry,
-                  polygonGeometries: polygonGeometries?.length || 0
-                })}
-                <ModelPreview
-                  terrainGeometry={terrainSettings.enabled ? terrainGeometry : null}
-                  buildingsGeometry={buildingSettings.enabled ? buildingsGeometry : null}
-                  polygonGeometries={polygonGeometries}
-                />
+                <ModelPreview />
               </>
             )}
           </Suspense>
