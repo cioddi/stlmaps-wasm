@@ -6,6 +6,8 @@ import {
     Drawer,
     Tab,
     Tabs,
+    useTheme,
+    useMediaQuery,
 } from "@mui/material";
 import BboxSelector from "./BboxSelector";
 import { GenerateMeshButton } from "./GenerateMeshButton";
@@ -22,15 +24,17 @@ export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
     const [openAttribution, setOpenAttribution] = useState(false);
     const [openTodoList, setOpenTodoList] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
     return (
         <Drawer
             variant="permanent"
             sx={{
-                width: SIDEBAR_WIDTH,
+                width: { xs: '100%', sm: SIDEBAR_WIDTH },
                 flexShrink: 0,
                 [`& .MuiDrawer-paper`]: {
-                    width: SIDEBAR_WIDTH,
+                    width: { xs: '100%', sm: SIDEBAR_WIDTH },
                     boxSizing: "border-box",
                 },
             }}

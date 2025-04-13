@@ -105,14 +105,13 @@ const ModelPreview = ({
         rendererRef.current.physicallyCorrectLights = true;
         containerRef.current.appendChild(rendererRef.current.domElement);
 
-        // Setup camera for dramatic and professional angles
+        // Setup camera with proper field of view
         const camera = new THREE.PerspectiveCamera(
-          42, // Cinematic field of view
+          45, // Standard field of view
           width / height,
           0.1,
           2000
         );
-        camera.position.z = 5;
 
         // Add orbit controls with cinematographer settings
         const controls = new OrbitControls(
@@ -134,7 +133,7 @@ const ModelPreview = ({
         // Add bloom effect for that glossy bubblegum highlight glow
         const bloomPass = new UnrealBloomPass(
           new THREE.Vector2(width, height),
-          0.4,    // bloom strength
+          0.3,    // bloom strength
           0.35,   // bloom radius
           0.9     // bloom threshold
         );
@@ -284,12 +283,52 @@ const ModelPreview = ({
           camera.position.copy(cameraPosition);
           controls.target.copy(cameraTarget);
         } else {
-          // Use dramatic cinematic default position
-          camera.position.set(-80, -140, 60);
-          controls.target.set(0, 0, 5);
+          // Set a default true top-down view
+          camera.position.set(0, -200, 100);
+          controls.target.set(0, 0, 0);
         }
         
+        // Set appropriate field of view
+        camera.fov = 45;
         camera.updateProjectionMatrix();
+        
+        // Add camera helper buttons for quick positioning
+        const addCameraPositionButton = (label: string, position: [number, number, number]) => {
+          const button = document.createElement('button');
+          button.textContent = label;
+          button.style.position = 'absolute';
+          button.style.bottom = '10px';
+          button.style.padding = '8px 12px';
+          button.style.margin = '0 5px';
+          button.style.backgroundColor = '#2196F3';
+          button.style.color = 'white';
+          button.style.border = 'none';
+          button.style.borderRadius = '4px';
+          button.style.cursor = 'pointer';
+          button.style.zIndex = '100';
+          button.style.fontSize = '12px';
+          button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+          
+          button.addEventListener('click', () => {
+            const [x, y, z] = position;
+            camera.position.set(x, y, z);
+            controls.target.set(0, 0, 0);
+            camera.updateProjectionMatrix();
+          });
+          
+          if (containerRef.current) {
+            containerRef.current.appendChild(button);
+          }
+          
+          return button;
+        };
+        
+        // Position buttons at the bottom of the container
+        const topButton = addCameraPositionButton('Top', [0, 50, 200]);
+        topButton.style.left = '10px';
+        
+        const frontButton = addCameraPositionButton('Initial', [0, -200, 100]);
+        frontButton.style.left = '60px';
 
         // Animation loop with enhanced rendering
         const animate = () => {

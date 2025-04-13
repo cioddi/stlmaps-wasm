@@ -347,15 +347,12 @@ const ExportButtons: React.FC = () => {
 
   return (
     <>
-      <Button 
-        variant="contained" 
-        color="primary"
+            <IconButton 
         onClick={handleOpenDialog}
         disabled={isDisabled}
-        startIcon={<FileDownloadIcon />}
-      >
-        Export 3D Model
-      </Button>
+            color="secondary">
+              <FileDownloadIcon />
+            </IconButton>
       
       <Dialog 
         open={dialogOpen} 

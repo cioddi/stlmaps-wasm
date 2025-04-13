@@ -99,9 +99,7 @@ const App: React.FC = () => {
           {/* Right side topbar buttons */}
           <Box sx={{ display: "flex", gap: 1 }}>
             {/* Export button - Always visible with just icon on mobile */}
-            <IconButton color="secondary">
-              <SaveAltIcon />
-            </IconButton>
+            <ExportButtons />
             
             {/* Hamburger menu button - Only on mobile */}
             {isMobile && (
