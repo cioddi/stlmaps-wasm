@@ -257,6 +257,22 @@ const ModelPreview = ({
         rimLight.position.set(-3, 1, -2);
         scene.add(rimLight);
         
+        // Add a large sunset-like light from front-left side
+        const sunsetLight = new THREE.DirectionalLight(0xff7e47, 1.8); // Increased intensity for wider reach
+        sunsetLight.position.set(-5, 30, 30); // Positioned much higher for broader coverage
+        sunsetLight.castShadow = true;
+        sunsetLight.shadow.mapSize.width = 2048;
+        sunsetLight.shadow.mapSize.height = 2048;
+        sunsetLight.shadow.camera.near = 0.1;
+        sunsetLight.shadow.camera.far = 500; // Increased far plane to reach further
+        sunsetLight.shadow.camera.left = -120; // Doubled shadow camera frustum
+        sunsetLight.shadow.camera.right = 120;
+        sunsetLight.shadow.camera.top = 120;
+        sunsetLight.shadow.camera.bottom = -120;
+        sunsetLight.shadow.bias = -0.0003;
+        sunsetLight.shadow.radius = 4;
+        scene.add(sunsetLight);
+        
         // Add a subtle yellow fill light for warmth
         const fillLight = new THREE.DirectionalLight(0xfff0c0, 0.2); // Soft yellow light
         fillLight.position.set(2, -1, -1);
