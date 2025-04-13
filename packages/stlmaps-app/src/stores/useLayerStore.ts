@@ -14,12 +14,28 @@ interface BuildingSettings {
   scaleFactor: number;
 }
 
+interface ConfigHashes {
+  fullConfigHash: string;
+  terrainHash: string;
+  layerHashes: { index: number, hash: string }[];
+}
+
+interface ProcessedTerrainData {
+  processedElevationGrid?: number[][];
+  processedMinElevation: number;
+  processedMaxElevation: number;
+}
+
 interface LayerState {
   // Layer data
   vtLayers: VtDataSet[];
   terrainSettings: TerrainSettings;
   buildingSettings: BuildingSettings;
   bbox: GeoJSON.Feature | undefined;
+  
+  // Config hashes for smart regeneration
+  configHashes: ConfigHashes;
+  processedTerrainData: ProcessedTerrainData;
 
   // Processing state
   isProcessing: boolean;
@@ -31,6 +47,10 @@ interface LayerState {
     polygonGeometries: VtDataSet[] | null;
     terrainGeometry: THREE.BufferGeometry | undefined;
   }
+  
+  // Actions for config hashes and terrain data
+  setConfigHashes: (hashes: ConfigHashes) => void;
+  setProcessedTerrainData: (data: ProcessedTerrainData) => void;
 
   // Actions for layers
   setVtLayers: (layers: VtDataSet[]) => void;
@@ -90,11 +110,28 @@ const useLayerStore = create<LayerState>((set) => ({
   processingStatus: null,
   processingProgress: null,
   
+  // Config hashes and processed terrain data for smart regeneration
+  configHashes: {
+    fullConfigHash: "",
+    terrainHash: "",
+    layerHashes: []
+  },
+  processedTerrainData: {
+    processedElevationGrid: undefined,
+    processedMinElevation: 0,
+    processedMaxElevation: 0
+  },
+  
   geometryDataSets: {
     polygonGeometries: null,
     terrainGeometry: undefined
   },
   setGeometryDataSets: (geometryDataSets) => set({ geometryDataSets: { ...geometryDataSets} }),
+  
+  // Methods for config hashes and processed terrain data
+  setConfigHashes: (hashes) => set({ configHashes: hashes }),
+  setProcessedTerrainData: (data) => set({ processedTerrainData: data }),
+  
   vtLayers: [...defaultVtGeometries],
   terrainSettings: {
     enabled: true,
@@ -249,6 +286,16 @@ const useLayerStore = create<LayerState>((set) => ({
       polygonGeometries: null,
       terrainGeometry: undefined
     },
+    configHashes: {
+      fullConfigHash: "",
+      terrainHash: "",
+      layerHashes: []
+    },
+    processedTerrainData: {
+      processedElevationGrid: undefined,
+      processedMinElevation: 0,
+      processedMaxElevation: 0
+    }
   })
 }));
 

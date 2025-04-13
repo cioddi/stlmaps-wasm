@@ -31,6 +31,7 @@ export interface VtDataSet {
   data?: GeometryData[];
   geometry?: THREE.BufferGeometry;
   extrusionDepth?: number;
+  minExtrusionDepth?: number;
   zOffset?: number;
   bufferSize?: number;
   filter?: any[]; // Add support for MapLibre-style filter expressions
@@ -82,11 +83,6 @@ interface ConfigHashes {
 
 export const GenerateMeshButton = function () {
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
-  const [configHashes, setConfigHashes] = useState<ConfigHashes>({
-    fullConfigHash: "",
-    terrainHash: "",
-    layerHashes: []
-  });
 
   // Get settings and setter functions directly from Zustand store
   const {
@@ -99,7 +95,11 @@ export const GenerateMeshButton = function () {
     setIsProcessing,
     setProcessingProgress,
     setProcessingStatus,
-    updateProcessingState
+    updateProcessingState,
+    configHashes,
+    setConfigHashes,
+    processedTerrainData,
+    setProcessedTerrainData
   } = useLayerStore();
 
   // Modify generate3DModel function to include buildings
@@ -262,6 +262,13 @@ export const GenerateMeshButton = function () {
         processedElevationGrid = terrainResult.processedElevationGrid;
         processedMinElevation = terrainResult.processedMinElevation;
         processedMaxElevation = terrainResult.processedMaxElevation;
+        
+        // Store processed terrain data in the Zustand store
+        setProcessedTerrainData({
+          processedElevationGrid: terrainResult.processedElevationGrid,
+          processedMinElevation: terrainResult.processedMinElevation,
+          processedMaxElevation: terrainResult.processedMaxElevation
+        });
 
         console.log("✅ Terrain geometry created successfully:", {
           geometryExists: !!terrainGeometry,
@@ -269,18 +276,34 @@ export const GenerateMeshButton = function () {
         });
       } else {
         console.log("%c ♻️ Reusing existing terrain geometry - configuration unchanged", "color: #4CAF50;");
-        // We still need elevation data for other layers
-        const tempResult = createTerrainGeometry(
-          elevationGrid,
-          gridSize,
-          minElevation,
-          maxElevation,
-          terrainSettings.verticalExaggeration,
-          terrainSettings.baseHeight
-        );
-        processedElevationGrid = tempResult.processedElevationGrid;
-        processedMinElevation = tempResult.processedMinElevation;
-        processedMaxElevation = tempResult.processedMaxElevation;
+        // Check if we have processed terrain data from a previous run
+        if (processedTerrainData.processedElevationGrid) {
+          console.log("%c ♻️ Reusing existing processed terrain data", "color: #4CAF50;");
+          processedElevationGrid = processedTerrainData.processedElevationGrid;
+          processedMinElevation = processedTerrainData.processedMinElevation;
+          processedMaxElevation = processedTerrainData.processedMaxElevation;
+        } else {
+          // Only recreate terrain data if we don't have it stored
+          console.log("%c 🔄 Regenerating processed terrain data", "color: #FF9800;");
+          const tempResult = createTerrainGeometry(
+            elevationGrid,
+            gridSize,
+            minElevation,
+            maxElevation,
+            terrainSettings.verticalExaggeration,
+            terrainSettings.baseHeight
+          );
+          processedElevationGrid = tempResult.processedElevationGrid;
+          processedMinElevation = tempResult.processedMinElevation;
+          processedMaxElevation = tempResult.processedMaxElevation;
+          
+          // Store the processed terrain data for future use
+          setProcessedTerrainData({
+            processedElevationGrid: tempResult.processedElevationGrid,
+            processedMinElevation: tempResult.processedMinElevation,
+            processedMaxElevation: tempResult.processedMaxElevation
+          });
+        }
       }
 
       // Set generated geometries based on settings
@@ -314,7 +337,7 @@ export const GenerateMeshButton = function () {
       // Process vector tile layers
       for (let i = 0; i < vtLayers.length; i++) {
         const currentLayer = vtLayers[i];
-        updateProcessingState({ status: "Processing vector tile layers " + currentLayer.sourceLayer + "...", progress: 75 + (i * 10) / vtLayers.length });
+        updateProcessingState({ status: "Processing " + currentLayer.sourceLayer + " layer",  progress: 75 + (i * 10) / vtLayers.length });
 
         // Skip disabled layers
         if (currentLayer.enabled === false) {
@@ -455,11 +478,12 @@ export const GenerateMeshButton = function () {
         setIsProcessing(false);
       }, 2000);
 
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error generating 3D model:", error);
 
       // Show error in processing indicator
-      updateProcessingState({ status: `Error: ${error.message || 'Failed to generate 3D model'}`, progress: 100 });
+      const errorMessage = error instanceof Error ? error.message : 'Failed to generate 3D model';
+      updateProcessingState({ status: `Error: ${errorMessage}`, progress: 100 });
 
       // Hide the indicator after showing the error
       setTimeout(() => {

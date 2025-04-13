@@ -46,7 +46,6 @@ const ProcessingContainer = styled(Paper)(({ theme }) => ({
   alignItems: 'center',
   width: '300px',
   boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
-  borderLeft: `4px solid ${theme.palette.primary.main}`,
   overflow: 'hidden',
   transition: 'transform 0.3s ease-out, opacity 0.3s ease-out',
 }));
@@ -57,7 +56,6 @@ const TechLines = styled(Box)({
   left: 0,
   right: 0,
   height: '4px',
-  background: 'linear-gradient(90deg, #4CAF50, #2196F3, #9C27B0, #F44336)',
   backgroundSize: '300% 100%',
   animation: `${flowAnimation} 3s linear infinite`,
 });
