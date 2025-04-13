@@ -70,7 +70,9 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
-
+.MuiDrawer-root{
+  z-index: 10000 !important;
+}
 .MuiPopper-root {
   z-index: 100000 !important;
 }
