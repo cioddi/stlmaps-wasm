@@ -201,7 +201,11 @@ function createPolygonGeometry({
   // Process each polygon individually
   polygons.forEach((poly, polyIndex) => {
     //poly.height ||
-    const height = vtDataSet.extrusionDepth || poly.height || (datasetHighestZ - datasetLowestZ + 0.1);
+    let height = vtDataSet.extrusionDepth || poly.height || (datasetHighestZ - datasetLowestZ + 0.1);
+
+    if (vtDataSet.minExtrusionDepth && height < vtDataSet.minExtrusionDepth) {
+      height = vtDataSet.minExtrusionDepth;
+    }
 
     const footprint: GeometryData["geometry"] = poly.geometry;
 
@@ -286,29 +290,29 @@ function createPolygonGeometry({
     };
     const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     geometry.translate(0, 0, zBottom);
-    
+
     // Align vertices to terrain if specified
     if (vtDataSet.alignVerticesToTerrain) {
       // Get position attribute for direct manipulation
       const positions = geometry.attributes.position;
-      
+
       // For each vertex in the geometry
       for (let i = 0; i < positions.count; i++) {
         // Get current vertex coordinates
         const x = positions.getX(i);
         const y = positions.getY(i);
         const z = positions.getZ(i);
-        
+
         // Skip bottom vertices (we only want to adjust the top surface)
         // In ExtrudeGeometry, vertices come in pairs - top and bottom
         // We can identify top vertices as they have higher z values
         if (z <= zBottom + 0.1) continue; // Small epsilon to account for floating point errors
-        
+
         // Convert mesh coordinates back to geographic coordinates
         const meshSize = Math.min(200, 200); // Typical terrain mesh size
-        const geoLng = minLng + ((x + meshSize/2) / meshSize) * (maxLng - minLng);
-        const geoLat = minLat + ((y + meshSize/2) / meshSize) * (maxLat - minLat);
-        
+        const geoLng = minLng + ((x + meshSize / 2) / meshSize) * (maxLng - minLng);
+        const geoLat = minLat + ((y + meshSize / 2) / meshSize) * (maxLat - minLat);
+
         // Sample terrain elevation at this point
         const terrainZ = sampleTerrainElevationAtPoint(
           geoLng,
@@ -319,18 +323,18 @@ function createPolygonGeometry({
           minElevation,
           maxElevation
         );
-        
+
         // Apply height offset from base terrain
         const heightOffset = z - zBottom;
-        
+
         // Set new Z position to terrain height plus original height offset
         positions.setZ(i, terrainZ + heightOffset);
       }
-      
+
       // Update the geometry
       positions.needsUpdate = true;
     }
-    
+
     geometry.computeVertexNormals();
 
     // Add color attribute

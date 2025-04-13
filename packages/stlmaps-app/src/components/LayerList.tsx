@@ -90,6 +90,7 @@ const LayerList: React.FC<LayerListProps> = () => {
     toggleLayerEnabled,
     setLayerColor,
     setLayerExtrusionDepth,
+    setLayerMinExtrusionDepth,
     setLayerZOffset,
     setLayerBufferSize,
     toggleLayerUseAdaptiveScaleFactor,
@@ -139,6 +140,18 @@ const LayerList: React.FC<LayerListProps> = () => {
     setLayerHeightScaleFactor(index, value);
   };
 
+  const handleMinExtrusionToggle = (index: number, enabled: boolean) => {
+    if (enabled) {
+      setLayerMinExtrusionDepth(index, 0); // Default value when enabling
+    } else {
+      setLayerMinExtrusionDepth(index, undefined);
+    }
+  };
+  
+  const handleMinExtrusionChange = (index: number, value: number) => {
+    setLayerMinExtrusionDepth(index, value);
+  };
+
   const toggleExpand = (layerId: string) => {
     setExpandedLayers(prev => ({
       ...prev,
@@ -182,7 +195,7 @@ const LayerList: React.FC<LayerListProps> = () => {
         </LayerHeader>
         
         <Collapse in={expandedLayers.terrain} timeout="auto" unmountOnExit>
-          <Box sx={{ p: 2 }}>
+          <Box sx={{ p: 3 }}>
             <Typography gutterBottom>
               Vertical Exaggeration: {terrainSettings.verticalExaggeration.toFixed(2)}
             </Typography>
@@ -294,6 +307,40 @@ const LayerList: React.FC<LayerListProps> = () => {
                       <Slider
                         value={layer.extrusionDepth}
                         onChange={(_, newValue) => handleExtrusionChange(index, newValue as number)}
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        marks={[
+                          { value: 0, label: "0" },
+                          { value: 5, label: "5" },
+                          { value: 10, label: "10" },
+                        ]}
+                      />
+                    </>
+                  )}
+                </Box>
+                
+                {/* Min Extrusion Depth with enable/disable checkbox */}
+                <Box sx={{ mt: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={layer.minExtrusionDepth !== undefined}
+                        onChange={(e) => handleMinExtrusionToggle(index, e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label="Enable Min Extrusion Depth"
+                  />
+                  
+                  {layer.minExtrusionDepth !== undefined && (
+                    <>
+                      <Typography gutterBottom>
+                        Min Extrusion Depth: {layer.minExtrusionDepth.toFixed(1)}
+                      </Typography>
+                      <Slider
+                        value={layer.minExtrusionDepth}
+                        onChange={(_, newValue) => handleMinExtrusionChange(index, newValue as number)}
                         min={0}
                         max={10}
                         step={0.1}

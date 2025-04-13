@@ -58,6 +58,7 @@ interface LayerState {
   toggleLayerEnabled: (index: number) => void;
   setLayerColor: (index: number, hexColor: string) => void;
   setLayerExtrusionDepth: (index: number, value: number | undefined) => void;
+  setLayerMinExtrusionDepth: (index: number, value: number | undefined) => void;
   setLayerZOffset: (index: number, value: number) => void;
   setLayerBufferSize: (index: number, value: number) => void;
   toggleLayerUseAdaptiveScaleFactor: (index: number) => void;
@@ -180,6 +181,15 @@ const useLayerStore = create<LayerState>((set) => ({
     updatedLayers[index] = {
       ...updatedLayers[index],
       extrusionDepth: value
+    };
+    return { vtLayers: updatedLayers };
+  }),
+
+  setLayerMinExtrusionDepth: (index, value) => set((state) => {
+    const updatedLayers = [...state.vtLayers];
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      minExtrusionDepth: value
     };
     return { vtLayers: updatedLayers };
   }),
