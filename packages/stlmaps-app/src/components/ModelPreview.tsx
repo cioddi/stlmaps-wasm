@@ -23,8 +23,8 @@ interface ModelPreviewProps {
 
 const ModelPreview = ({
 }: ModelPreviewProps) => {
-  // Get geometry data directly from the Zustand store
-  const { geometryDataSets } = useLayerStore();
+  // Get geometry data and terrain settings from the Zustand store
+  const { geometryDataSets, terrainSettings } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -270,12 +270,15 @@ const ModelPreview = ({
         const modelGroup = new THREE.Group();
         
         // Create PBR materials with professional quality for terrain (less reflective)
+        // Use color from the store if available, otherwise fall back to vertex colors
         const terrainMaterial = new THREE.MeshStandardMaterial({
-          vertexColors: true,
+          vertexColors: terrainSettings.color ? false : true,
+          color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
           roughness: 0.8,
           metalness: 0.01,
           envMapIntensity: 0.4, // 50% less reflective
-          flatShading: true
+          flatShading: true,
+          side: THREE.DoubleSide // Render both sides of the terrain
         });
         
         // Apply the material to the terrain mesh

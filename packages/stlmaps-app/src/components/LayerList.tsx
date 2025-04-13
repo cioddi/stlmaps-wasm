@@ -197,7 +197,28 @@ const LayerList: React.FC<LayerListProps> = () => {
         
         <Collapse in={expandedLayers.terrain} timeout="auto" unmountOnExit>
           <Box sx={{ p: 3 }}>
-            <Typography gutterBottom>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <FormatColorFillIcon sx={{ mr: 1, color: terrainSettings.color }} />
+              <TextField
+                label="Terrain Color"
+                type="color"
+                value={terrainSettings.color}
+                onChange={(e) => setTerrainSettings({
+                  color: e.target.value
+                })}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <ColorCircle bgcolor={terrainSettings.color} />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ width: '100%' }}
+                size="small"
+              />
+            </Box>
+            
+            <Typography gutterBottom sx={{ mt: 2 }}>
               Vertical Exaggeration: {terrainSettings.verticalExaggeration.toFixed(2)}
             </Typography>
             <Slider

@@ -7,6 +7,7 @@ interface TerrainSettings {
   enabled: boolean;
   verticalExaggeration: number;
   baseHeight: number;
+  color: string; // Hex color string for terrain
 }
 
 interface BuildingSettings {
@@ -73,6 +74,7 @@ interface LayerState {
   toggleTerrainEnabled: () => void;
   setTerrainVerticalExaggeration: (value: number) => void;
   setTerrainBaseHeight: (value: number) => void;
+  setTerrainColor: (color: string) => void;
 
   // Actions for buildings
   setBuildingSettings: (settings: Partial<BuildingSettings>) => void;
@@ -138,7 +140,8 @@ const useLayerStore = create<LayerState>((set) => ({
   terrainSettings: {
     enabled: true,
     verticalExaggeration: 0.06,
-    baseHeight: 5
+    baseHeight: 5,
+    color: "#383533"
   },
   buildingSettings: {
     enabled: true,
@@ -259,6 +262,10 @@ const useLayerStore = create<LayerState>((set) => ({
   setTerrainBaseHeight: (value) => set((state) => ({
     terrainSettings: { ...state.terrainSettings, baseHeight: value }
   })),
+  
+  setTerrainColor: (color) => set((state) => ({
+    terrainSettings: { ...state.terrainSettings, color }
+  })),
 
   // Building actions
   setBuildingSettings: (settings) => set((state) => ({
@@ -295,7 +302,8 @@ const useLayerStore = create<LayerState>((set) => ({
     terrainSettings: {
       enabled: true,
       verticalExaggeration: 0.06,
-      baseHeight: 5
+      baseHeight: 5,
+      color: "#6B8E23" // Default olive green color for terrain
     },
     buildingSettings: {
       enabled: true,

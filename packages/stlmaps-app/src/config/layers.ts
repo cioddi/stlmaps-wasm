@@ -42,7 +42,7 @@ export const vtGeometries: VtDataSet[] = [
     },
     {
         sourceLayer: "transportation",
-        color: new THREE.Color(0xaaaaaa), // Gray color for streets
+        color: new THREE.Color(0x454545), // Gray color for streets
         extrusionDepth: 0.8, // Thin extrusion for landuse
         zOffset: -0.2,
         bufferSize: 2.4,

@@ -9,6 +9,7 @@ export function hashTerrainConfig(config: TerrainSettings): string {
     enabled: config.enabled,
     verticalExaggeration: config.verticalExaggeration,
     baseHeight: config.baseHeight,
+    color: config.color, // Include terrain color in hash calculation
   });
 }
 
