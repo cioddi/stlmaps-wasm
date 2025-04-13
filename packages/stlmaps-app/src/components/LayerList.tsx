@@ -253,7 +253,7 @@ const LayerList: React.FC<LayerListProps> = () => {
             </LayerHeader>
             
             <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-              <Box sx={{ p: 2 }}>
+              <Box sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                   <FormatColorFillIcon sx={{ mr: 1, color: rgbToHex(layer.color) }} />
                   <TextField

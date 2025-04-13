@@ -11,7 +11,7 @@ export const vtGeometries: VtDataSet[] = [
     },
     {
         sourceLayer: "landcover",
-        color: new THREE.Color(0x4CDF54), // Green color for landuse
+        color: new THREE.Color(0x74e010), // Green color for landuse
         extrusionDepth: 1.2, // Thin extrusion for landuse
         zOffset: -0.3,
         bufferSize: 2,
@@ -51,12 +51,12 @@ export const vtGeometries: VtDataSet[] = [
         // Updated filter to include more street types
         filter: [
             "all",
-            ["in", "class", "motorway", "trunk", "primary", "secondary", "tertiary", "residential", "service", "minor", "unclassified", "track", "path"],
+            ["in", "class", "motorway", "trunk", "primary", "secondary", "tertiary", "residential", "service", "minor", "track"],
         ]
     },
     {
         sourceLayer: "building",
-        color: new THREE.Color(0x888888), // Gray color for buildings
+        color: new THREE.Color(0xdddddd), // Gray color for buildings
         zOffset: 0,
         useAdaptiveScaleFactor: true,
         heightScaleFactor: 0.25,
