@@ -172,11 +172,12 @@ const ModelPreview = ({
         canvas.height = 1024;
         const context = canvas.getContext('2d');
         if (context) {
-          // Create a gradient with deeper, less bright bubblegum colors
+          // Create a gradient with more balanced colors including yellow and blue tones
           const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-          gradient.addColorStop(0, '#d896e0'); // Deeper, less bright pink
-          gradient.addColorStop(0.5, '#e88bab'); // Darker bubblegum pink
-          gradient.addColorStop(1, '#68d5d5'); // Deeper, less bright cyan
+          gradient.addColorStop(0, '#a1c4fd'); // Soft blueish-white
+          gradient.addColorStop(0.4, '#f9d976'); // Warm yellow
+          gradient.addColorStop(0.7, '#c2e9fb'); // Light blue
+          gradient.addColorStop(1, '#81d8d0'); // Subtle cyan
           
           context.fillStyle = gradient;
           context.fillRect(0, 0, canvas.width, canvas.height);
@@ -192,23 +193,34 @@ const ModelPreview = ({
         pmremGenerator.dispose();
         
         // Add strategic studio-style lighting setup for professional rendering
-        // Main key light (primary light source)
-        const keyLight = new THREE.DirectionalLight(0xffffff, 1.0); // Reduced intensity
+        // Main key light (primary light source) - slightly warmer white
+        const keyLight = new THREE.DirectionalLight(0xfffbf0, 0.9);
         keyLight.position.set(1, 2, 3);
         keyLight.castShadow = true;
         keyLight.shadow.mapSize.width = 2048;
         keyLight.shadow.mapSize.height = 2048;
         keyLight.shadow.camera.near = 0.1;
-        keyLight.shadow.camera.far = 500;
+        keyLight.shadow.camera.far = 100;
         keyLight.shadow.camera.left = -50;
         keyLight.shadow.camera.right = 50;
         keyLight.shadow.camera.top = 50;
         keyLight.shadow.camera.bottom = -50;
+        keyLight.shadow.radius = 12;
+        keyLight.shadow.blurSamples = 8;
         keyLight.shadow.bias = -0.0001;
         scene.add(keyLight);
+        // Add a subtle blue rim light for color variation
+        const rimLight = new THREE.DirectionalLight(0xc4e0ff, 0.3); // Blueish-white light
+        rimLight.position.set(-3, 1, -2);
+        scene.add(rimLight);
         
-        // Ambient light to simulate global illumination bounce
-        const ambientLight = new THREE.HemisphereLight(0xffffff, 0x8080ff, 1.4);
+        // Add a subtle yellow fill light for warmth
+        const fillLight = new THREE.DirectionalLight(0xfff0c0, 0.2); // Soft yellow light
+        fillLight.position.set(2, -1, -1);
+        scene.add(fillLight);
+        
+        // Ambient light to simulate global illumination bounce - more neutral
+        const ambientLight = new THREE.HemisphereLight(0xffffff, 0xf0f5ff, 2.7);
         scene.add(ambientLight);
 
         // Create a model group for all geometry
