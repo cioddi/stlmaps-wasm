@@ -62,6 +62,7 @@ interface LayerState {
   setLayerZOffset: (index: number, value: number) => void;
   setLayerBufferSize: (index: number, value: number) => void;
   toggleLayerUseAdaptiveScaleFactor: (index: number) => void;
+  toggleLayerAlignVerticesToTerrain: (index: number) => void;
   setLayerHeightScaleFactor: (index: number, value: number) => void;
 
   // Actions for bbox
@@ -217,6 +218,15 @@ const useLayerStore = create<LayerState>((set) => ({
     updatedLayers[index] = {
       ...updatedLayers[index],
       useAdaptiveScaleFactor: !updatedLayers[index].useAdaptiveScaleFactor
+    };
+    return { vtLayers: updatedLayers };
+  }),
+
+  toggleLayerAlignVerticesToTerrain: (index) => set((state) => {
+    const updatedLayers = [...state.vtLayers];
+    updatedLayers[index] = {
+      ...updatedLayers[index],
+      alignVerticesToTerrain: !updatedLayers[index].alignVerticesToTerrain
     };
     return { vtLayers: updatedLayers };
   }),

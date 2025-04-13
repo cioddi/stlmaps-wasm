@@ -420,7 +420,7 @@ export default function BboxSelector(props: Props) {
             updateBbox();
           }}
           /* rotatable */
-          rotatable={true}
+          rotatable={false}
           onRotate={(e) => {
             if (mapHook.map && mapState.viewport) {
               const _transformParts = e.drag.transform.split("rotate(");

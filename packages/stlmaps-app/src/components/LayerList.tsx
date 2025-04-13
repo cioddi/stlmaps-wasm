@@ -94,6 +94,7 @@ const LayerList: React.FC<LayerListProps> = () => {
     setLayerZOffset,
     setLayerBufferSize,
     toggleLayerUseAdaptiveScaleFactor,
+    toggleLayerAlignVerticesToTerrain,
     setLayerHeightScaleFactor,
     setTerrainSettings,
     setBuildingSettings,
@@ -424,6 +425,20 @@ const LayerList: React.FC<LayerListProps> = () => {
                       { value: 1, label: "1" },
                       { value: 5, label: "5" },
                     ]}
+                  />
+                </Box>
+                
+                {/* Align Vertices to Terrain */}
+                <Box sx={{ mt: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={layer.alignVerticesToTerrain === true}
+                        onChange={() => toggleLayerAlignVerticesToTerrain(index)}
+                        size="small"
+                      />
+                    }
+                    label="Align Vertices to Terrain"
                   />
                 </Box>
               </Box>
