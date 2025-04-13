@@ -16,6 +16,9 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
+  ToggleButtonGroup,
+  ToggleButton,
+  Tooltip,
 } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import ModelPreview from "./components/ModelPreview";
@@ -27,11 +30,15 @@ import AttributionDialog from "./components/AttributionDialog";
 import ProjectTodoList from "./components/ProjectTodoList";
 import ProcessingIndicator from "./components/ProcessingIndicator";
 import MenuIcon from "@mui/icons-material/Menu";
-import SaveAltIcon from "@mui/icons-material/SaveAlt";
 import InfoIcon from "@mui/icons-material/Info";
 import MapIcon from "@mui/icons-material/Map";
+import ViewQuiltIcon from "@mui/icons-material/ViewQuilt";
+import View3dIcon from "@mui/icons-material/ViewInAr";
 import BboxSelector from "./components/BboxSelector";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
+
+// View mode types
+type ViewMode = "split" | "map" | "model";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 440;
@@ -46,6 +53,7 @@ const App: React.FC = () => {
   const [openTodoList, setOpenTodoList] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("split");
   
   // Close sidebar by default on mobile devices
   useEffect(() => {
@@ -59,6 +67,21 @@ const App: React.FC = () => {
     setBbox
   } = useLayerStore();
 
+  const handleViewModeChange = (
+    event: React.MouseEvent<HTMLElement>,
+    newMode: ViewMode | null,
+  ) => {
+    if (newMode !== null) {
+      setViewMode(newMode);
+    }
+  };
+
+  // Calculate flex values and height constraints based on view mode
+  const mapFlex = viewMode === "map" ? 1 : viewMode === "split" ? 0.5 : 0;
+  const modelFlex = viewMode === "model" ? 1 : viewMode === "split" ? 0.5 : 0;
+  const mapDisplay = viewMode === "model" ? "none" : "flex";
+  const modelDisplay = viewMode === "map" ? "none" : "flex";
+  const showDivider = viewMode === "split";
 
   return (<>
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
@@ -82,6 +105,32 @@ const App: React.FC = () => {
             <Typography variant="h6" color="primary">
               STLmaps
             </Typography>
+
+            {/* View mode toggle buttons */}
+            <ToggleButtonGroup
+              value={viewMode}
+              exclusive
+              onChange={handleViewModeChange}
+              aria-label="view mode"
+              size="small"
+              sx={{ ml: 2, bgcolor: 'background.paper', borderRadius: 1 }}
+            >
+              <Tooltip title="Map Only">
+                <ToggleButton value="map" aria-label="map only">
+                  <MapIcon />
+                </ToggleButton>
+              </Tooltip>
+              <Tooltip title="Split View">
+                <ToggleButton value="split" aria-label="split view">
+                  <ViewQuiltIcon />
+                </ToggleButton>
+              </Tooltip>
+              <Tooltip title="3D Model Only">
+                <ToggleButton value="model" aria-label="model only">
+                  <View3dIcon />
+                </ToggleButton>
+              </Tooltip>
+            </ToggleButtonGroup>
           </Box>
           
           {/* Middle section - Only visible on desktop */}
@@ -158,6 +207,32 @@ const App: React.FC = () => {
               />
             </ListItem>
             <Divider />
+            <ListItem>
+              <ToggleButtonGroup
+                value={viewMode}
+                exclusive
+                onChange={(e, newMode) => {
+                  if (newMode !== null) {
+                    setViewMode(newMode);
+                    setMenuOpen(false);
+                  }
+                }}
+                aria-label="view mode"
+                size="small"
+                sx={{ width: "100%", justifyContent: "space-between" }}
+              >
+                <ToggleButton value="map" aria-label="map only">
+                  <MapIcon /> Map
+                </ToggleButton>
+                <ToggleButton value="split" aria-label="split view">
+                  <ViewQuiltIcon /> Split
+                </ToggleButton>
+                <ToggleButton value="model" aria-label="model only">
+                  <View3dIcon /> 3D
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </ListItem>
+            <Divider />
             <ListItem button onClick={() => {
               setOpenAttribution(true);
               setMenuOpen(false);
@@ -216,7 +291,17 @@ const App: React.FC = () => {
       >
         <Toolbar /> {/* Spacing below AppBar */}
         {/* Map - Top Half */}
-        <Box sx={{ flex: 1, position: "relative", minHeight: 0 }}>
+        <Box 
+          sx={{ 
+            flex: mapFlex, 
+            position: "relative", 
+            minHeight: 0, 
+            display: mapDisplay, 
+            transition: theme.transitions.create(['flex', 'display'], {
+              duration: theme.transitions.duration.standard,
+            })
+          }}
+        >
           <MapLibreMap
             style={{
               position: "absolute",
@@ -233,10 +318,19 @@ const App: React.FC = () => {
             }}
           />
         </Box>
-        <Divider />
+        {showDivider && <Divider />}
         {/* Model Preview - Bottom Half */}
         <Box
-          sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 10000 }}
+          sx={{ 
+            flex: modelFlex, 
+            position: "relative", 
+            minHeight: 0, 
+            zIndex: 10000, 
+            display: modelDisplay,
+            transition: theme.transitions.create(['flex', 'display'], {
+              duration: theme.transitions.duration.standard,
+            })
+          }}
         >
           <Suspense fallback={<CircularProgress />}>
             <ModelPreview />
@@ -254,22 +348,22 @@ const App: React.FC = () => {
       open={openTodoList}
       onClose={() => setOpenTodoList(false)}
     />
-                    <GenerateMeshButton />
+    <GenerateMeshButton />
 
-                <BboxSelector
-                    options={{
-                        center: bboxCenter,
-                        scale: [1, 1],
-                        rotate: 0,
-                        orientation: "portrait",
-                        width: 800,
-                        height: 800,
-                    }}
-                    onChange={(geojson) => {
-                        console.log("BboxSelector onChange triggered with:", geojson);
-                        setBbox(geojson);
-                    }}
-                />
+    <BboxSelector
+      options={{
+        center: bboxCenter,
+        scale: [1, 1],
+        rotate: 0,
+        orientation: "portrait",
+        width: 800,
+        height: 800,
+      }}
+      onChange={(geojson) => {
+        console.log("BboxSelector onChange triggered with:", geojson);
+        setBbox(geojson);
+      }}
+    />
   </>
   );
 };

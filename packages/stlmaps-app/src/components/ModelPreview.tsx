@@ -60,6 +60,44 @@ const ModelPreview = ({
     setLoading(true);
     setError(null);
 
+    // Resize handler function to update renderer when container size changes
+    const handleResize = () => {
+      if (!containerRef.current || !rendererRef.current) return;
+      
+      const width = containerRef.current.clientWidth;
+      const height = containerRef.current.clientHeight;
+      
+      if (width === 0 || height === 0) return;
+      
+      // Update camera aspect ratio
+      if (rendererRef.current.userData.camera) {
+        const camera = rendererRef.current.userData.camera as THREE.PerspectiveCamera;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      }
+      
+      // Update renderer size
+      rendererRef.current.setSize(width, height);
+      
+      // Update composer size if it exists
+      if (rendererRef.current.userData.composer) {
+        const composer = rendererRef.current.userData.composer as EffectComposer;
+        composer.setSize(width, height);
+      }
+    };
+
+    // Add resize event listener
+    window.addEventListener('resize', handleResize);
+    
+    // Use ResizeObserver to detect container size changes
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+    
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
     // Small timeout to ensure container is fully laid out
     const initTimer = setTimeout(() => {
       if (!containerRef.current) return;
@@ -103,6 +141,8 @@ const ModelPreview = ({
         rendererRef.current.toneMapping = THREE.ACESFilmicToneMapping;
         rendererRef.current.toneMappingExposure = 0.8; // Reduced exposure for better contrast
         rendererRef.current.physicallyCorrectLights = true;
+        // Initialize userData object to store references
+        rendererRef.current.userData = {};
         containerRef.current.appendChild(rendererRef.current.domElement);
 
         // Setup camera with proper field of view
@@ -129,6 +169,10 @@ const ModelPreview = ({
         const composer = new EffectComposer(rendererRef.current);
         const renderPass = new RenderPass(scene, camera);
         composer.addPass(renderPass);
+        
+        // Store references to camera and composer for resize handling
+        rendererRef.current.userData.camera = camera;
+        rendererRef.current.userData.composer = composer;
         
         // Add bloom effect for that glossy bubblegum highlight glow
         const bloomPass = new UnrealBloomPass(
