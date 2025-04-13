@@ -74,11 +74,19 @@ interface ElevationProcessingResult {
 interface GenerateMeshButtonProps {
 }
 
+interface ConfigHashes {
+  fullConfigHash: string;
+  terrainHash: string;
+  layerHashes: { index: number, hash: string }[];
+}
+
 export const GenerateMeshButton = function () {
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
-  const [lastFullConfigHash, setLastFullConfigHash] = useState<string>("");
-  const [lastTerrainHash, setLastTerrainHash] = useState<string>("");
-  const [lastLayerHashes, setLastLayerHashes] = useState<{ index: number, hash: string }[]>([]);
+  const [configHashes, setConfigHashes] = useState<ConfigHashes>({
+    fullConfigHash: "",
+    terrainHash: "",
+    layerHashes: []
+  });
 
   // Get settings and setter functions directly from Zustand store
   const {
@@ -110,7 +118,7 @@ export const GenerateMeshButton = function () {
     const { terrainHash: currentTerrainHash, layerHashes: currentLayerHashes } = createComponentHashes(bbox, terrainSettings, vtLayers);
 
     // Skip full regeneration if configuration hasn't changed
-    if (currentFullConfigHash === lastFullConfigHash) {
+    if (currentFullConfigHash === configHashes.fullConfigHash) {
       console.log("%c ✅ SKIPPING 3D MODEL GENERATION - No config changes detected", "background: #2196F3; color: white; padding: 4px; font-weight: bold;");
       return;
     }
@@ -121,10 +129,10 @@ export const GenerateMeshButton = function () {
     console.log("Using building settings:", buildingSettings);
 
     // Check which specific components need regeneration
-    const terrainChanged = currentTerrainHash !== lastTerrainHash;
+    const terrainChanged = currentTerrainHash !== configHashes.terrainHash;
     const changedLayerIndices = currentLayerHashes
       .filter((layerHash, idx) => {
-        const previousHash = lastLayerHashes.find(lh => lh.index === layerHash.index)?.hash;
+        const previousHash = configHashes.layerHashes.find(lh => lh.index === layerHash.index)?.hash;
         return previousHash !== layerHash.hash;
       })
       .map(lh => lh.index);
@@ -235,7 +243,7 @@ export const GenerateMeshButton = function () {
       const { terrainHash: currentTerrainHashHere } = createComponentHashes(bbox, terrainSettings, vtLayers);
 
       // Compare current and previous terrain hash
-      const terrainConfigChanged = currentTerrainHashHere !== lastTerrainHash;
+      const terrainConfigChanged = currentTerrainHashHere !== configHashes.terrainHash;
 
       if (!terrainGeometry || terrainConfigChanged) {
         // Generate three.js geometry from elevation grid
@@ -296,7 +304,7 @@ export const GenerateMeshButton = function () {
 
       const changedLayerIndices = currentLayerHashes
         .filter((layerHash) => {
-          const previousHash = lastLayerHashes.find(lh => lh.index === layerHash.index)?.hash;
+          const previousHash = configHashes.layerHashes.find(lh => lh.index === layerHash.index)?.hash;
           return previousHash !== layerHash.hash;
         })
         .map(lh => lh.index);
@@ -315,7 +323,7 @@ export const GenerateMeshButton = function () {
         }
 
         // Check if this layer's configuration has changed
-        const layerNeedsUpdate = changedLayerIndices.includes(i);
+        const layerNeedsUpdate = changedLayerIndices.includes(i) || terrainConfigChanged;
         const existingLayerGeometry = existingGeometries.find(
           g => g.sourceLayer === currentLayer.sourceLayer &&
             g.subClass?.toString() === currentLayer.subClass?.toString()
@@ -431,9 +439,11 @@ export const GenerateMeshButton = function () {
       setIsProcessing(false);
 
       // Store the hashes for future comparisons
-      setLastFullConfigHash(currentFullConfigHash);
-      setLastTerrainHash(currentTerrainHash);
-      setLastLayerHashes(currentLayerHashes);
+      setConfigHashes({
+        fullConfigHash: currentFullConfigHash,
+        terrainHash: currentTerrainHash,
+        layerHashes: currentLayerHashes
+      });
 
       // Update processing state to show completion
       updateProcessingState({ status: "3D model generation complete!", progress: 100 });
