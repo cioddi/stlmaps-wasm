@@ -17,16 +17,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'  # Latest LTS version
-          cache: 'yarn'
-          cache-dependency-path: 'packages/stlmaps-app/yarn.lock'
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
-        working-directory: ./packages/stlmaps-app
+        run: npm ci
+        working-directory: ./
 
       - name: Build project
-        run: yarn build
-        working-directory: ./packages/stlmaps-app
+        run: npm run build
+        working-directory: ./
 
       - name: Deploy to docs branch
         run: |
