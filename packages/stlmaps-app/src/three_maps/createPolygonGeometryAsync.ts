@@ -1,0 +1,145 @@
+import * as THREE from "three";
+import { WorkerService } from "../workers/WorkerService";
+import { GridSize, VtDataSet } from "../components/GenerateMeshButton";
+import { GeometryData } from "../components/VectorTileFunctions";
+
+// Define the path to our worker
+const POLYGON_WORKER_PATH = "../workers/polygonGeometryWorker.ts";
+const WORKER_NAME = "polygon-geometry";
+
+/**
+ * Creates polygon geometry using a web worker to avoid blocking the main thread
+ * 
+ * @param params - Parameters needed for polygon geometry creation
+ * @returns Promise that resolves with the created buffer geometry
+ */
+export async function createPolygonGeometryAsync({
+  bbox,
+  polygons,
+  terrainBaseHeight,
+  elevationGrid,
+  gridSize,
+  minElevation,
+  maxElevation,
+  vtDataSet,
+  useSameZOffset = false,
+}: {
+  polygons: GeometryData[];
+  terrainBaseHeight: number;
+  bbox: number[];
+  elevationGrid: number[][];
+  gridSize: GridSize;
+  minElevation: number;
+  maxElevation: number;
+  vtDataSet: VtDataSet;
+  useSameZOffset?: boolean;
+}): Promise<THREE.BufferGeometry> {
+  try {
+    // Run the geometry creation in a worker
+    const serializedGeometry = await WorkerService.runWorkerTask(
+      WORKER_NAME,
+      POLYGON_WORKER_PATH,
+      {
+        bbox,
+        polygons,
+        terrainBaseHeight,
+        elevationGrid,
+        gridSize,
+        minElevation,
+        maxElevation,
+        vtDataSet,
+        useSameZOffset,
+      }
+    );
+
+    // Create a new buffer geometry from the serialized data
+    if (!serializedGeometry || !serializedGeometry.vertices) {
+      console.error("Worker returned invalid geometry data");
+      return new THREE.BufferGeometry();
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    
+    // Add position attribute
+    geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(serializedGeometry.vertices, 3)
+    );
+    
+    // Add normal attribute if available
+    if (serializedGeometry.normals) {
+      geometry.setAttribute(
+        'normal',
+        new THREE.Float32BufferAttribute(serializedGeometry.normals, 3)
+      );
+    } else {
+      // Compute normals if not provided
+      geometry.computeVertexNormals();
+    }
+    
+    // Add UV attribute if available
+    if (serializedGeometry.uvs) {
+      geometry.setAttribute(
+        'uv',
+        new THREE.Float32BufferAttribute(serializedGeometry.uvs, 2)
+      );
+    }
+    
+    // Add indices if available
+    if (serializedGeometry.indices) {
+      geometry.setIndex(Array.from(serializedGeometry.indices));
+    }
+    
+    return geometry;
+  } catch (error) {
+    console.error("Error in polygon geometry worker:", error);
+    // Return an empty geometry as fallback
+    return new THREE.BufferGeometry();
+  }
+}
+
+/**
+ * Legacy synchronous function for compatibility with existing code
+ * This is a wrapper that logs a deprecation warning and calls the async version
+ * In the long term, all code should be updated to use the async version directly
+ */
+export function createPolygonGeometry(params: {
+  polygons: GeometryData[];
+  terrainBaseHeight: number;
+  bbox: number[];
+  elevationGrid: number[][];
+  gridSize: GridSize;
+  minElevation: number;
+  maxElevation: number;
+  vtDataSet: VtDataSet;
+  useSameZOffset?: boolean;
+}): THREE.BufferGeometry {
+  console.warn(
+    "Deprecated: createPolygonGeometry is running on the main thread. " +
+    "Use createPolygonGeometryAsync instead to avoid UI freezing."
+  );
+  
+  // Create an empty geometry that will be populated later
+  const placeholder = new THREE.BufferGeometry();
+  
+  // Start the async operation
+  createPolygonGeometryAsync(params)
+    .then((geometry) => {
+      // Copy all attributes and properties from the async result to our placeholder
+      placeholder.copy(geometry);
+      // Force attribute update
+      placeholder.attributes.position.needsUpdate = true;
+      if (placeholder.attributes.normal) {
+        placeholder.attributes.normal.needsUpdate = true;
+      }
+    })
+    .catch((error) => {
+      console.error("Failed to create polygon geometry asynchronously:", error);
+    });
+  
+  // Return the placeholder that will be updated when the worker finishes
+  return placeholder;
+}
+
+// Default export for compatibility with existing imports
+export default createPolygonGeometry;
