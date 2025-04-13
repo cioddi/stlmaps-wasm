@@ -3,6 +3,18 @@ import { CircularProgress } from "@mui/material";
 import * as THREE from "three";
 // @ts-expect-error
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+// @ts-expect-error
+import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
+// @ts-expect-error
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+// @ts-expect-error
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+// @ts-expect-error
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+// @ts-expect-error
+import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
+// @ts-expect-error
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 import useLayerStore from "../stores/useLayerStore";
 
@@ -64,23 +76,9 @@ const ModelPreview = ({
       let animationFrameId: number;
 
       try {
-        // Initialize Three.js scene
+        // Initialize Three.js scene with enhanced visual quality
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xf0f0f0);
-
-        // Add lighting
-        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-        scene.add(hemiLight);
-
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
-        directionalLight.position.set(1, 1, 1);
-        scene.add(directionalLight);
-
-        // Add second directional light from another angle for better illumination
-        const secondaryLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        secondaryLight.position.set(-1, 0.5, -1);
-        scene.add(secondaryLight);
-
+        
         const width = containerRef.current.clientWidth;
         const height = containerRef.current.clientHeight;
 
@@ -90,132 +88,222 @@ const ModelPreview = ({
           throw new Error("Container has zero width or height");
         }
 
-        // Setup camera
+        // Setup advanced renderer with high-quality settings
+        rendererRef.current = new THREE.WebGLRenderer({
+          antialias: true,
+          alpha: true,
+          powerPreference: "high-performance",
+          precision: "highp",
+        });
+        rendererRef.current.setSize(width, height);
+        rendererRef.current.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap pixel ratio for performance
+        rendererRef.current.shadowMap.enabled = true;
+        rendererRef.current.shadowMap.type = THREE.PCFSoftShadowMap;
+        rendererRef.current.outputEncoding = THREE.sRGBEncoding;
+        rendererRef.current.toneMapping = THREE.ACESFilmicToneMapping;
+        rendererRef.current.toneMappingExposure = 1.2; // Brighter exposure for pop effect
+        rendererRef.current.physicallyCorrectLights = true;
+        containerRef.current.appendChild(rendererRef.current.domElement);
+
+        // Setup camera for dramatic and professional angles
         const camera = new THREE.PerspectiveCamera(
-          50, // Reduced FOV for better perspective
+          42, // Cinematic field of view
           width / height,
           0.1,
           2000
         );
         camera.position.z = 5;
 
-        // Setup renderer with better shadow settings
-        rendererRef.current = new THREE.WebGLRenderer({
-          antialias: true,
-          alpha: true,
-        });
-        rendererRef.current.setSize(width, height);
-        rendererRef.current.setPixelRatio(window.devicePixelRatio);
-        rendererRef.current.shadowMap.enabled = true;
-        rendererRef.current.shadowMap.type = THREE.PCFSoftShadowMap; // Better shadow quality
-        containerRef.current.appendChild(rendererRef.current.domElement);
-
-        // Add orbit controls with better settings
+        // Add orbit controls with cinematographer settings
         const controls = new OrbitControls(
           camera,
           rendererRef.current.domElement
         );
         controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
+        controls.dampingFactor = 0.07; // Smoother camera movement
         controls.screenSpacePanning = true;
         controls.minDistance = 0.1;
-        controls.maxDistance = 500; // Significantly increased to allow much more zoom out
+        controls.maxDistance = 500;
+        controls.maxPolarAngle = Math.PI * 0.85; // Prevent going underground too much
 
-        // Add an axes helper
-        const axesHelper = new THREE.AxesHelper(10);
-        scene.add(axesHelper);
+        // Create post-processing composer for advanced effects
+        const composer = new EffectComposer(rendererRef.current);
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+        
+        // Add bloom effect for that glossy bubblegum highlight glow
+        const bloomPass = new UnrealBloomPass(
+          new THREE.Vector2(width, height),
+          0.4,    // bloom strength
+          0.35,   // bloom radius
+          0.9     // bloom threshold
+        );
+        composer.addPass(bloomPass);
 
-        function createAxisLabel(text: string, color: string): Sprite {
-          const canvas = document.createElement("canvas");
-          const ctx = canvas.getContext("2d");
-          if (!ctx)
-            throw new Error("Failed to get canvas context for axis label.");
+        // Add ambient occlusion for better depth perception
+        const ssaoPass = new SSAOPass(
+          scene,
+          camera,
+          width,
+          height
+        );
+        ssaoPass.kernelRadius = 16;
+        ssaoPass.minDistance = 0.005;
+        ssaoPass.maxDistance = 0.1;
+        composer.addPass(ssaoPass);
+        
+        // Final output pass with gamma correction
+        const outputPass = new OutputPass();
+        composer.addPass(outputPass);
 
-          canvas.width = 256;
-          canvas.height = 64;
-          ctx.fillStyle = color;
-          ctx.font = "28px Arial";
-          ctx.fillText(text, 10, 40);
+        // Use HDRI environment map for realistic lighting
+        // We'll use a placeholder until the user provides an actual HDRI image
+        // You would normally load your own HDR map with the RGBELoader
+        const pmremGenerator = new THREE.PMREMGenerator(rendererRef.current);
+        pmremGenerator.compileEquirectangularShader();
 
-          const texture = new CanvasTexture(canvas);
-          const spriteMaterial = new SpriteMaterial({
-            map: texture,
-            depthTest: false,
-          });
-          const sprite = new Sprite(spriteMaterial);
-          sprite.scale.set(3, 1, 1); // Adjust scale as needed
-          return sprite;
+        // Create a default colorful environment map to simulate studio lighting
+        // This is a temporary solution until a proper HDRI is provided
+        const envScene = new THREE.Scene();
+        
+        // Create a gradient background for the environment
+        const canvas = document.createElement('canvas');
+        canvas.width = 2048;
+        canvas.height = 1024;
+        const context = canvas.getContext('2d');
+        if (context) {
+          // Create a gradient from pink to blue - bubblegum colors
+          const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+          gradient.addColorStop(0, '#ff9ff3'); // Soft pink
+          gradient.addColorStop(0.5, '#ffc0cb'); // Classic bubblegum pink
+          gradient.addColorStop(1, '#81ecec'); // Bright cyan
+          
+          context.fillStyle = gradient;
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Add some "studio lights" as bright spots
+          context.fillStyle = 'rgba(255, 255, 255, 0.8)';
+          context.beginPath();
+          context.arc(canvas.width * 0.2, canvas.height * 0.2, 200, 0, Math.PI * 2);
+          context.fill();
+          
+          context.beginPath();
+          context.arc(canvas.width * 0.7, canvas.height * 0.3, 150, 0, Math.PI * 2);
+          context.fill();
         }
+        
+        const envTexture = new THREE.CanvasTexture(canvas);
+        envTexture.mapping = THREE.EquirectangularReflectionMapping;
+        
+        const envMap = pmremGenerator.fromEquirectangular(envTexture).texture;
+        scene.environment = envMap;
+        scene.background = envMap;
+        
+        pmremGenerator.dispose();
+        
+        // Add strategic studio-style lighting setup for professional rendering
+        // Main key light (primary light source)
+        const keyLight = new THREE.DirectionalLight(0xffffff, 3); 
+        keyLight.position.set(1, 2, 3);
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.width = 2048;
+        keyLight.shadow.mapSize.height = 2048;
+        keyLight.shadow.camera.near = 0.1;
+        keyLight.shadow.camera.far = 500;
+        keyLight.shadow.camera.left = -50;
+        keyLight.shadow.camera.right = 50;
+        keyLight.shadow.camera.top = 50;
+        keyLight.shadow.camera.bottom = -50;
+        keyLight.shadow.bias = -0.0001;
+        scene.add(keyLight);
+        
+        // Fill light (softens shadows from the key light, opposite side)
+        const fillLight = new THREE.DirectionalLight(0xffffcc, 1.2); // Slight warmth
+        fillLight.position.set(-2, 1, 0);
+        scene.add(fillLight);
+        
+        // Rim light (highlights edges, creates separation from background)
+        const rimLight = new THREE.DirectionalLight(0xaaeeff, 2); // Cool light for edge highlights
+        rimLight.position.set(0.5, 0, -2);
+        scene.add(rimLight);
+        
+        // Ambient light to simulate global illumination bounce
+        const ambientLight = new THREE.HemisphereLight(0xffffff, 0x8080ff, 0.4);
+        scene.add(ambientLight);
 
-        const xLabel = createAxisLabel("X", "#ff0000");
-        xLabel.position.set(12, 0, 0);
-        scene.add(xLabel);
-
-        const yLabel = createAxisLabel("Y", "#00ff00");
-        yLabel.position.set(0, 12, 0);
-        scene.add(yLabel);
-
-        const zLabel = createAxisLabel("Z", "#0000ff");
-        zLabel.position.set(0, 0, 12);
-        scene.add(zLabel);
-
-        // Set up better directional light for shadows
-        const shadowLight = new THREE.DirectionalLight(0xffffff, 0.6);
-        shadowLight.position.set(5, 10, 7);
-        shadowLight.castShadow = true;
-        shadowLight.shadow.mapSize.width = 1024;
-        shadowLight.shadow.mapSize.height = 1024;
-        shadowLight.shadow.camera.near = 0.5;
-        shadowLight.shadow.camera.far = 100; // Increased to match further camera distance
-        shadowLight.shadow.camera.left = -20; // Wider shadow camera frustum
-        shadowLight.shadow.camera.right = 20;
-        shadowLight.shadow.camera.top = 20;
-        shadowLight.shadow.camera.bottom = -20;
-        scene.add(shadowLight);
-
+        // Create a model group for all geometry
         const modelGroup = new THREE.Group();
+        
+        // Create PBR materials with professional quality for terrain
+        const terrainMaterial = new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.65,
+          metalness: 0.2,
+          envMapIntensity: 0.8,
+          flatShading: true
+        });
+        
+        // Apply the material to the terrain mesh
         const geometryMesh = new THREE.Mesh(
           geometryDataSets.terrainGeometry,
-          new THREE.MeshPhongMaterial({ vertexColors: true })
+          terrainMaterial
         );
+        geometryMesh.castShadow = true;
+        geometryMesh.receiveShadow = true;
         modelGroup.add(geometryMesh);
 
+        // Process polygon geometries with shiny bubblegum-like materials
         if (geometryDataSets.polygonGeometries) {
           geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
-            const polygonMesh = new THREE.Mesh(
-              geometry,
-              new THREE.MeshPhongMaterial({
-                color: vtDataset.color, // Light sky blue
-                //VertexColors: true,
-                flatShading: true, // Use flat shading for better definition
-                shininess: 0, // Remove shininess for a matte look
-              })
-            );
+            // Create a glossy, candy-like material based on the dataset's color
+            const baseColor = vtDataset.color || new THREE.Color(0x81ecec);
+            
+            // Create slightly brightened color for bubblegum aesthetic
+            const enhancedColor = new THREE.Color().copy(baseColor).convertSRGBToLinear();
+            enhancedColor.r = Math.min(1, enhancedColor.r * 1.2);
+            enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
+            enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
+            
+            // Use PBR materials for realistic surfaces
+            const polygonMaterial = new THREE.MeshPhysicalMaterial({
+              color: enhancedColor,
+              roughness: 0.2,  // Low roughness for glossy appearance
+              metalness: 0.1,  // Slight metalness for more interesting reflections
+              clearcoat: 0.8,  // Clear coat layer for candy/bubblegum shine
+              clearcoatRoughness: 0.1,
+              envMapIntensity: 1.5,  // Increased reflection intensity
+              flatShading: false,    // Smooth shading for glossy look
+              side: THREE.DoubleSide
+            });
+            
+            const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
+            polygonMesh.castShadow = true;
+            polygonMesh.receiveShadow = true;
             modelGroup.add(polygonMesh);
           });
         }
 
         scene.add(modelGroup);
-
         modelGroup.position.set(0, 0, 0);
         
-        // Set camera position - use saved position if available, otherwise use default
+        // Set camera position - use saved position if available
         if (cameraPosition && cameraTarget) {
           // Restore saved camera position and target
           camera.position.copy(cameraPosition);
           controls.target.copy(cameraTarget);
         } else {
-          // Use default position
-          camera.position.set(0, -145, 30);
+          // Use dramatic cinematic default position
+          camera.position.set(-80, -140, 60);
+          controls.target.set(0, 0, 5);
         }
         
         camera.updateProjectionMatrix();
 
-        // Animation loop with camera position saving
+        // Animation loop with enhanced rendering
         const animate = () => {
           if (!rendererRef.current) return;
           
-          // Save camera position and target periodically when it changes
+          // Save camera position and target when it changes
           if (controls.target && camera.position) {
             if (!cameraPosition || 
                 !camera.position.equals(cameraPosition) || 
@@ -227,13 +315,15 @@ const ModelPreview = ({
           
           animationFrameId = requestAnimationFrame(animate);
           controls.update();
-          rendererRef.current.render(scene, camera);
+          
+          // Use the composer for enhanced rendering with post-processing
+          composer.render();
         };
 
         // @ts-expect-error
         document.debug_camera = camera; // Expose camera to global scope for debugging
         animate();
-        console.log("Animation started");
+        console.log("Enhanced animation started");
         setLoading(false);
       } catch (setupError) {
         console.error("Error setting up 3D scene:", setupError);
