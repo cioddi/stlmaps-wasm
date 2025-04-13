@@ -30,6 +30,8 @@ import MenuIcon from "@mui/icons-material/Menu";
 import SaveAltIcon from "@mui/icons-material/SaveAlt";
 import InfoIcon from "@mui/icons-material/Info";
 import MapIcon from "@mui/icons-material/Map";
+import BboxSelector from "./components/BboxSelector";
+import { GenerateMeshButton } from "./components/GenerateMeshButton";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 440;
@@ -54,9 +56,7 @@ const App: React.FC = () => {
   const {
     terrainSettings,
     buildingSettings,
-    polygonGeometries,
-    terrainGeometry,
-    buildingsGeometry
+    setBbox
   } = useLayerStore();
 
 
@@ -254,6 +254,22 @@ const App: React.FC = () => {
       open={openTodoList}
       onClose={() => setOpenTodoList(false)}
     />
+                    <GenerateMeshButton />
+
+                <BboxSelector
+                    options={{
+                        center: bboxCenter,
+                        scale: [1, 1],
+                        rotate: 0,
+                        orientation: "portrait",
+                        width: 800,
+                        height: 800,
+                    }}
+                    onChange={(geojson) => {
+                        console.log("BboxSelector onChange triggered with:", geojson);
+                        setBbox(geojson);
+                    }}
+                />
   </>
   );
 };

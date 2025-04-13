@@ -28,6 +28,7 @@ export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
     return (
+        <>
         <Drawer
             variant="permanent"
             sx={{
@@ -71,24 +72,10 @@ export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
                     height: 'calc(100% - 48px)'
                 }}
             >
-                <BboxSelector
-                    options={{
-                        center: bboxCenter,
-                        scale: [1, 1],
-                        rotate: 0,
-                        orientation: "portrait",
-                        width: 800,
-                        height: 800,
-                    }}
-                    onChange={(geojson) => {
-                        console.log("BboxSelector onChange triggered with:", geojson);
-                        setBbox(geojson);
-                    }}
-                />
                 <Box sx={{ mt: 2 }}>
-                    <GenerateMeshButton />
                 </Box>
             </Box>
         </Drawer>
+                </>
     );
 };
