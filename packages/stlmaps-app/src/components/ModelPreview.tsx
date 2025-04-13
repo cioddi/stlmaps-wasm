@@ -101,7 +101,7 @@ const ModelPreview = ({
         rendererRef.current.shadowMap.type = THREE.PCFSoftShadowMap;
         rendererRef.current.outputEncoding = THREE.sRGBEncoding;
         rendererRef.current.toneMapping = THREE.ACESFilmicToneMapping;
-        rendererRef.current.toneMappingExposure = 1.2; // Brighter exposure for pop effect
+        rendererRef.current.toneMappingExposure = 0.8; // Reduced exposure for better contrast
         rendererRef.current.physicallyCorrectLights = true;
         containerRef.current.appendChild(rendererRef.current.domElement);
 
@@ -172,24 +172,14 @@ const ModelPreview = ({
         canvas.height = 1024;
         const context = canvas.getContext('2d');
         if (context) {
-          // Create a gradient from pink to blue - bubblegum colors
+          // Create a gradient with deeper, less bright bubblegum colors
           const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-          gradient.addColorStop(0, '#ff9ff3'); // Soft pink
-          gradient.addColorStop(0.5, '#ffc0cb'); // Classic bubblegum pink
-          gradient.addColorStop(1, '#81ecec'); // Bright cyan
+          gradient.addColorStop(0, '#d896e0'); // Deeper, less bright pink
+          gradient.addColorStop(0.5, '#e88bab'); // Darker bubblegum pink
+          gradient.addColorStop(1, '#68d5d5'); // Deeper, less bright cyan
           
           context.fillStyle = gradient;
           context.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Add some "studio lights" as bright spots
-          context.fillStyle = 'rgba(255, 255, 255, 0.8)';
-          context.beginPath();
-          context.arc(canvas.width * 0.2, canvas.height * 0.2, 200, 0, Math.PI * 2);
-          context.fill();
-          
-          context.beginPath();
-          context.arc(canvas.width * 0.7, canvas.height * 0.3, 150, 0, Math.PI * 2);
-          context.fill();
         }
         
         const envTexture = new THREE.CanvasTexture(canvas);
@@ -203,7 +193,7 @@ const ModelPreview = ({
         
         // Add strategic studio-style lighting setup for professional rendering
         // Main key light (primary light source)
-        const keyLight = new THREE.DirectionalLight(0xffffff, 3); 
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.0); // Reduced intensity
         keyLight.position.set(1, 2, 3);
         keyLight.castShadow = true;
         keyLight.shadow.mapSize.width = 2048;
@@ -217,29 +207,19 @@ const ModelPreview = ({
         keyLight.shadow.bias = -0.0001;
         scene.add(keyLight);
         
-        // Fill light (softens shadows from the key light, opposite side)
-        const fillLight = new THREE.DirectionalLight(0xffffcc, 1.2); // Slight warmth
-        fillLight.position.set(-2, 1, 0);
-        scene.add(fillLight);
-        
-        // Rim light (highlights edges, creates separation from background)
-        const rimLight = new THREE.DirectionalLight(0xaaeeff, 2); // Cool light for edge highlights
-        rimLight.position.set(0.5, 0, -2);
-        scene.add(rimLight);
-        
         // Ambient light to simulate global illumination bounce
-        const ambientLight = new THREE.HemisphereLight(0xffffff, 0x8080ff, 0.4);
+        const ambientLight = new THREE.HemisphereLight(0xffffff, 0x8080ff, 1.4);
         scene.add(ambientLight);
 
         // Create a model group for all geometry
         const modelGroup = new THREE.Group();
         
-        // Create PBR materials with professional quality for terrain
+        // Create PBR materials with professional quality for terrain (less reflective)
         const terrainMaterial = new THREE.MeshStandardMaterial({
           vertexColors: true,
-          roughness: 0.65,
-          metalness: 0.2,
-          envMapIntensity: 0.8,
+          roughness: 0.8,
+          metalness: 0.01,
+          envMapIntensity: 0.4, // 50% less reflective
           flatShading: true
         });
         
@@ -264,15 +244,15 @@ const ModelPreview = ({
             enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
             enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
             
-            // Use PBR materials for realistic surfaces
+            // Use PBR materials for realistic surfaces (with reduced reflectivity)
             const polygonMaterial = new THREE.MeshPhysicalMaterial({
               color: enhancedColor,
-              roughness: 0.2,  // Low roughness for glossy appearance
-              metalness: 0.1,  // Slight metalness for more interesting reflections
-              clearcoat: 0.8,  // Clear coat layer for candy/bubblegum shine
-              clearcoatRoughness: 0.1,
-              envMapIntensity: 1.5,  // Increased reflection intensity
-              flatShading: false,    // Smooth shading for glossy look
+              roughness: 0.35,  // Slightly increased roughness for less glossiness
+              metalness: 0.01,  // Reduced metalness for less reflections
+              clearcoat: 0.06,   // Reduced clear coat for more subtle shine
+              clearcoatRoughness: 2, // Increased clearcoat roughness for diffused reflections
+              envMapIntensity: 0.7,    // Reduced reflection intensity by ~50%
+              flatShading: false,      // Smooth shading for glossy look
               side: THREE.DoubleSide
             });
             
