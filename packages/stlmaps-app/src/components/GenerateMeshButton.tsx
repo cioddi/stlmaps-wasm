@@ -24,20 +24,50 @@ export interface GridSize {
   height: number;
 }
 
+/**
+ * Interface representing a vector tile dataset configuration for 3D rendering.
+ */
 export interface VtDataSet {
+  /** The source layer name from the vector tile data */
   sourceLayer: string;
+  
+  /** Optional array of subclass identifiers to filter features by class */
   subClass?: string[];
+  
+  /** THREE.js Color to apply to the geometry */
   color: THREE.Color;
+  
+  /** Optional array of pre-processed geometry data */
   data?: GeometryData[];
+  
+  /** Optional THREE.js buffer geometry for the dataset */
   geometry?: THREE.BufferGeometry;
+  
+  /** Optional depth value for extruding 2D geometries into 3D */
   extrusionDepth?: number;
+  
+  /** Optional minimum extrusion depth when using variable extrusion */
   minExtrusionDepth?: number;
+  
+  /** Optional z-axis offset for vertical positioning */
   zOffset?: number;
+  
+  /** Optional buffer size for geometry operations like polygon buffering */
   bufferSize?: number;
-  filter?: any[]; // Add support for MapLibre-style filter expressions
+  
+  /** Optional array for MapLibre-style filter expressions to filter features */
+  filter?: any[]; 
+  
+  /** Whether to use adaptive scaling based on zoom level or other factors */
   useAdaptiveScaleFactor?: boolean;
+  
+  /** Factor to multiply height values by when extruding */
   heightScaleFactor?: number;
+  
+  /** Whether to align the vertices to match terrain elevation */
   alignVerticesToTerrain?: boolean;
+  
+  /** Whether this dataset is enabled for rendering */
   enabled?: boolean;
 }
 
