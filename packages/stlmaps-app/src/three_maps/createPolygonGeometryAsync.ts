@@ -52,8 +52,9 @@ export async function createPolygonGeometryAsync({
       }
     );
 
+    const parsedGeometry = JSON.parse(serializedGeometry);
     // Create a new buffer geometry from the serialized data
-    if (!serializedGeometry || !serializedGeometry.vertices) {
+    if (!parsedGeometry || !parsedGeometry.vertices) {
       console.error("Worker returned invalid geometry data");
       return new THREE.BufferGeometry();
     }
@@ -63,14 +64,14 @@ export async function createPolygonGeometryAsync({
     // Add position attribute
     geometry.setAttribute(
       'position',
-      new THREE.Float32BufferAttribute(serializedGeometry.vertices, 3)
+      new THREE.Float32BufferAttribute(parsedGeometry.vertices, 3)
     );
     
     // Add normal attribute if available
-    if (serializedGeometry.normals) {
+    if (parsedGeometry.normals) {
       geometry.setAttribute(
         'normal',
-        new THREE.Float32BufferAttribute(serializedGeometry.normals, 3)
+        new THREE.Float32BufferAttribute(parsedGeometry.normals, 3)
       );
     } else {
       // Compute normals if not provided
@@ -78,16 +79,16 @@ export async function createPolygonGeometryAsync({
     }
     
     // Add UV attribute if available
-    if (serializedGeometry.uvs) {
+    if (parsedGeometry.uvs) {
       geometry.setAttribute(
         'uv',
-        new THREE.Float32BufferAttribute(serializedGeometry.uvs, 2)
+        new THREE.Float32BufferAttribute(parsedGeometry.uvs, 2)
       );
     }
     
     // Add indices if available
-    if (serializedGeometry.indices) {
-      geometry.setIndex(Array.from(serializedGeometry.indices));
+    if (parsedGeometry.indices) {
+      geometry.setIndex(Array.from(parsedGeometry.indices));
     }
     
     return geometry;
