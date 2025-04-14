@@ -22,19 +22,17 @@ export class WorkerService {
    * Initializes a worker with a specified name if it doesn't already exist
    * 
    * @param workerName - Unique name for the worker
-   * @param workerPath - Path to the worker script
+   * @param workerConstructor - Worker constructor from Vite's ?worker import
    * @returns The worker instance
    */
-  public static initWorker(workerName: string, workerPath: string): Worker {
+  public static initWorker(workerName: string, workerConstructor: new () => Worker): Worker {
     // Return existing worker if already initialized
     if (this.workers.has(workerName)) {
       return this.workers.get(workerName)!;
     }
     
-    // Create a new worker
-    const worker = new Worker(new URL(workerPath, import.meta.url), { 
-      type: 'module' 
-    });
+    // Create a new worker using the constructor provided by Vite
+    const worker = new workerConstructor();
     
     // Set up message handling
     worker.onmessage = this.handleWorkerMessage.bind(this);
@@ -50,16 +48,16 @@ export class WorkerService {
    * Runs a task on a worker and returns a promise with the result
    * 
    * @param workerName - Name of the worker to use
-   * @param workerPath - Path to the worker script
+   * @param workerConstructor - Worker constructor from Vite's ?worker import
    * @param data - Data to send to the worker
    * @returns Promise that resolves with the worker's result
    */
   public static runWorkerTask(
     workerName: string, 
-    workerPath: string, 
+    workerConstructor: new () => Worker, 
     data: any
   ): Promise<any> {
-    const worker = this.initWorker(workerName, workerPath);
+    const worker = this.initWorker(workerName, workerConstructor);
     const requestId = `${workerName}-${++this.requestCounter}`;
     
     // Create a promise that will be resolved when the worker responds

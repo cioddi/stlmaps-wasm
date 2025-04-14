@@ -3,8 +3,8 @@ import { WorkerService } from "../workers/WorkerService";
 import { GridSize, VtDataSet } from "../components/GenerateMeshButton";
 import { GeometryData } from "../components/VectorTileFunctions";
 
-// Define the path to our worker
-const POLYGON_WORKER_PATH = "../workers/polygonGeometryWorker.ts";
+// Import the worker directly - Vite will handle the bundling
+import PolygonWorker from "../workers/polygonGeometryWorker.ts?worker";
 const WORKER_NAME = "polygon-geometry";
 
 /**
@@ -38,7 +38,7 @@ export async function createPolygonGeometryAsync({
     // Run the geometry creation in a worker
     const serializedGeometry = await WorkerService.runWorkerTask(
       WORKER_NAME,
-      POLYGON_WORKER_PATH,
+      PolygonWorker,
       {
         bbox,
         polygons,
