@@ -4,6 +4,8 @@ import { resolve } from 'path';
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Use relative paths for all assets
+  base: './',
   plugins: [react()],
   build: {
     rollupOptions: {
