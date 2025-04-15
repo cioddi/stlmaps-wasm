@@ -70,8 +70,8 @@ const App: React.FC = () => {
         onViewModeChange={handleViewModeChange}
         onOpenAttribution={() => setOpenAttribution(true)}
         onOpenTodoList={() => setOpenTodoList(true)}
-        onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
-        onMenuToggle={() => setMenuOpen(true)}
+        onSidebarToggle={() => setSidebarOpen(curr => !curr)}
+        onMenuToggle={() => setMenuOpen(curr => !curr)}
         onCitySelect={(city) => {
           if (city) {
             // Only update bbox center, map center is handled by CitySearch component
