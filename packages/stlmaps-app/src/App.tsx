@@ -5,7 +5,6 @@ import {
   Box,
   Toolbar,
   Divider,
-  IconButton,
   useMediaQuery,
   useTheme,
   Drawer,
@@ -13,8 +12,6 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
-  ToggleButtonGroup,
-  ToggleButton
 } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import ModelPreview from "./components/ModelPreview";
@@ -26,8 +23,6 @@ import AttributionDialog from "./components/AttributionDialog";
 import ProjectTodoList from "./components/ProjectTodoList";
 import InfoIcon from "@mui/icons-material/Info";
 import MapIcon from "@mui/icons-material/Map";
-import ViewQuiltIcon from "@mui/icons-material/ViewQuilt";
-import View3dIcon from "@mui/icons-material/ViewInAr";
 import BboxSelector from "./components/BboxSelector";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
 import { TopBar, ViewMode } from "./components/TopBar";
@@ -116,32 +111,6 @@ const App: React.FC = () => {
               />
             </ListItem>
             <Divider />
-            <ListItem>
-              <ToggleButtonGroup
-                value={viewMode}
-                exclusive
-                onChange={(e, newMode) => {
-                  if (newMode !== null) {
-                    setViewMode(newMode);
-                    setMenuOpen(false);
-                  }
-                }}
-                aria-label="view mode"
-                size="small"
-                sx={{ width: "100%", justifyContent: "space-between" }}
-              >
-                <ToggleButton value="map" aria-label="map only">
-                  <MapIcon /> Map
-                </ToggleButton>
-                <ToggleButton value="split" aria-label="split view">
-                  <ViewQuiltIcon /> Split
-                </ToggleButton>
-                <ToggleButton value="model" aria-label="model only">
-                  <View3dIcon /> 3D
-                </ToggleButton>
-              </ToggleButtonGroup>
-            </ListItem>
-            <Divider />
             <ListItem button onClick={() => {
               setOpenAttribution(true);
               setMenuOpen(false);
@@ -159,9 +128,6 @@ const App: React.FC = () => {
                 <MapIcon />
               </ListItemIcon>
               <ListItemText primary="Roadmap" />
-            </ListItem>
-            <ListItem>
-              <ExportButtons />
             </ListItem>
           </List>
         </Box>

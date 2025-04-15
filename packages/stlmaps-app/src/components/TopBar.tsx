@@ -64,7 +64,14 @@ export const TopBar: React.FC<TopBarProps> = ({
               <MenuIcon />
             </IconButton>
           )}
-          <Typography variant="h6" color="primary">
+          <Typography 
+            variant={isMobile ? "body2" : "h6"}
+            color="primary"
+            sx={{ 
+              fontSize: isMobile ? '0.75rem' : undefined,
+              fontWeight: 'bold'
+            }}
+          >
             STLmaps
           </Typography>
 
@@ -103,7 +110,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         )}
 
         {/* Right side topbar buttons */}
-        <Box sx={{ display: "flex", gap: 1 }}>
+        <Box sx={{ display: "flex" }}>
           {/* Export button - Always visible with just icon on mobile */}
           <ExportButtons />
           
@@ -134,21 +141,23 @@ export const TopBar: React.FC<TopBarProps> = ({
               >
                 Roadmap
               </Button>
-              <ProcessingIndicator 
-                isVisible={isProcessing}
-                title="Processing 3D Model"
-                progress={processingProgress}
-                statusMessage={processingStatus}
-                steps={[
-                  { id: 'preparation', label: 'Preparing model data', status: isProcessing ? 'in-progress' : 'not-started', order: 0 },
-                  { id: 'geometry', label: 'Building geometries', status: 'not-started', order: 5 },
-                  { id: 'finalizing', label: 'Finalizing model', status: 'not-started', order: 100 },
-                ]}
-                activeStepId={isProcessing ? 'preparation' : null}
-              />
             </>
           )}
         </Box>
+        
+        {/* Processing Indicator - Always visible, positioned differently based on device */}
+        <ProcessingIndicator 
+          isVisible={isProcessing}
+          title="Processing 3D Model"
+          progress={processingProgress}
+          statusMessage={processingStatus}
+          steps={[
+            { id: 'preparation', label: 'Preparing model data', status: isProcessing ? 'in-progress' : 'not-started', order: 0 },
+            { id: 'geometry', label: 'Building geometries', status: 'not-started', order: 5 },
+            { id: 'finalizing', label: 'Finalizing model', status: 'not-started', order: 100 },
+          ]}
+          activeStepId={isProcessing ? 'preparation' : null}
+        />
       </Toolbar>
     </AppBar>
   );
