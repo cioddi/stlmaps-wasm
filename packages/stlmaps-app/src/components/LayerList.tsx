@@ -43,7 +43,9 @@ const StyledPaper = styled(Paper)(({ theme }) => ({
   overflow: 'hidden',
 }));
 
-const LayerHeader = styled(ListItem)<{ active?: boolean }>(({ theme, active }) => ({
+const LayerHeader = styled(ListItem, {
+  shouldForwardProp: (prop) => prop !== 'active'
+})<{ active?: boolean }>(({ theme, active }) => ({
   backgroundColor: active 
     ? `${theme.palette.primary.main}10` 
     : theme.palette.background.paper,

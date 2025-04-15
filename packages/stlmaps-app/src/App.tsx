@@ -1,31 +1,23 @@
-import React, { useState, Suspense, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   CssBaseline,
-  CircularProgress,
   Box,
   Toolbar,
   Divider,
   useMediaQuery,
   useTheme,
   Drawer,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
 } from "@mui/material";
-import { MapLibreMap } from "@mapcomponents/react-maplibre";
-import ModelPreview from "./components/ModelPreview";
-import CitySearch from "./components/CitySearch";
 import useLayerStore from "./stores/useLayerStore";
 import { Sidebar } from "./components/Sidebar";
-import ExportButtons from "./components/ExportButtons";
 import AttributionDialog from "./components/AttributionDialog";
 import ProjectTodoList from "./components/ProjectTodoList";
-import InfoIcon from "@mui/icons-material/Info";
-import MapIcon from "@mui/icons-material/Map";
 import BboxSelector from "./components/BboxSelector";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
 import { TopBar, ViewMode } from "./components/TopBar";
+import MobileMenu from "./components/MobileMenu";
+import MapSection from "./components/MapSection";
+import ModelSection from "./components/ModelSection";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 440;
@@ -88,50 +80,18 @@ const App: React.FC = () => {
         }}
       />
 
-      {/* Mobile Menu Drawer - appears from the right side */}
-      <Drawer
-        anchor="right"
+      {/* Mobile Menu Drawer */}
+      <MobileMenu
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
-        sx={{ zIndex: (theme) => theme.zIndex.drawer + 20000 }}
-      >
-        <Box
-          sx={{ width: 280 }}
-          role="presentation"
-        >
-          <List>
-            <ListItem>
-              <CitySearch
-                onCitySelect={(city) => {
-                  if (city) {
-                    setBboxCenter(city.coordinates);
-                    setMenuOpen(false);
-                  }
-                }}
-              />
-            </ListItem>
-            <Divider />
-            <ListItem button onClick={() => {
-              setOpenAttribution(true);
-              setMenuOpen(false);
-            }}>
-              <ListItemIcon>
-                <InfoIcon />
-              </ListItemIcon>
-              <ListItemText primary="Attribution" />
-            </ListItem>
-            <ListItem button onClick={() => {
-              setOpenTodoList(true);
-              setMenuOpen(false);
-            }}>
-              <ListItemIcon>
-                <MapIcon />
-              </ListItemIcon>
-              <ListItemText primary="Roadmap" />
-            </ListItem>
-          </List>
-        </Box>
-      </Drawer>
+        onCitySelect={(city) => {
+          if (city) {
+            setBboxCenter(city.coordinates);
+          }
+        }}
+        onOpenAttribution={() => setOpenAttribution(true)}
+        onOpenTodoList={() => setOpenTodoList(true)}
+      />
 
       {/* Slideable Sidebar - changes between temporary and permanent based on screen size */}
       <Drawer
@@ -166,51 +126,17 @@ const App: React.FC = () => {
       >
         <Toolbar /> {/* Spacing below AppBar */}
         {/* Map - Top Half */}
-        <Box 
-          sx={{ 
-            flex: mapFlex, 
-            position: "relative", 
-            minHeight: 0, 
-            display: mapDisplay, 
-            transition: theme.transitions.create(['flex', 'display'], {
-              duration: theme.transitions.duration.standard,
-            })
-          }}
-        >
-          <MapLibreMap
-            style={{
-              position: "absolute",
-              top: 0,
-              bottom: 0,
-              left: 0,
-              right: 0,
-            }}
-            options={{
-              center: mapCenter,
-              zoom: 14,
-              style:
-                "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
-            }}
-          />
-        </Box>
+        <MapSection 
+          mapCenter={mapCenter}
+          flex={mapFlex}
+          display={mapDisplay}
+        />
         {showDivider && <Divider />}
         {/* Model Preview - Bottom Half */}
-        <Box
-          sx={{ 
-            flex: modelFlex, 
-            position: "relative", 
-            minHeight: 0, 
-            zIndex: 10000, 
-            display: modelDisplay,
-            transition: theme.transitions.create(['flex', 'display'], {
-              duration: theme.transitions.duration.standard,
-            })
-          }}
-        >
-          <Suspense fallback={<CircularProgress />}>
-            <ModelPreview />
-          </Suspense>
-        </Box>
+        <ModelSection
+          flex={modelFlex}
+          display={modelDisplay}
+        />
       </Box>
     </Box>
 
