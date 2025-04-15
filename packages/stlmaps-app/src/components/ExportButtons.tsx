@@ -60,21 +60,21 @@ const ExportButtons: React.FC = () => {
       id: 'obj',
       name: 'Wavefront OBJ',
       description: 'Standard 3D file format supported by most 3D applications. Good for general-purpose 3D models.',
-      icon: <ScatterPlotIcon fontSize="large" />,
+      icon: <ScatterPlotIcon fontSize="small" />,
       fileExtension: 'obj'
     },
     {
       id: 'stl',
       name: 'STL',
       description: '3D printing industry standard format. Ideal for 3D printing and CNC manufacturing.',
-      icon: <ModelTrainingIcon fontSize="large" />,
+      icon: <ModelTrainingIcon fontSize="small" />,
       fileExtension: 'stl'
     },
     {
       id: 'glb',
       name: 'glTF/GLB',
       description: 'Modern, efficient 3D format with material support. Best for web and game engines.',
-      icon: <ThreeDRotationIcon fontSize="large" />,
+      icon: <ThreeDRotationIcon fontSize="small" />,
       fileExtension: 'glb'
     }
   ];
@@ -404,19 +404,6 @@ const ExportButtons: React.FC = () => {
                       }
                     }}
                   >
-                    <Box 
-                      sx={{ 
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        bgcolor: theme.palette.action.hover,
-                        borderRadius: '50%',
-                        p: 2,
-                        color: theme.palette.primary.main
-                      }}
-                    >
-                      {format.icon}
-                    </Box>
                     
                     <Box flex={1}>
                       <Box display="flex" alignItems="center" mb={0.5}>
