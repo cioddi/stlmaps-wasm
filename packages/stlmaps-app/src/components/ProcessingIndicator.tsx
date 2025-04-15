@@ -59,8 +59,8 @@ interface ProcessingIndicatorProps {
 const ProcessingContainer = styled(Paper)(({ theme }) => ({
   position: 'fixed',
   bottom: '1rem',
-  left: '50%',
-  transform: 'translateX(-50%)',
+  right: '1rem',
+  transform: 'none',
   padding: '16px 20px',
   borderRadius: '12px',
   backgroundColor: 'rgba(34, 43, 54, 0.95)',
@@ -77,6 +77,8 @@ const ProcessingContainer = styled(Paper)(({ theme }) => ({
   transition: 'all 0.3s ease-out',
   [theme.breakpoints.down('sm')]: {
     bottom: '0.75rem',
+    left: '50%',
+    transform: 'translateX(-50%)',
     width: 'calc(100vw - 1.5rem)',
     padding: '12px 16px',
   }

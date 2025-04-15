@@ -103,7 +103,7 @@ const LayerList: React.FC<LayerListProps> = () => {
   } = useLayerStore();
 
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({
-    terrain: true,
+    terrain: false,
     buildings: true,
   });
 

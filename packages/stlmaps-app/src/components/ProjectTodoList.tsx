@@ -121,9 +121,10 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
             tags: ["UI/UX", "Customization", "Styling"],
             progress: 0,
             children: [
+                { title: "Improve mobile responsive UX", done: true },
+                { title: "Implement layer controls (toggle, color, filter)", done: true },
+                { title: "Add color and style options", done: true },
                 { title: "Redesign layout", done: false },
-                { title: "Implement layer controls (toggle, color, filter)", done: false },
-                { title: "Add color and style options", done: false },
                 { title: "Add matrix support to ensure perfect alignment of adjacent bbox exports", done: false },
                 { title: "Create save/load bbox presets", done: false },
                 { title: "Create save/load style presets", done: false },
