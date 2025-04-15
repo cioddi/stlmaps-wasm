@@ -19,6 +19,7 @@ import View3dIcon from "@mui/icons-material/ViewInAr";
 import CitySearch from "./CitySearch";
 import ExportButtons from "./ExportButtons";
 import ProcessingIndicator from "./ProcessingIndicator";
+import useLayerStore from "../stores/useLayerStore";
 
 // View mode types
 export type ViewMode = "split" | "map" | "model";
@@ -44,6 +45,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { isProcessing, processingStatus, processingProgress } = useLayerStore();
 
   return (
     <AppBar
@@ -132,7 +134,18 @@ export const TopBar: React.FC<TopBarProps> = ({
               >
                 Roadmap
               </Button>
-              <ProcessingIndicator />
+              <ProcessingIndicator 
+                isVisible={isProcessing}
+                title="Processing 3D Model"
+                progress={processingProgress}
+                statusMessage={processingStatus}
+                steps={[
+                  { id: 'preparation', label: 'Preparing model data', status: isProcessing ? 'in-progress' : 'not-started', order: 0 },
+                  { id: 'geometry', label: 'Building geometries', status: 'not-started', order: 5 },
+                  { id: 'finalizing', label: 'Finalizing model', status: 'not-started', order: 100 },
+                ]}
+                activeStepId={isProcessing ? 'preparation' : null}
+              />
             </>
           )}
         </Box>
