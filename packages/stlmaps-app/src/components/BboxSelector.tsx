@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo, useState } from "react";
+import React, { useRef, useEffect, useMemo, useState, forwardRef, useImperativeHandle } from "react";
 import ReactDOM from "react-dom";
 import Moveable from "react-moveable";
 import { useMap, useMapState } from "@mapcomponents/react-maplibre";
@@ -84,7 +84,7 @@ function getMapZoomScaleModifier(point: [number, number], _map: MapType) {
 /**
  * BboxSelector component renders a transformable (drag, scale, rotate) preview of the desired export or print content
  */
-export default function BboxSelector(props: Props) {
+const BboxSelector = forwardRef((props: Props, ref) => {
   const [options, setOptions] = React.useState<BboxSelectorOptions>(
     props.options
   );
@@ -332,6 +332,11 @@ export default function BboxSelector(props: Props) {
       setBbox(_geoJson);
     }
   }, [mapHook.map, options.width, options.height, options.orientation, transformOrigin]);
+  
+  // Expose updateBbox method through ref
+  useImperativeHandle(ref, () => ({
+    updateBbox
+  }));
 
   // Update element styling and position when needed without updating bbox
   useEffect(() => {
@@ -445,4 +450,6 @@ export default function BboxSelector(props: Props) {
   ) : (
     <></>
   );
-}
+});
+
+export default BboxSelector;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   CssBaseline,
   Box,
@@ -18,6 +18,7 @@ import { TopBar, ViewMode } from "./components/TopBar";
 import MobileMenu from "./components/MobileMenu";
 import MapSection from "./components/MapSection";
 import ModelSection from "./components/ModelSection";
+import { Feature } from "geojson";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 440;
@@ -33,6 +34,7 @@ const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [menuOpen, setMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const bboxSelectorRef = useRef<{ updateBbox: () => void } | null>(null);
   
   // Close sidebar by default on mobile devices
   useEffect(() => {
@@ -46,6 +48,20 @@ const App: React.FC = () => {
     setBbox
   } = useLayerStore();
 
+  // Handle city selection to update both center and bbox
+  const handleCitySelect = (city: any) => {
+    if (city) {
+      setBboxCenter(city.coordinates);
+      
+      // Add a small delay to ensure state is updated before triggering bbox update
+      setTimeout(() => {
+        if (bboxSelectorRef.current) {
+          bboxSelectorRef.current.updateBbox();
+        }
+      }, 100);
+    }
+  };
+  
   const handleViewModeChange = (
     event: React.MouseEvent<HTMLElement>,
     newMode: ViewMode | null,
@@ -72,23 +88,14 @@ const App: React.FC = () => {
         onOpenTodoList={() => setOpenTodoList(true)}
         onSidebarToggle={() => setSidebarOpen(curr => !curr)}
         onMenuToggle={() => setMenuOpen(curr => !curr)}
-        onCitySelect={(city) => {
-          if (city) {
-            // Only update bbox center, map center is handled by CitySearch component
-            setBboxCenter(city.coordinates);
-          }
-        }}
+        onCitySelect={handleCitySelect}
       />
 
       {/* Mobile Menu Drawer */}
       <MobileMenu
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
-        onCitySelect={(city) => {
-          if (city) {
-            setBboxCenter(city.coordinates);
-          }
-        }}
+        onCitySelect={handleCitySelect}
         onOpenAttribution={() => setOpenAttribution(true)}
         onOpenTodoList={() => setOpenTodoList(true)}
       />
@@ -149,9 +156,8 @@ const App: React.FC = () => {
       open={openTodoList}
       onClose={() => setOpenTodoList(false)}
     />
-    <GenerateMeshButton />
-
-    <BboxSelector
+    <GenerateMeshButton />      <BboxSelector
+      ref={bboxSelectorRef}
       options={{
         center: bboxCenter,
         scale: [1, 1],
