@@ -16,6 +16,8 @@ import MenuIcon from "@mui/icons-material/Menu";
 import MapIcon from "@mui/icons-material/Map";
 import ViewQuiltIcon from "@mui/icons-material/ViewQuilt";
 import View3dIcon from "@mui/icons-material/ViewInAr";
+import InfoIcon from "@mui/icons-material/Info";
+import ListAltIcon from "@mui/icons-material/ListAlt";
 import CitySearch from "./CitySearch";
 import ExportButtons from "./ExportButtons";
 import ProcessingIndicator from "./ProcessingIndicator";
@@ -127,20 +129,24 @@ export const TopBar: React.FC<TopBarProps> = ({
           {/* Desktop buttons */}
           {!isMobile && (
             <>
-              <Button
-                variant="outlined"
-                onClick={onOpenAttribution}
-                color="secondary"
-              >
-                Attribution
-              </Button>
-              <Button
-                variant="outlined"
-                onClick={onOpenTodoList}
-                color="secondary"
-              >
-                Roadmap
-              </Button>
+              <Tooltip title="Attribution">
+                <IconButton
+                  color="secondary"
+                  onClick={onOpenAttribution}
+                  sx={{ ml: 1 }}
+                >
+                  <InfoIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Roadmap">
+                <IconButton
+                  color="secondary"
+                  onClick={onOpenTodoList}
+                  sx={{ ml: 1 }}
+                >
+                  <ListAltIcon />
+                </IconButton>
+              </Tooltip>
             </>
           )}
         </Box>

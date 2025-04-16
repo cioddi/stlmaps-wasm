@@ -6,7 +6,8 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
-  Divider
+  Divider,
+  Toolbar
 } from "@mui/material";
 import InfoIcon from "@mui/icons-material/Info";
 import MapIcon from "@mui/icons-material/Map";
@@ -34,6 +35,7 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
       onClose={onClose}
       sx={{ zIndex: (theme) => theme.zIndex.drawer + 20000 }}
     >
+      <Toolbar /> {/* Spacing below AppBar */}
       <Box
         sx={{ width: 280 }}
         role="presentation"
