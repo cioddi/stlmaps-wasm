@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { CircularProgress } from "@mui/material";
 import * as THREE from "three";
 // @ts-expect-error
@@ -36,15 +36,152 @@ interface SceneData {
   isFirstRender?: boolean;
 }
 
+/**
+ * Detects device capabilities and recommends the appropriate rendering mode
+ */
+const detectDeviceCapabilities = (): 'quality' | 'performance' => {
+  console.log("Detecting device capabilities for optimal rendering mode");
+  
+  // Check for mobile devices first - they generally need performance mode
+  const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  // Get device memory (available in Chrome)
+  // @ts-expect-error - navigator.deviceMemory is not in TypeScript defs
+  const deviceMemory = navigator.deviceMemory || 4; // Default to 4GB if not available
+  
+  // Check for hardware concurrency (CPU cores)
+  const cpuCores = navigator.hardwareConcurrency || 4; // Default to 4 cores
+  
+  // Check screen resolution
+  const pixelCount = window.screen.width * window.screen.height;
+  const isHighResolution = pixelCount > (1920 * 1080);
+  
+  // Try to detect GPU performance using canvas
+  let gpuPowerScore = 0;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    
+    if (gl) {
+      // @ts-expect-error - This property exists on WebGL contexts
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      if (debugInfo) {
+        // @ts-expect-error - This constant exists when the extension is available
+        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+        
+        // Check for keywords indicating powerful GPUs
+        const knownHighPerformanceGPUs = [
+          'NVIDIA', 'RTX', 'GTX', 'Quadro',
+          'AMD', 'Radeon', 'FirePro',
+          'Intel Iris', 'Apple M1', 'Apple M2', 'Apple M3'
+        ];
+        
+        for (const gpu of knownHighPerformanceGPUs) {
+          if (renderer && renderer.indexOf(gpu) !== -1) {
+            gpuPowerScore += 1;
+          }
+        }
+        
+        // Mobile GPUs typically have 'Mali', 'Adreno', 'PowerVR' in their name
+        const mobileGPUs = ['Mali', 'Adreno', 'PowerVR', 'Apple GPU'];
+        for (const gpu of mobileGPUs) {
+          if (renderer && renderer.indexOf(gpu) !== -1) {
+            gpuPowerScore -= 1; // Reduce score for mobile GPUs
+          }
+        }
+        
+        console.log("Detected GPU:", renderer);
+      }
+      
+      // Check supported extensions as another indicator
+      const extensions = gl.getSupportedExtensions() || [];
+      const advancedExtensions = [
+        'EXT_color_buffer_float',
+        'OES_texture_float',
+        'WEBGL_color_buffer_float',
+        'WEBGL_compressed_texture_s3tc',
+        'WEBGL_depth_texture'
+      ];
+      
+      for (const ext of advancedExtensions) {
+        if (extensions.includes(ext)) {
+          gpuPowerScore += 0.5;
+        }
+      }
+      
+      // Test draw call performance with a basic benchmark
+      const startTime = performance.now();
+      let testIterations = 0;
+      const testDrawCalls = () => {
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.flush();
+        testIterations++;
+        
+        if (performance.now() - startTime < 50) { // 50ms test
+          testDrawCalls();
+        }
+      };
+      testDrawCalls();
+      
+      // Higher iterations = better performance
+      if (testIterations > 1000) {
+        gpuPowerScore += 2;
+      } else if (testIterations > 500) {
+        gpuPowerScore += 1;
+      }
+    }
+  } catch (e) {
+    console.warn("Error during GPU capability detection:", e);
+  }
+
+  // Combine factors to make decision
+  let useQualityMode = true;
+  
+  // Score-based decision
+  let totalScore = 0;
+  
+  // Device factors
+  totalScore -= isMobileDevice ? 3 : 0;
+  totalScore += Math.min(deviceMemory / 2, 4); // Up to 4 points for 8GB+ RAM
+  totalScore += Math.min(cpuCores / 2, 4);     // Up to 4 points for 8+ cores
+  totalScore -= isHighResolution ? 1 : 0;      // High resolution is demanding
+  totalScore += gpuPowerScore;                 // Add GPU power score
+  
+  // Check for battery status if available
+  // @ts-expect-error - navigator.getBattery is not in all TypeScript defs
+  if (navigator.getBattery) {
+    // @ts-expect-error - navigator.getBattery is not in all TypeScript defs
+    navigator.getBattery().then(battery => {
+      if (battery.charging === false && battery.level < 0.5) {
+        // If on battery and below 50%, prefer performance mode
+        totalScore -= 2;
+      }
+    }).catch(() => {
+      // Ignore errors from battery API
+    });
+  }
+  
+  console.log("Device capability score:", totalScore);
+  
+  // Set threshold for quality mode
+  useQualityMode = totalScore >= 4;
+  
+  const recommendedMode = useQualityMode ? 'quality' : 'performance';
+  console.log("Recommended rendering mode:", recommendedMode);
+  
+  return recommendedMode;
+};
+
 const ModelPreview = ({}: ModelPreviewProps) => {
   // Get geometry data and settings from the Zustand store
-  const { geometryDataSets, terrainSettings, renderingSettings } = useLayerStore();
+  const { geometryDataSets, terrainSettings, renderingSettings, setRenderingMode } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasSetInitialMode, setHasSetInitialMode] = useState<boolean>(false);
   
   // Access the current rendering mode
   const renderingMode = renderingSettings.mode;
@@ -521,11 +658,19 @@ const ModelPreview = ({}: ModelPreviewProps) => {
     if (!containerRef.current) return;
     
     console.log("ModelPreview mounted");
+
+    // Auto-detect and set optimal rendering mode on first mount
+    if (!hasSetInitialMode) {
+      const detectedMode = detectDeviceCapabilities();
+      console.log(`Setting initial rendering mode to ${detectedMode} based on device capabilities`);
+      setRenderingMode(detectedMode);
+      setHasSetInitialMode(true);
+    }
     
     // Clear any existing canvases in the container first
-    containerRef.current.querySelectorAll('button').forEach(canvas => {
-      console.log("Removing existing BUTTONS before initialization");
-      canvas.remove();
+    containerRef.current.querySelectorAll('button').forEach(button => {
+      console.log("Removing existing buttons before initialization");
+      button.remove();
     });
     // Clear any existing canvases in the container first
     containerRef.current.querySelectorAll('canvas').forEach(canvas => {
