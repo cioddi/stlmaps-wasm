@@ -170,6 +170,7 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
       elevation={8}
       sx={{
         opacity: isVisible ? 1 : 0,
+        pointerEvents: 'none'
       }}
     >
       <TechLines backgroundImage="linear-gradient(90deg, #42a5f5, #64ffda, #42a5f5)" />
