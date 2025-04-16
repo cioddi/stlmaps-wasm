@@ -30,17 +30,24 @@ interface SceneData {
   animationFrameId?: number;
   initialized: boolean;
   buttons: HTMLButtonElement[];
+  savedCameraPosition?: THREE.Vector3;
+  savedCameraTarget?: THREE.Vector3;
+  cameraUpdateTimeoutId?: NodeJS.Timeout | null;
+  isFirstRender?: boolean;
 }
 
 const ModelPreview = ({}: ModelPreviewProps) => {
-  // Get geometry data and terrain settings from the Zustand store
-  const { geometryDataSets, terrainSettings } = useLayerStore();
+  // Get geometry data and settings from the Zustand store
+  const { geometryDataSets, terrainSettings, renderingSettings } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Access the current rendering mode
+  const renderingMode = renderingSettings.mode;
   
   // Store camera position and target to persist across re-renders
   const [cameraPosition, setCameraPosition] = useState<THREE.Vector3 | null>(null);
@@ -69,7 +76,25 @@ const ModelPreview = ({}: ModelPreviewProps) => {
 
   // Initialize Three.js scene
   const initScene = useCallback(() => {
-    if (!containerRef.current || rendererRef.current) return;
+    // Only initialize if we don't have a renderer yet or if rendering mode has changed
+    const shouldInitialize = !rendererRef.current || 
+      (sceneDataRef.current && sceneDataRef.current.renderingMode !== renderingMode);
+    
+    if (!containerRef.current || !shouldInitialize) return;
+    
+    // Clean up existing renderer and scene if they exist
+    if (rendererRef.current) {
+      console.log("Cleaning up existing Three.js scene before re-initialization");
+      if (containerRef.current.contains(rendererRef.current.domElement)) {
+        containerRef.current.removeChild(rendererRef.current.domElement);
+      }
+      rendererRef.current.dispose();
+      rendererRef.current = null;
+      
+      if (sceneDataRef.current?.animationFrameId) {
+        cancelAnimationFrame(sceneDataRef.current.animationFrameId);
+      }
+    }
     
     try {
       console.log("Initializing Three.js scene");
@@ -82,21 +107,29 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         throw new Error("Container has zero width or height");
       }
       
-      // Setup advanced renderer with high-quality settings
+      // Setup renderer with settings based on rendering mode
       rendererRef.current = new THREE.WebGLRenderer({
-        antialias: true,
+        antialias: renderingMode === 'quality',
         alpha: true,
         powerPreference: "high-performance",
-        precision: "highp",
+        precision: renderingMode === 'quality' ? "highp" : "mediump",
       });
       rendererRef.current.setSize(width, height);
-      rendererRef.current.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      rendererRef.current.shadowMap.enabled = true;
-      rendererRef.current.shadowMap.type = THREE.PCFSoftShadowMap;
+      rendererRef.current.setPixelRatio(
+        renderingMode === 'quality' 
+          ? Math.min(window.devicePixelRatio, 2) 
+          : Math.min(window.devicePixelRatio, 1)
+      );
+      rendererRef.current.shadowMap.enabled = renderingMode === 'quality';
+      rendererRef.current.shadowMap.type = renderingMode === 'quality' 
+        ? THREE.PCFSoftShadowMap 
+        : THREE.BasicShadowMap;
       rendererRef.current.outputEncoding = THREE.sRGBEncoding;
-      rendererRef.current.toneMapping = THREE.ACESFilmicToneMapping;
-      rendererRef.current.toneMappingExposure = 0.8;
-      rendererRef.current.physicallyCorrectLights = true;
+      rendererRef.current.toneMapping = renderingMode === 'quality'
+        ? THREE.ACESFilmicToneMapping
+        : THREE.LinearToneMapping;
+      rendererRef.current.toneMappingExposure = renderingMode === 'quality' ? 0.8 : 1.0;
+      rendererRef.current.physicallyCorrectLights = renderingMode === 'quality';
       containerRef.current.appendChild(rendererRef.current.domElement);
       
       // Create scene
@@ -119,21 +152,24 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       const renderPass = new RenderPass(scene, camera);
       composer.addPass(renderPass);
       
-      // Add bloom effect
-      const bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(width, height),
-        0.3,
-        0.35,
-        0.9
-      );
-      composer.addPass(bloomPass);
-      
-      // Add ambient occlusion
-      const ssaoPass = new SSAOPass(scene, camera, width, height);
-      ssaoPass.kernelRadius = 16;
-      ssaoPass.minDistance = 0.005;
-      ssaoPass.maxDistance = 0.1;
-      composer.addPass(ssaoPass);
+      // Configure post-processing based on rendering mode
+      if (renderingMode === 'quality') {
+        // Add bloom effect (quality mode only)
+        const bloomPass = new UnrealBloomPass(
+          new THREE.Vector2(width, height),
+          0.3,
+          0.35,
+          0.9
+        );
+        composer.addPass(bloomPass);
+        
+        // Add ambient occlusion (quality mode only)
+        const ssaoPass = new SSAOPass(scene, camera, width, height);
+        ssaoPass.kernelRadius = 16;
+        ssaoPass.minDistance = 0.005;
+        ssaoPass.maxDistance = 0.1;
+        composer.addPass(ssaoPass);
+      }
       
       // Final output pass
       const outputPass = new OutputPass();
@@ -168,47 +204,67 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       
       pmremGenerator.dispose();
       
-      // Add strategic studio-style lighting
+      // Add strategic lighting with settings based on rendering mode
       const keyLight = new THREE.DirectionalLight(0xfffbf0, 0.9);
       keyLight.position.set(1, 2, 3);
-      keyLight.castShadow = true;
-      keyLight.shadow.mapSize.width = 2048;
-      keyLight.shadow.mapSize.height = 2048;
-      keyLight.shadow.camera.near = 0.1;
-      keyLight.shadow.camera.far = 100;
-      keyLight.shadow.camera.left = -50;
-      keyLight.shadow.camera.right = 50;
-      keyLight.shadow.camera.top = 50;
-      keyLight.shadow.camera.bottom = -50;
-      keyLight.shadow.radius = 12;
-      keyLight.shadow.blurSamples = 8;
-      keyLight.shadow.bias = -0.0001;
+      
+      if (renderingMode === 'quality') {
+        // High-quality shadow settings
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.width = 2048;
+        keyLight.shadow.mapSize.height = 2048;
+        keyLight.shadow.camera.near = 0.1;
+        keyLight.shadow.camera.far = 100;
+        keyLight.shadow.camera.left = -50;
+        keyLight.shadow.camera.right = 50;
+        keyLight.shadow.camera.top = 50;
+        keyLight.shadow.camera.bottom = -50;
+        keyLight.shadow.radius = 12;
+        keyLight.shadow.blurSamples = 8;
+        keyLight.shadow.bias = -0.0001;
+      } else {
+        // No shadows in performance mode
+        keyLight.castShadow = false;
+      }
       scene.add(keyLight);
       
-      const rimLight = new THREE.DirectionalLight(0xc4e0ff, 0.3);
-      rimLight.position.set(-3, 1, -2);
-      scene.add(rimLight);
+      // Only add extra lights in quality mode
+      if (renderingMode === 'quality') {
+        const rimLight = new THREE.DirectionalLight(0xc4e0ff, 0.3);
+        rimLight.position.set(-3, 1, -2);
+        scene.add(rimLight);
+        
+        const sunsetLight = new THREE.DirectionalLight(0xff7e47, 1.8);
+        sunsetLight.position.set(-5, 30, 30);
+        sunsetLight.castShadow = true;
+        sunsetLight.shadow.mapSize.width = 2048;
+        sunsetLight.shadow.mapSize.height = 2048;
+        sunsetLight.shadow.camera.near = 0.1;
+        sunsetLight.shadow.camera.far = 500;
+        sunsetLight.shadow.camera.left = -120;
+        sunsetLight.shadow.camera.right = 120;
+        sunsetLight.shadow.camera.top = 120;
+        sunsetLight.shadow.camera.bottom = -120;
+        sunsetLight.shadow.bias = -0.0003;
+        sunsetLight.shadow.radius = 4;
+        scene.add(sunsetLight);
+        
+        const fillLight = new THREE.DirectionalLight(0xfff0c0, 0.2);
+        fillLight.position.set(2, -1, -1);
+        scene.add(fillLight);
+      } else {
+        // Add a basic directional light for performance mode
+        const simpleLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        simpleLight.position.set(-5, 10, 7);
+        scene.add(simpleLight);
+      }
       
-      const sunsetLight = new THREE.DirectionalLight(0xff7e47, 1.8);
-      sunsetLight.position.set(-5, 30, 30);
-      sunsetLight.castShadow = true;
-      sunsetLight.shadow.mapSize.width = 2048;
-      sunsetLight.shadow.mapSize.height = 2048;
-      sunsetLight.shadow.camera.near = 0.1;
-      sunsetLight.shadow.camera.far = 500;
-      sunsetLight.shadow.camera.left = -120;
-      sunsetLight.shadow.camera.right = 120;
-      sunsetLight.shadow.camera.top = 120;
-      sunsetLight.shadow.camera.bottom = -120;
-      sunsetLight.shadow.bias = -0.0003;
-      sunsetLight.shadow.radius = 4;
-      scene.add(sunsetLight);
-      
-      const fillLight = new THREE.DirectionalLight(0xfff0c0, 0.2);
-      fillLight.position.set(2, -1, -1);
-      scene.add(fillLight);
-      
-      const ambientLight = new THREE.HemisphereLight(0xffffff, 0xf0f5ff, 2.7);
+      // Always add ambient light but with different intensity
+      const ambientLight = new THREE.HemisphereLight(
+        0xffffff, 
+        0xf0f5ff, 
+        renderingMode === 'quality' ? 2.7 : 3.5
+      );
       scene.add(ambientLight);
       
       // Create a model group for all geometry
@@ -272,7 +328,9 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         modelGroup,
         composer,
         initialized: true,
-        buttons
+        buttons,
+        isFirstRender: true,
+        renderingMode // Store the current rendering mode to detect changes
       };
       
       // Animation loop
@@ -281,13 +339,25 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         
         const { controls, camera, composer } = sceneDataRef.current;
         
-        // Save camera position and target when it changes
+        // Save camera position and target when it changes, with debouncing
         if (controls.target && camera.position) {
-          if (!cameraPosition || 
-              !camera.position.equals(cameraPosition) || 
-              !controls.target.equals(cameraTarget || new THREE.Vector3())) {
-            setCameraPosition(camera.position.clone());
-            setCameraTarget(controls.target.clone());
+          // Store the camera position and target in a ref to avoid state updates during animation
+          if (!sceneDataRef.current.savedCameraPosition ||
+              !camera.position.equals(sceneDataRef.current.savedCameraPosition) || 
+              !controls.target.equals(sceneDataRef.current.savedCameraTarget || new THREE.Vector3())) {
+            
+            // Store the current position and target in the ref
+            sceneDataRef.current.savedCameraPosition = camera.position.clone();
+            sceneDataRef.current.savedCameraTarget = controls.target.clone();
+            
+            // Only update the state occasionally to avoid re-renders
+            if (!sceneDataRef.current.cameraUpdateTimeoutId) {
+              sceneDataRef.current.cameraUpdateTimeoutId = setTimeout(() => {
+                setCameraPosition(camera.position.clone());
+                setCameraTarget(controls.target.clone());
+                sceneDataRef.current.cameraUpdateTimeoutId = null;
+              }, 500); // Update state after 500ms of no camera movement
+            }
           }
         }
         
@@ -316,14 +386,18 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       );
       setLoading(false);
     }
-  }, [cameraPosition, cameraTarget]);
+  }, [renderingMode]); // Only depend on rendering mode, not camera position
   
   // Update scene geometry with latest data
   const updateScene = useCallback(() => {
     if (!sceneDataRef.current || !rendererRef.current) return;
     
     try {
-      console.log("Updating model geometry");
+      console.log("Updating model geometry", {
+        hasTerrainGeometry: !!geometryDataSets.terrainGeometry,
+        hasPolygonGeometries: !!geometryDataSets.polygonGeometries?.length,
+        renderingMode
+      });
       const { scene, modelGroup } = sceneDataRef.current;
       
       // Clear existing geometry
@@ -344,24 +418,41 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       
       // Add terrain if available
       if (geometryDataSets.terrainGeometry) {
-        // Create terrain material
-        const terrainMaterial = new THREE.MeshStandardMaterial({
-          vertexColors: terrainSettings.color ? false : true,
-          color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
-          roughness: 0.8,
-          metalness: 0.01,
-          envMapIntensity: 0.4,
-          flatShading: true,
-          side: THREE.DoubleSide
+        console.log("Adding terrain geometry to scene:", {
+          vertexCount: geometryDataSets.terrainGeometry.attributes?.position?.count || 0,
+          valid: !!geometryDataSets.terrainGeometry.attributes?.position?.count
         });
+        // Create terrain material based on rendering mode
+        let terrainMaterial;
+        
+        if (renderingMode === 'quality') {
+          // High-quality material with more complex properties
+          terrainMaterial = new THREE.MeshStandardMaterial({
+            vertexColors: terrainSettings.color ? false : true,
+            color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
+            roughness: 0.8,
+            metalness: 0.01,
+            envMapIntensity: 0.4,
+            flatShading: true,
+            side: THREE.DoubleSide
+          });
+        } else {
+          // Performance-optimized material with simpler properties
+          terrainMaterial = new THREE.MeshLambertMaterial({
+            vertexColors: terrainSettings.color ? false : true,
+            color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
+            flatShading: true,
+            side: THREE.DoubleSide
+          });
+        }
         
         // Apply the material to the terrain mesh
         const geometryMesh = new THREE.Mesh(
           geometryDataSets.terrainGeometry,
           terrainMaterial
         );
-        geometryMesh.castShadow = true;
-        geometryMesh.receiveShadow = true;
+        geometryMesh.castShadow = renderingMode === 'quality';
+        geometryMesh.receiveShadow = renderingMode === 'quality';
         modelGroup.add(geometryMesh);
       }
       
@@ -377,22 +468,36 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
           enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
           
-          // Create material
-          const polygonMaterial = new THREE.MeshPhysicalMaterial({
-            color: enhancedColor,
-            roughness: 0.35,
-            metalness: 0.01,
-            clearcoat: 0.06,
-            clearcoatRoughness: 2,
-            envMapIntensity: 0.7,
-            flatShading: false,
-            side: THREE.DoubleSide
-          });
+          // Create material based on rendering mode
+          let polygonMaterial;
+          
+          if (renderingMode === 'quality') {
+            // High-quality material with physically-based properties
+            polygonMaterial = new THREE.MeshPhysicalMaterial({
+              color: enhancedColor,
+              roughness: 0.35,
+              metalness: 0.01,
+              clearcoat: 0.06,
+              clearcoatRoughness: 2,
+              envMapIntensity: 0.7,
+              flatShading: false,
+              side: THREE.DoubleSide
+            });
+          } else {
+            // Performance-optimized simpler material
+            polygonMaterial = new THREE.MeshStandardMaterial({
+              color: enhancedColor,
+              roughness: 0.5,
+              metalness: 0,
+              flatShading: true,
+              side: THREE.DoubleSide
+            });
+          }
           
           // Create mesh
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
-          polygonMesh.castShadow = true;
-          polygonMesh.receiveShadow = true;
+          polygonMesh.castShadow = renderingMode === 'quality';
+          polygonMesh.receiveShadow = renderingMode === 'quality';
           modelGroup.add(polygonMesh);
         });
       }
@@ -409,13 +514,25 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       );
       setLoading(false);
     }
-  }, [geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries, terrainSettings]);
+  }, [geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries, terrainSettings, renderingMode]);
   
   // Initialize scene when component mounts
   useEffect(() => {
     if (!containerRef.current) return;
     
     console.log("ModelPreview mounted");
+    
+    // Clear any existing canvases in the container first
+    containerRef.current.querySelectorAll('button').forEach(canvas => {
+      console.log("Removing existing BUTTONS before initialization");
+      canvas.remove();
+    });
+    // Clear any existing canvases in the container first
+    containerRef.current.querySelectorAll('canvas').forEach(canvas => {
+      console.log("Removing existing canvas before initialization");
+      canvas.remove();
+    });
+    
     initScene();
     
     // Setup resize handler
@@ -488,12 +605,13 @@ const ModelPreview = ({}: ModelPreviewProps) => {
     };
   }, [initScene, handleResize]);
   
-  // Update scene when geometry data changes
+  // Update scene when geometry data or rendering mode changes
   useEffect(() => {
     if (sceneDataRef.current?.initialized) {
+      console.log("Triggering updateScene due to dependency changes");
       updateScene();
     }
-  }, [updateScene, geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries]);
+  }, [updateScene, geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries, renderingMode]);
 
   return (
     <div

@@ -27,11 +27,16 @@ interface ProcessedTerrainData {
   processedMaxElevation: number;
 }
 
+interface RenderingSettings {
+  mode: 'quality' | 'performance';
+}
+
 interface LayerState {
   // Layer data
   vtLayers: VtDataSet[];
   terrainSettings: TerrainSettings;
   buildingSettings: BuildingSettings;
+  renderingSettings: RenderingSettings;
   bbox: GeoJSON.Feature | undefined;
   
   // Config hashes for smart regeneration
@@ -80,6 +85,9 @@ interface LayerState {
   setBuildingSettings: (settings: Partial<BuildingSettings>) => void;
   toggleBuildingsEnabled: () => void;
   setBuildingScaleFactor: (value: number) => void;
+  
+  // Actions for rendering settings
+  setRenderingMode: (mode: 'quality' | 'performance') => void;
 
   // Geometry actions
   setGeometryDataSets: (geometryDataSets: {
@@ -146,6 +154,9 @@ const useLayerStore = create<LayerState>((set) => ({
   buildingSettings: {
     enabled: true,
     scaleFactor: 0.5
+  },
+  renderingSettings: {
+    mode: 'quality'
   },
   bbox: undefined,
 
@@ -281,6 +292,11 @@ const useLayerStore = create<LayerState>((set) => ({
 
   setBuildingScaleFactor: (value) => set((state) => ({
     buildingSettings: { ...state.buildingSettings, scaleFactor: value }
+  })),
+
+  // Rendering settings actions
+  setRenderingMode: (mode) => set((state) => ({
+    renderingSettings: { ...state.renderingSettings, mode }
   })),
 
   // Bbox action

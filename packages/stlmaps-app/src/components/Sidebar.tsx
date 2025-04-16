@@ -15,6 +15,7 @@ import ExportButtons from "./ExportButtons";
 import AttributionDialog from "./AttributionDialog";
 import ProjectTodoList from "./ProjectTodoList";
 import LayerList from "./LayerList";
+import RenderingControls from "./RenderingControls";
 import useLayerStore from "../stores/useLayerStore";
 
 const SIDEBAR_WIDTH = 440;
@@ -73,6 +74,7 @@ export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
                 }}
             >
                 <Box sx={{ mt: 2 }}>
+                    <RenderingControls />
                 </Box>
             </Box>
         </Drawer>
