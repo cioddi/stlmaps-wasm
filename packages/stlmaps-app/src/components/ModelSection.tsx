@@ -18,9 +18,6 @@ const ModelSection: React.FC<ModelSectionProps> = ({ flex, display }) => {
         minHeight: 0, 
         zIndex: 10000, 
         display: display,
-        transition: theme.transitions.create(['flex', 'display'], {
-          duration: theme.transitions.duration.standard,
-        })
       }}
     >
       <Suspense fallback={<CircularProgress />}>

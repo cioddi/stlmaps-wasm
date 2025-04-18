@@ -20,9 +20,6 @@ const MapSection: React.FC<MapSectionProps> = ({ mapCenter, flex, display, bboxS
         position: "relative", 
         minHeight: 0, 
         display: display, 
-        transition: theme.transitions.create(['flex', 'display'], {
-          duration: theme.transitions.duration.standard,
-        })
       }}
     >
       <MapLibreMap

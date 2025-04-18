@@ -132,7 +132,6 @@ const App: React.FC = () => {
           flexDirection: "column",
           overflow: "hidden",
           ml: { xs: 0 },
-          transition: (theme) => theme.transitions.create('margin'),
         }}
       >
         <Toolbar /> {/* Spacing below AppBar */}
