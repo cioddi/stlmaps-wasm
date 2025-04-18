@@ -164,7 +164,7 @@ const AttributionDialog: React.FC<AttributionDialogProps> = ({
           }}
         >
           <img
-            src="/assets/panda.png"
+            src="assets/panda.png"
             alt="Panda with a 3D map blocks"
             style={{
               width: isMobile ? "78px" : "82px",

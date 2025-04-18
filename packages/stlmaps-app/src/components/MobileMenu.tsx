@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import InfoIcon from "@mui/icons-material/Info";
 import MapIcon from "@mui/icons-material/Map";
+import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import CitySearch from "./CitySearch";
 
 interface MobileMenuProps {
@@ -18,6 +19,7 @@ interface MobileMenuProps {
   onClose: () => void;
   onCitySelect: (city: { coordinates: [number, number] } | null) => void;
   onOpenAttribution: () => void;
+  onOpenInfo: () => void;
   onOpenTodoList: () => void;
 }
 
@@ -26,6 +28,7 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
   onClose,
   onCitySelect,
   onOpenAttribution,
+  onOpenInfo,
   onOpenTodoList
 }) => {
   return (
@@ -53,11 +56,20 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
           </ListItem>
           <Divider />
           <ListItem onClick={() => {
-            onOpenAttribution();
+            onOpenInfo();
             onClose();
           }} sx={{ cursor: 'pointer' }}>
             <ListItemIcon>
               <InfoIcon />
+            </ListItemIcon>
+            <ListItemText primary="About" />
+          </ListItem>
+          <ListItem onClick={() => {
+            onOpenAttribution();
+            onClose();
+          }} sx={{ cursor: 'pointer' }}>
+            <ListItemIcon>
+                  <MilitaryTechIcon />
             </ListItemIcon>
             <ListItemText primary="Attribution" />
           </ListItem>

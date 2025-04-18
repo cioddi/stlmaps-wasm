@@ -216,7 +216,7 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                     }}
                 >
                     <img 
-                        src="/assets/terrain_tortoise.png"
+                        src="assets/terrain_tortoise.png"
                         alt="Terrain Tortoise"
                         style={{
                             width: isMobile ? '78px' : '82px',

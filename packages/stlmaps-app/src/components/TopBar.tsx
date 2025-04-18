@@ -18,6 +18,7 @@ import ViewQuiltIcon from "@mui/icons-material/ViewQuilt";
 import View3dIcon from "@mui/icons-material/ViewInAr";
 import InfoIcon from "@mui/icons-material/Info";
 import ListAltIcon from "@mui/icons-material/ListAlt";
+import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import CitySearch from "./CitySearch";
 import ExportButtons from "./ExportButtons";
 import ProcessingIndicator from "./ProcessingIndicator";
@@ -28,8 +29,12 @@ export type ViewMode = "split" | "map" | "model";
 
 interface TopBarProps {
   viewMode: ViewMode;
-  onViewModeChange: (event: React.MouseEvent<HTMLElement>, newMode: ViewMode | null) => void;
+  onViewModeChange: (
+    event: React.MouseEvent<HTMLElement>,
+    newMode: ViewMode | null
+  ) => void;
   onOpenAttribution: () => void;
+  onOpenInfo: () => void;
   onOpenTodoList: () => void;
   onSidebarToggle: () => void;
   onMenuToggle: () => void;
@@ -40,14 +45,16 @@ export const TopBar: React.FC<TopBarProps> = ({
   viewMode,
   onViewModeChange,
   onOpenAttribution,
+  onOpenInfo,
   onOpenTodoList,
   onSidebarToggle,
   onMenuToggle,
   onCitySelect,
 }) => {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const { isProcessing, processingStatus, processingProgress } = useLayerStore();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const { isProcessing, processingStatus, processingProgress } =
+    useLayerStore();
 
   return (
     <AppBar
@@ -66,15 +73,16 @@ export const TopBar: React.FC<TopBarProps> = ({
               <MenuIcon />
             </IconButton>
           )}
-          <Typography 
+          <img src="assets/logo.png" alt="Logo" width={isMobile ? 30 : 50} />
+          <Typography
             variant={isMobile ? "body2" : "h6"}
             color="primary"
-            sx={{ 
-              fontSize: isMobile ? '0.75rem' : undefined,
-              fontWeight: 'bold'
+            sx={{
+              fontSize: isMobile ? "0.75rem" : undefined,
+              fontWeight: "bold",
             }}
           >
-            STLmaps
+            STLMaps
           </Typography>
 
           {/* View mode toggle buttons */}
@@ -84,7 +92,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onChange={onViewModeChange}
             aria-label="view mode"
             size="small"
-            sx={{ ml: 2, bgcolor: 'background.paper', borderRadius: 1 }}
+            sx={{ ml: 2, bgcolor: "background.paper", borderRadius: 1 }}
           >
             <Tooltip title="Map Only">
               <ToggleButton value="map" aria-label="map only">
@@ -103,25 +111,18 @@ export const TopBar: React.FC<TopBarProps> = ({
             </Tooltip>
           </ToggleButtonGroup>
         </Box>
-        
+
         {/* Middle section - Only visible on desktop */}
-        {!isMobile && (
-          <CitySearch
-            onCitySelect={onCitySelect}
-          />
-        )}
+        {!isMobile && <CitySearch onCitySelect={onCitySelect} />}
 
         {/* Right side topbar buttons */}
         <Box sx={{ display: "flex" }}>
           {/* Export button - Always visible with just icon on mobile */}
           <ExportButtons />
-          
+
           {/* Hamburger menu button - Only on mobile */}
           {isMobile && (
-            <IconButton
-              color="secondary"
-              onClick={onMenuToggle}
-            >
+            <IconButton color="secondary" onClick={onMenuToggle}>
               <MenuIcon />
             </IconButton>
           )}
@@ -129,13 +130,22 @@ export const TopBar: React.FC<TopBarProps> = ({
           {/* Desktop buttons */}
           {!isMobile && (
             <>
+              <Tooltip title="About">
+                <IconButton
+                  color="secondary"
+                  onClick={onOpenInfo}
+                  sx={{ ml: 1 }}
+                >
+                  <InfoIcon />
+                </IconButton>
+              </Tooltip>
               <Tooltip title="Attribution">
                 <IconButton
                   color="secondary"
                   onClick={onOpenAttribution}
                   sx={{ ml: 1 }}
                 >
-                  <InfoIcon />
+                  <MilitaryTechIcon />
                 </IconButton>
               </Tooltip>
               <Tooltip title="Roadmap">
@@ -144,23 +154,28 @@ export const TopBar: React.FC<TopBarProps> = ({
                   onClick={onOpenTodoList}
                   sx={{ ml: 1 }}
                 >
-                  <ListAltIcon />
+                  <MapIcon />
                 </IconButton>
               </Tooltip>
             </>
           )}
         </Box>
-        
+
         {/* Processing Indicator - Always visible, positioned differently based on device */}
-        <ProcessingIndicator 
+        <ProcessingIndicator
           isVisible={isProcessing}
           title="Processing 3D Model"
           progress={processingProgress}
           statusMessage={processingStatus}
           steps={[
-            { id: 'preparation', label: 'Preparing model data', status: isProcessing ? 'in-progress' : 'not-started', order: 0 },
+            {
+              id: "preparation",
+              label: "Preparing model data",
+              status: isProcessing ? "in-progress" : "not-started",
+              order: 0,
+            },
           ]}
-          activeStepId={isProcessing ? 'preparation' : null}
+          activeStepId={isProcessing ? "preparation" : null}
         />
       </Toolbar>
     </AppBar>

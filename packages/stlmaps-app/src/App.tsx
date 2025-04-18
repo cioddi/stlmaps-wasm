@@ -11,6 +11,7 @@ import {
 import useLayerStore from "./stores/useLayerStore";
 import { Sidebar } from "./components/Sidebar";
 import AttributionDialog from "./components/AttributionDialog";
+import InfoDialog from "./components/InfoDialog";
 import ProjectTodoList from "./components/ProjectTodoList";
 import BboxSelector from "./components/BboxSelector";
 import { GenerateMeshButton } from "./components/GenerateMeshButton";
@@ -24,7 +25,7 @@ import TerraBboxSelector from "./components/TerraBboxSelector";
 import NewBboxSelector from "./components/NewBboxSelector";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
-const SIDEBAR_WIDTH = 440;
+const SIDEBAR_WIDTH = 340;
 
 const App: React.FC = () => {
   const theme = useTheme();
@@ -33,6 +34,7 @@ const App: React.FC = () => {
     -74.00599999999997, 40.71279999999999,
   ]);
   const [openAttribution, setOpenAttribution] = useState(false);
+  const [openInfo, setOpenInfo] = useState(false);
   const [openTodoList, setOpenTodoList] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -89,6 +91,7 @@ const App: React.FC = () => {
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
         onOpenAttribution={() => setOpenAttribution(true)}
+        onOpenInfo={() => setOpenInfo(true)}
         onOpenTodoList={() => setOpenTodoList(true)}
         onSidebarToggle={() => setSidebarOpen(curr => !curr)}
         onMenuToggle={() => setMenuOpen(curr => !curr)}
@@ -101,6 +104,7 @@ const App: React.FC = () => {
         onClose={() => setMenuOpen(false)}
         onCitySelect={handleCitySelect}
         onOpenAttribution={() => setOpenAttribution(true)}
+        onOpenInfo={() => setOpenInfo(true)}
         onOpenTodoList={() => setOpenTodoList(true)}
       />
 
@@ -155,6 +159,10 @@ const App: React.FC = () => {
     <AttributionDialog
       open={openAttribution}
       onClose={() => setOpenAttribution(false)}
+    />
+    <InfoDialog
+      open={openInfo}
+      onClose={() => setOpenInfo(false)}
     />
     <ProjectTodoList
       open={openTodoList}
