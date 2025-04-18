@@ -68,12 +68,11 @@ export const TopBar: React.FC<TopBarProps> = ({
               color="secondary"
               edge="start"
               onClick={onSidebarToggle}
-              sx={{ mr: 2 }}
             >
               <MenuIcon />
             </IconButton>
           )}
-          <img src="assets/logo.png" alt="Logo" width={isMobile ? 30 : 50} />
+          <img src="assets/logo.png" alt="Logo" width={isMobile ? 20 : 30} />
           <Typography
             variant={isMobile ? "body2" : "h6"}
             color="primary"
