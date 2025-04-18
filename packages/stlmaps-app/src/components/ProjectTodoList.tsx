@@ -16,6 +16,7 @@ import {
     Chip,
     LinearProgress,
     useTheme,
+    useMediaQuery,
 } from "@mui/material";
 import DoneOutlineIcon from "@mui/icons-material/DoneOutline";
 import CodeIcon from "@mui/icons-material/Code";
@@ -44,6 +45,8 @@ interface TodoItem {
 
 const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
     const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const [expandedItems, setExpandedItems] = React.useState<Record<number, boolean>>({});
 
     // Initialize expanded state when dialog opens based on task status
@@ -87,14 +90,36 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                 "Convert various vector tile data sources into 3D mesh representations, including buildings, roads, land use, and other geographic features.",
             status: "in-progress",
             tags: ["OSM", "Vector Tiles", "3D Mesh"],
-            progress: 65,
+            progress: 75,
             children: [
                 { title: "Load vector tile data", done: true },
                 { title: "Generate 3D building extrusions", done: true },
                 { title: "Add water polygons", done: true },
                 { title: "Implement road networks (LineString support)", done: true },
-                { title: "Add land use polygons", done: true },
-                { title: "Support MapLibre style specification", done: false },
+                { title: "Add landuse, park, landcover polygons", done: true },
+                { title: "Move processing intensive tasks to a web-worker to keep the UI responsive", done: true },
+                { title: "Fix Align Vertices to Terrain layer-option", done: false },
+                { title: "Add 3mf export option", done: false },
+            ]
+        },
+        {
+            id: 4,
+            title: "Improve User Interface and Experience",
+            description:
+                "Enhance layer controls to allow users to customize the appearance of map elements.",
+            status: "planned",
+            tags: ["UI/UX", "Customization", "Styling"],
+            progress: 60,
+            children: [
+                { title: "Improve mobile responsive UX", done: true },
+                { title: "Implement layer controls (toggle, color, filter)", done: true },
+                { title: "Add color and style options", done: true },
+                { title: "Rewrite BboxSelector component to provide a better user experience", done: true },
+                { title: "Add Bbox-to-center button to initialize a new bbox in the map-view center", done: true },
+                { title: "Redesign layout", done: false },
+                { title: "Add matrix support to ensure perfect alignment of adjacent bbox exports", done: false },
+                { title: "Create save/load bbox presets", done: false },
+                { title: "Create save/load style presets", done: false },
             ]
         },
         {
@@ -110,24 +135,6 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                 { title: "Create GitHub actions for npm deployments", done: false },
                 { title: "Set up stlmaps-app to consume the local dev version in development", done: false },
                 { title: "Move processing and data-fetching functions from stlmaps-app to @threegis/core", done: false },
-            ]
-        },
-        {
-            id: 4,
-            title: "Improve User Interface and Experience",
-            description:
-                "Enhance layer controls to allow users to customize the appearance of map elements.",
-            status: "planned",
-            tags: ["UI/UX", "Customization", "Styling"],
-            progress: 0,
-            children: [
-                { title: "Improve mobile responsive UX", done: true },
-                { title: "Implement layer controls (toggle, color, filter)", done: true },
-                { title: "Add color and style options", done: true },
-                { title: "Redesign layout", done: false },
-                { title: "Add matrix support to ensure perfect alignment of adjacent bbox exports", done: false },
-                { title: "Create save/load bbox presets", done: false },
-                { title: "Create save/load style presets", done: false },
             ]
         },
     ];
@@ -186,74 +193,125 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
             sx={{ zIndex: 10000 }}
             maxWidth="md"
             fullWidth
+            fullScreen={isMobile}
         >
             <DialogTitle
                 sx={{
                     background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
                     color: "white",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
+                    padding: isMobile ? 2 : 3,
+                    display: 'flex',
+                    flexDirection: isMobile ? 'column' : 'row',
+                    alignItems: 'center',
+                    gap: 2
                 }}
+            component={"div"}
             >
-                <Typography variant="h5" component="div" sx={{ fontWeight: "bold" }}>
-                    Project Roadmap
-                </Typography>
-                <Chip
-                    icon={<TimerIcon />}
-                    label="Updated April 2025"
-                    variant="outlined"
-                    sx={{
-                        bgcolor: 'rgba(255,255,255,0.2)',
-                        color: 'white',
-                        border: '1px solid rgba(255,255,255,0.5)'
+                <Box 
+                    sx={{ 
+                        display: 'flex', 
+                        alignItems: 'center',
+                        justifyContent: isMobile ? 'center' : 'flex-start',
+                        width: '100%'
                     }}
-                />
+                >
+                    <img 
+                        src="/assets/terrain_tortoise.png"
+                        alt="Terrain Tortoise"
+                        style={{
+                            width: isMobile ? '78px' : '82px',
+                            height: isMobile ? '78px' : '82px',
+                            borderRadius: '50%',
+                            marginRight: '12px',
+                            boxShadow: '0px 2px 4px rgba(0,0,0,0.25)',
+                            border: '1px solid white',
+                            objectFit: 'cover'
+                        }}
+                    />
+                    <Typography 
+                        variant={isMobile ? "h6" : "h5"} 
+                        component="div" 
+                        sx={{ 
+                            fontWeight: "bold"
+                        }}
+                    >
+                        Project Roadmap
+                    </Typography>
+                </Box>
             </DialogTitle>
             <DialogContent sx={{ py: 3 }}>
-                <Typography variant="subtitle1" color="text.secondary" paragraph>
-                    Track our progress and see what's coming next in the STL Maps project.
-                    Here's what we're working on:
-                </Typography>
-
-                <List sx={{ width: "100%" }}>
+                <List sx={{ width: "100%", padding: isMobile ? 0 : 1 }}>
                     {todoItems.map((item, index) => (
                         <React.Fragment key={item.id}>
                             {index > 0 && <Divider variant="inset" component="li" />}
                             <Paper
                                 elevation={3}
                                 sx={{
-                                    my: 2,
+                                    my: isMobile ? 1 : 2,
                                     p: 0,
                                     overflow: "hidden",
                                     borderRadius: 2,
                                     border: `1px solid ${theme.palette.divider}`,
                                     transition: "transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out",
                                     "&:hover": {
-                                        transform: "translateY(-4px)",
-                                        boxShadow: 6,
+                                        transform: isMobile ? "none" : "translateY(-4px)",
+                                        boxShadow: isMobile ? 3 : 6,
                                     },
                                 }}
                             >
                                 <ListItem
                                     alignItems="flex-start"
                                     sx={{
-                                        py: 2,
-                                        px: 3,
+                                        py: isMobile ? 1.5 : 2,
+                                        px: isMobile ? 2 : 3,
                                         background: `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.background.paper} 85%, ${getStatusColor(
                                             item.status
                                         )}22 100%)`,
+                                        flexDirection: isMobile ? 'column' : 'row',
                                     }}
                                 >
-                                    <ListItemIcon sx={{ mt: 1.5 }}>
-                                        {getStatusIcon(item.status)}
-                                    </ListItemIcon>
+                                    {!isMobile && (
+                                        <ListItemIcon sx={{ mt: 1.5 }}>
+                                            {getStatusIcon(item.status)}
+                                        </ListItemIcon>
+                                    )}
                                     <ListItemText
                                         primary={
-                                            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                                                <Typography variant="h6" component="div">
-                                                    {item.title}
-                                                </Typography>
+                                            <Box sx={{ 
+                                                display: "flex", 
+                                                flexDirection: isMobile ? "column" : "row",
+                                                justifyContent: "space-between", 
+                                                alignItems: isMobile ? "flex-start" : "center", 
+                                                mb: 1,
+                                                gap: isMobile ? 1 : 0
+                                            }}>
+                                                <Box sx={{ 
+                                                    display: 'flex', 
+                                                    alignItems: 'center', 
+                                                    gap: 1,
+                                                    width: isMobile ? '100%' : 'auto'
+                                                }}>
+                                                    {isMobile && (
+                                                        <Box sx={{ 
+                                                            display: 'flex', 
+                                                            alignItems: 'center', 
+                                                            justifyContent: 'center',
+                                                            minWidth: 24
+                                                        }}>
+                                                            {getStatusIcon(item.status)}
+                                                        </Box>
+                                                    )}
+                                                    <Typography 
+                                                        variant={isMobile ? "subtitle1" : "h6"} 
+                                                        component="div"
+                                                        sx={{ 
+                                                            fontWeight: isMobile ? 'medium' : 'bold',
+                                                            wordBreak: 'break-word'
+                                                        }}
+                                                    >
+                                                        {item.title}
+                                                    </Typography>
+                                                </Box>
                                                 <Chip
                                                     label={getStatusLabel(item.status)}
                                                     size="small"
@@ -261,23 +319,41 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                                                         bgcolor: getStatusColor(item.status),
                                                         color: "white",
                                                         fontWeight: "bold",
+                                                        alignSelf: isMobile ? 'flex-start' : 'center'
                                                     }}
                                                 />
                                             </Box>
                                         }
                                         secondary={
-                                            <Box sx={{ color: "text.primary", mt: 1 }}>
-                                                <Typography variant="body2" color="text.secondary" paragraph>
+                                            <Box sx={{ color: "text.primary", mt: isMobile ? 0.5 : 1 }}>
+                                                <Typography 
+                                                    variant="body2" 
+                                                    color="text.secondary" 
+                                                    paragraph
+                                                    sx={{ 
+                                                        fontSize: isMobile ? '0.8rem' : '0.875rem',
+                                                        mb: isMobile ? 1 : 1.5
+                                                    }}
+                                                >
                                                     {item.description}
                                                 </Typography>
 
                                                 {item.progress !== undefined && (
-                                                    <Box sx={{ mt: 1, mb: 2 }}>
+                                                    <Box sx={{ mt: isMobile ? 0.5 : 1, mb: isMobile ? 1 : 2 }}>
                                                         <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                                                            <Typography variant="caption" color="text.secondary">
+                                                            <Typography 
+                                                                variant="caption" 
+                                                                color="text.secondary"
+                                                                sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}
+                                                            >
                                                                 Progress
                                                             </Typography>
-                                                            <Typography variant="caption" fontWeight="bold" color={getStatusColor(item.status)}>
+                                                            <Typography 
+                                                                variant="caption" 
+                                                                fontWeight="bold" 
+                                                                color={getStatusColor(item.status)}
+                                                                sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}
+                                                            >
                                                                 {item.progress}%
                                                             </Typography>
                                                         </Box>
@@ -285,7 +361,7 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                                                             variant="determinate"
                                                             value={item.progress}
                                                             sx={{
-                                                                height: 8,
+                                                                height: isMobile ? 6 : 8,
                                                                 borderRadius: 4,
                                                                 bgcolor: theme.palette.grey[200],
                                                                 '& .MuiLinearProgress-bar': {
@@ -298,7 +374,7 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                                                 )}
 
                                                 {item.children && item.children.length > 0 && (
-                                                    <Box sx={{ mt: 2, mb: 2 }}>
+                                                    <Box sx={{ mt: isMobile ? 1 : 2, mb: isMobile ? 1 : 2 }}>
                                                         <Box
                                                             onClick={() => toggleExpand(item.id)}
                                                             sx={{
@@ -330,7 +406,8 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                                                                 sx={{
                                                                     display: 'flex',
                                                                     alignItems: 'center',
-                                                                    gap: 0.5
+                                                                    gap: 0.5,
+                                                                    fontSize: isMobile ? '0.65rem' : '0.75rem'
                                                                 }}
                                                             >
                                                                 Subtasks: {item.children.filter(child => child.done).length}/{item.children.length} completed
@@ -339,42 +416,46 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
 
                                                         {expandedItems[item.id] && (
                                                             <Box sx={{
-                                                                pl: 1,
+                                                                pl: isMobile ? 0.5 : 1,
                                                                 borderLeft: `2px solid ${theme.palette.grey[200]}`,
                                                                 display: 'flex',
                                                                 flexDirection: 'column',
-                                                                gap: 1
+                                                                gap: isMobile ? 0.5 : 1
                                                             }}>
                                                                 {item.children.map((child, idx) => (
                                                                     <Box
                                                                         key={idx}
                                                                         sx={{
                                                                             display: 'flex',
-                                                                            alignItems: 'center',
                                                                             gap: 1
                                                                         }}
                                                                     >
                                                                         <Box
                                                                             sx={{
-                                                                                width: 16,
-                                                                                height: 16,
+                                                                                width: isMobile ? 14 : 16,
+                                                                                height: isMobile ? 14 : 16,
+                                                                                minWidth: isMobile ? 14 : 16,
                                                                                 borderRadius: '50%',
                                                                                 border: `1px solid ${child.done ? theme.palette.success.main : theme.palette.grey[400]}`,
                                                                                 bgcolor: child.done ? theme.palette.success.main : 'transparent',
                                                                                 display: 'flex',
                                                                                 justifyContent: 'center',
-                                                                                alignItems: 'center'
+                                                                                alignItems: 'center',
+                                                                                flexShrink: 0,
+                                                                                marginTop: '3px'
                                                                             }}
                                                                         >
                                                                             {child.done && (
-                                                                                <DoneOutlineIcon sx={{ color: 'white', fontSize: 12 }} />
+                                                                                <DoneOutlineIcon sx={{ color: 'white', fontSize: isMobile ? 10 : 12 }} />
                                                                             )}
                                                                         </Box>
                                                                         <Typography
                                                                             variant="body2"
                                                                             color={child.done ? "text.primary" : "text.secondary"}
                                                                             sx={{
-                                                                                fontWeight: child.done ? 'medium' : 'normal'
+                                                                                fontWeight: child.done ? 'medium' : 'normal',
+                                                                                fontSize: isMobile ? '0.75rem' : '0.875rem',
+                                                                                lineHeight: 1.3
                                                                             }}
                                                                         >
                                                                             {child.title}
