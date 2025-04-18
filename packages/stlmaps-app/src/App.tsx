@@ -141,6 +141,7 @@ const App: React.FC = () => {
           mapCenter={mapCenter}
           flex={mapFlex}
           display={mapDisplay}
+          bboxSelectorRef={bboxSelectorRef}
         />
         {showDivider && <Divider />}
         {/* Model Preview - Bottom Half */}

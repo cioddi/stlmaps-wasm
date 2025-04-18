@@ -1,14 +1,16 @@
 import React from "react";
 import { Box, useTheme } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
+import BboxToCenterButton from "./BboxToCenterButton";
 
 interface MapSectionProps {
   mapCenter: [number, number];
   flex: number;
   display: string;
+  bboxSelectorRef?: React.RefObject<{ updateBbox: () => void }>;
 }
 
-const MapSection: React.FC<MapSectionProps> = ({ mapCenter, flex, display }) => {
+const MapSection: React.FC<MapSectionProps> = ({ mapCenter, flex, display, bboxSelectorRef }) => {
   const theme = useTheme();
 
   return (
@@ -38,6 +40,10 @@ const MapSection: React.FC<MapSectionProps> = ({ mapCenter, flex, display }) => 
           style: "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
         }}
       />
+      {/* Add BBOX to Center button */}
+      {bboxSelectorRef && (
+        <BboxToCenterButton bboxSelectorRef={bboxSelectorRef} />
+      )}
     </Box>
   );
 };
