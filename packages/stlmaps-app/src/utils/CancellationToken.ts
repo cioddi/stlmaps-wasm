@@ -4,6 +4,7 @@
 export class CancellationToken {
   private _isCancelled = false;
   private _callbacks: (() => void)[] = [];
+  private _id: string = Math.random().toString(36).substring(2, 9);
 
   /**
    * Check if this token has been cancelled
@@ -13,12 +14,20 @@ export class CancellationToken {
   }
 
   /**
+   * Get the unique ID of this token
+   */
+  get id(): string {
+    return this._id;
+  }
+
+  /**
    * Cancel this token, notifying all callbacks
    */
   cancel(): void {
     if (this._isCancelled) return;
     
     this._isCancelled = true;
+    console.log(`Token ${this._id} has been cancelled`);
     
     // Execute all registered callbacks
     this._callbacks.forEach(callback => {
@@ -51,7 +60,7 @@ export class CancellationToken {
    */
   throwIfCancelled(): void {
     if (this._isCancelled) {
-      throw new Error('Operation was cancelled');
+      throw new Error(`Operation was cancelled (token ${this._id})`);
     }
   }
 }

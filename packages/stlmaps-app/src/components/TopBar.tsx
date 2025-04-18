@@ -159,8 +159,6 @@ export const TopBar: React.FC<TopBarProps> = ({
           statusMessage={processingStatus}
           steps={[
             { id: 'preparation', label: 'Preparing model data', status: isProcessing ? 'in-progress' : 'not-started', order: 0 },
-            { id: 'geometry', label: 'Building geometries', status: 'not-started', order: 5 },
-            { id: 'finalizing', label: 'Finalizing model', status: 'not-started', order: 100 },
           ]}
           activeStepId={isProcessing ? 'preparation' : null}
         />

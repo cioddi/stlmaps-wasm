@@ -515,6 +515,7 @@ export const GenerateMeshButton = function () {
 
         try {
           // Wait for all geometry promises to complete
+          setIsProcessing(true);
           const results = await Promise.all(
             geometryPromises.map(async ({ layer, promise }) => {
               try {
@@ -557,6 +558,7 @@ export const GenerateMeshButton = function () {
         }
       }
 
+        cancellationToken.throwIfCancelled();
       // Create debug visualization for the terrain area if needed
       if (vtPolygonGeometries.length > 0) {
         // Create a box to visualize the clipping area (but don't actually use it for clipping)
@@ -596,11 +598,20 @@ export const GenerateMeshButton = function () {
       }, 2000);
 
     } catch (error: unknown) {
+      // Check if this was a cancellation error (which is expected when the user changes the selection)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      if (errorMessage.includes('Operation was cancelled')) {
+        console.log("3D model generation was cancelled by user action");
+        // Don't update UI state for cancelled operations
+        return;
+      }
+      
       console.error("Error generating 3D model:", error);
-
-      // Show error in processing indicator
-      const errorMessage = error instanceof Error ? error.message : 'Failed to generate 3D model';
-      updateProcessingState({ status: `Error: ${errorMessage}`, progress: 100 });
+      
+      // Only show error in processing indicator for non-cancellation errors
+      const displayErrorMessage = error instanceof Error ? error.message : 'Failed to generate 3D model';
+      updateProcessingState({ status: `Error: ${displayErrorMessage}`, progress: 100 });
 
       // Hide the indicator after showing the error
       setTimeout(() => {
