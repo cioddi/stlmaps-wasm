@@ -38,6 +38,7 @@ const ExportButtons: React.FC = () => {
   // Get geometry data directly from the Zustand store
   const { geometryDataSets } = useLayerStore();
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   
   // State for dialog
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
@@ -57,13 +58,6 @@ const ExportButtons: React.FC = () => {
   // Define export formats with their metadata
   const exportFormats: ExportFormat[] = [
     {
-      id: 'obj',
-      name: 'Wavefront OBJ',
-      description: 'Standard 3D file format supported by most 3D applications. Good for general-purpose 3D models.',
-      icon: <ScatterPlotIcon fontSize="small" />,
-      fileExtension: 'obj'
-    },
-    {
       id: 'stl',
       name: 'STL',
       description: '3D printing industry standard format. Ideal for 3D printing and CNC manufacturing.',
@@ -73,10 +67,17 @@ const ExportButtons: React.FC = () => {
     {
       id: 'glb',
       name: 'glTF/GLB',
-      description: 'Modern, efficient 3D format with material support. Best for web and game engines.',
+      description: 'Separate geometries for each layer. Best for multi-color-FDM, web and game engines.',
       icon: <ThreeDRotationIcon fontSize="small" />,
       fileExtension: 'glb'
-    }
+    },
+    {
+      id: 'obj',
+      name: 'Wavefront OBJ',
+      description: 'Standard 3D file format supported by most 3D applications. Good for general-purpose 3D models.',
+      icon: <ScatterPlotIcon fontSize="small" />,
+      fileExtension: 'obj'
+    },
   ];
 
   // Cleanup function to revoke object URLs when component unmounts
@@ -359,61 +360,78 @@ const ExportButtons: React.FC = () => {
         onClose={handleCloseDialog} 
         maxWidth="md" 
         fullWidth
+        fullScreen={isMobile}
+        sx={{ zIndex: 10000 }}
         PaperProps={{
           sx: {
-            borderRadius: 2,
+            borderRadius: isMobile ? 0 : 2,
             overflow: 'hidden'
           }
         }}
       >
-        <DialogTitle sx={{ 
-          bgcolor: theme.palette.primary.main, 
-          color: 'white', 
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1
-        }}>
-          <ThreeDRotationIcon /> Export 3D Model
+        <DialogTitle 
+          sx={{ 
+            background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+            color: 'white', 
+            padding: isMobile ? 2 : 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1
+          }}
+          component={"div"}
+        >
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: isMobile ? "center" : "flex-start",
+              width: "100%",
+            }}
+          >
+            <ThreeDRotationIcon sx={{ mr: 1 }} /> 
+            <Typography 
+              variant={isMobile ? "h6" : "h5"} 
+              component="div"
+              sx={{ fontWeight: "bold" }}
+            >
+              Export 3D Model
+            </Typography>
+          </Box>
         </DialogTitle>
         
-        <DialogContent sx={{ p: 3 }}>
-          <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-            Export your 3D terrain model in various formats for use in external applications.
-          </Typography>
+        <DialogContent sx={{ p: isMobile ? 2 : 3 }}>
           
-          <Divider sx={{ my: 2 }} />
-          
-          <Grid container spacing={3}>
+          <Grid container spacing={isMobile ? 2 : 3}>
             {exportFormats.map((format) => {
               const { url, isLoading, handler } = getFormatData(format.id);
               return (
-                <Grid item xs={12} key={format.id}>
+                <Grid item xs={6} key={format.id}>
                   <Paper 
                     elevation={2}
                     sx={{
-                      p: 3,
+                      p: isMobile ? 2 : 3,
                       borderRadius: 2,
                       display: 'flex',
                       flexDirection: { xs: 'column', sm: 'row' },
                       alignItems: 'center',
-                      gap: 3,
+                      gap: isMobile ? 2 : 3,
                       transition: 'all 0.2s ease-in-out',
                       '&:hover': {
-                        boxShadow: 6,
-                        transform: 'translateY(-2px)'
+                        boxShadow: isMobile ? 4 : 6,
+                        transform: isMobile ? 'translateY(-1px)' : 'translateY(-2px)'
                       }
                     }}
                   >
                     
-                    <Box flex={1}>
-                      <Box display="flex" alignItems="center" mb={0.5}>
-                        <Typography variant="h6" fontWeight="bold">
+                    <Box flex={1} sx={{ width: '100%' }}>
+                      <Box display="flex" alignItems="center" mb={0.5} flexWrap={isMobile ? "wrap" : "nowrap"}>
+                        <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight="bold">
                           {format.name}
                         </Typography>
                         <Chip 
                           label={`.${format.fileExtension}`}
                           size="small"
-                          sx={{ ml: 1 }}
+                          sx={{ ml: 1, mt: isMobile ? 0.5 : 0 }}
                           color="primary"
                         />
                       </Box>
@@ -428,6 +446,8 @@ const ExportButtons: React.FC = () => {
                           href={url}
                           download={`model.${format.fileExtension}`}
                           startIcon={<FileDownloadIcon />}
+                          fullWidth={isMobile}
+                          size={isMobile ? "small" : "medium"}
                         >
                           Download {format.fileExtension.toUpperCase()}
                         </Button>
@@ -437,6 +457,8 @@ const ExportButtons: React.FC = () => {
                           onClick={handler}
                           disabled={isDisabled || isLoading}
                           startIcon={isLoading ? null : <ModelTrainingIcon />}
+                          fullWidth={isMobile}
+                          size={isMobile ? "small" : "medium"}
                         >
                           {isLoading ? "Generating..." : `Generate ${format.fileExtension.toUpperCase()}`}
                         </Button>
@@ -449,19 +471,9 @@ const ExportButtons: React.FC = () => {
           </Grid>
         </DialogContent>
         
-        <DialogActions sx={{ p: 2, bgcolor: theme.palette.grey[100] }}>
-          <Button onClick={handleCloseDialog} color="primary">
+        <DialogActions sx={{ p: isMobile ? "12px 16px" : "16px 24px", bgcolor: theme.palette.grey[50] }}>
+          <Button variant="outlined" onClick={handleCloseDialog} color="primary">
             Close
-          </Button>
-          <Button 
-            onClick={() => {
-              generateExports();
-            }} 
-            variant="contained" 
-            color="primary"
-            disabled={isDisabled || loading.obj || loading.stl || loading.gltf}
-          >
-            Generate All Formats
           </Button>
         </DialogActions>
       </Dialog>
