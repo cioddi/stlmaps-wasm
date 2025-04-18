@@ -8,6 +8,7 @@ interface WorkerRequest {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
   timeoutId: number;
+  workerName: string; // Track which worker this request belongs to
 }
 
 // Configuration for worker timeouts
@@ -71,12 +72,13 @@ export class WorkerService {
       }, WORKER_TIMEOUT);
       
       // Store the request callbacks for later resolution
-      this.requests.set(requestId, { resolve, reject, timeoutId });
+      this.requests.set(requestId, { resolve, reject, timeoutId, workerName });
       
       // Send data to worker with the request ID
       worker.postMessage({
         id: requestId,
         data,
+        cancelable: true
       });
     });
   }
@@ -147,5 +149,46 @@ export class WorkerService {
     for (const workerName of this.workers.keys()) {
       this.terminateWorker(workerName);
     }
+  }
+  
+  /**
+   * Cancels all active tasks for a specific task type
+   * 
+   * @param taskType - Type of task to cancel (e.g., 'polygonGeometry')
+   */
+  public static cancelActiveTasks(taskType: string): void {
+    console.log(`Canceling all active ${taskType} tasks`);
+    
+    // Find all active requests for this task type
+    const requestsToCancel: string[] = [];
+    
+    for (const [id, request] of this.requests.entries()) {
+      if (request.workerName === taskType) {
+        requestsToCancel.push(id);
+      }
+    }
+    
+    // Signal cancellation to workers
+    for (const workerName of this.workers.keys()) {
+      if (workerName === taskType) {
+        const worker = this.workers.get(workerName)!;
+        worker.postMessage({
+          type: 'cancel',
+          taskType
+        });
+      }
+    }
+    
+    // Reject all promises for the canceled tasks
+    for (const id of requestsToCancel) {
+      if (this.requests.has(id)) {
+        const request = this.requests.get(id)!;
+        clearTimeout(request.timeoutId);
+        request.reject(new Error(`Task ${id} was canceled because a new task was started`));
+        this.requests.delete(id);
+      }
+    }
+    
+    console.log(`Canceled ${requestsToCancel.length} active ${taskType} tasks`);
   }
 }

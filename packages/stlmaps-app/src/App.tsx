@@ -54,7 +54,7 @@ const App: React.FC = () => {
   // Handle city selection to update both center and bbox
   const handleCitySelect = (city: any) => {
     if (city) {
-      _map.setZoom(14);
+      _map.setZoom(15);
       setBboxCenter(city.coordinates);
       
       // Add a small delay to ensure state is updated before triggering bbox update

@@ -17,6 +17,8 @@ import { createTerrainGeometry } from "../three_maps/createTerrainGeometry";
 import { bufferLineString } from "../three_maps/bufferLineString";
 import useLayerStore from "../stores/useLayerStore";
 import { createComponentHashes, createConfigHash } from "../utils/configHashing";
+import { WorkerService } from "../workers/WorkerService";
+import { CancellationToken, tokenManager } from "../utils/CancellationToken";
 
 // Define interfaces for our data structures
 export interface GridSize {
@@ -138,6 +140,18 @@ export const GenerateMeshButton = function () {
       console.error("Cannot generate 3D model: bbox is undefined");
       return;
     }
+    
+    // Create a new cancellation token for this operation
+    // This will automatically cancel any previously running operations
+    const cancellationToken = tokenManager.getNewToken('generate3DModel');
+    
+    // Cancel any ongoing polygon geometry tasks as well
+    try {
+      WorkerService.cancelActiveTasks('polygon-geometry');
+    } catch (err) {
+      console.warn("Error cancelling existing worker tasks:", err);
+    }
+    
     setIsProcessing(true);
     updateProcessingState({ status: "Starting 3D model generation...", progress: 0 });
 
@@ -188,6 +202,9 @@ export const GenerateMeshButton = function () {
         return;
       }
 
+      // Check for cancellation before continuing
+      cancellationToken.throwIfCancelled();
+
       const coordinates = feature.geometry.coordinates[0]; // First ring of the polygon
 
       // Find min/max coordinates
@@ -230,6 +247,9 @@ export const GenerateMeshButton = function () {
       // Update processing status
       updateProcessingState({ status: `Downloading ${tiles.length} elevation tiles...`, progress: 20 });
 
+      // Check for cancellation before downloading tiles
+      cancellationToken.throwIfCancelled();
+
       // Download tile data
       console.log("🌐 Downloading tile data for tiles:", tiles);
       const tileData = await Promise.all(
@@ -240,6 +260,9 @@ export const GenerateMeshButton = function () {
       // Update processing status
       updateProcessingState({ status: "Processing elevation data...", progress: 35 });
 
+      // Check for cancellation before processing elevation data
+      cancellationToken.throwIfCancelled();
+
       // Process elevation data to create a grid
       console.log("🏔️ Processing elevation data...");
       const { elevationGrid, gridSize, minElevation, maxElevation } =
@@ -248,6 +271,9 @@ export const GenerateMeshButton = function () {
 
       // Update processing status
       updateProcessingState({ status: "Fetching vector tile data...", progress: 50 });
+
+      // Check for cancellation before fetching vector tile data
+      cancellationToken.throwIfCancelled();
 
       // Always use zoom level 14 for building data, since that's where buildings are available
       const buildingZoom = 14; // Force zoom 14 for buildings
@@ -262,6 +288,9 @@ export const GenerateMeshButton = function () {
 
       // Update processing status
       updateProcessingState({ status: "Generating terrain geometry...", progress: 65 });
+
+      // Check for cancellation before generating terrain geometry
+      cancellationToken.throwIfCancelled();
 
       // Check if terrain needs to be regenerated
       let terrainGeometry = terrainSettings.enabled ? geometryDataSets.terrainGeometry : undefined;
@@ -369,6 +398,9 @@ export const GenerateMeshButton = function () {
 
       // Process vector tile layers
       for (let i = 0; i < vtLayers.length; i++) {
+        // Check for cancellation before processing each layer
+        cancellationToken.throwIfCancelled();
+        
         const currentLayer = vtLayers[i];
         updateProcessingState({ status: "Processing " + currentLayer.sourceLayer + " layer", progress: 75 + (i * 10) / vtLayers.length });
 
@@ -404,6 +436,9 @@ export const GenerateMeshButton = function () {
         console.log(`%c 🔄 Generating ${currentLayer.sourceLayer} geometry - configuration changed`, "color: #FF9800;");
         console.log(`Fetching ${currentLayer.sourceLayer} data...`);
 
+        // Check for cancellation before fetching layer data
+        cancellationToken.throwIfCancelled();
+
         // Fetch data for this layer
         let layerData = await extractGeojsonFeaturesFromVectorTiles({
           bbox: [minLng, minLat, maxLng, maxLat],
@@ -435,6 +470,9 @@ export const GenerateMeshButton = function () {
             }
             return feature;
           });
+
+          // Check for cancellation before creating polygon geometry
+          cancellationToken.throwIfCancelled();
 
           // Create polygon geometry asynchronously using web worker
           const layerGeometryPromise = createPolygonGeometryAsync({
@@ -471,6 +509,9 @@ export const GenerateMeshButton = function () {
 
       if (geometryPromises.length > 0) {
         console.log(`Waiting for ${geometryPromises.length} geometries to be generated by web workers...`);
+
+        // Check for cancellation before waiting for worker results
+        cancellationToken.throwIfCancelled();
 
         try {
           // Wait for all geometry promises to complete
@@ -914,6 +955,9 @@ export const GenerateMeshButton = function () {
       layerCount: vtLayers?.length
     });
 
+    // Cancel any previous operations when dependencies change
+    tokenManager.cancelCurrentOperation();
+    
     if (debounceTimer) clearTimeout(debounceTimer);
     if (!bbox) {
       console.warn("No bbox available, skipping model generation");

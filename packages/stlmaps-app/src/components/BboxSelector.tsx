@@ -1,4 +1,10 @@
-import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from "react";
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import {
   useMap,
   useMapState,
@@ -71,6 +77,8 @@ const BboxSelector = forwardRef((props: Props, ref) => {
   useEffect(() => {
     if (!mapHook.map || bbox) return;
 
+    mapHook.map.map.dragRotate.disable();
+    mapHook.map.map.touchZoomRotate.disableRotation();
     // Create a default bbox in the center using pixel coordinates
     // Get the map container dimensions
     const container = mapHook.map.map.getContainer();
@@ -191,16 +199,16 @@ const BboxSelector = forwardRef((props: Props, ref) => {
     updateBbox: () => {
       // Create a new bbox based on the current map center
       if (!mapHook.map) return;
-      
+
       // Get the map container dimensions
       const container = mapHook.map.map.getContainer();
       const centerX = container.clientWidth / 2;
       const centerY = container.clientHeight / 2;
-      
+
       // Define dimensions based on props options
       const defaultWidth = props.options.width || 100;
       const defaultHeight = props.options.height || 100;
-      
+
       // Calculate pixel coordinates for corners
       const topLeftPixelX = centerX - defaultWidth / 2;
       const topLeftPixelY = centerY - defaultHeight / 2;
@@ -210,13 +218,22 @@ const BboxSelector = forwardRef((props: Props, ref) => {
       const bottomRightPixelY = centerY + defaultHeight / 2;
       const bottomLeftPixelX = centerX - defaultWidth / 2;
       const bottomLeftPixelY = centerY + defaultHeight / 2;
-      
+
       // Convert pixel coordinates to geographical coordinates
       const topLeft = mapHook.map.map.unproject([topLeftPixelX, topLeftPixelY]);
-      const topRight = mapHook.map.map.unproject([topRightPixelX, topRightPixelY]);
-      const bottomRight = mapHook.map.map.unproject([bottomRightPixelX, bottomRightPixelY]);
-      const bottomLeft = mapHook.map.map.unproject([bottomLeftPixelX, bottomLeftPixelY]);
-      
+      const topRight = mapHook.map.map.unproject([
+        topRightPixelX,
+        topRightPixelY,
+      ]);
+      const bottomRight = mapHook.map.map.unproject([
+        bottomRightPixelX,
+        bottomRightPixelY,
+      ]);
+      const bottomLeft = mapHook.map.map.unproject([
+        bottomLeftPixelX,
+        bottomLeftPixelY,
+      ]);
+
       // Create updated GeoJSON feature
       const updatedGeoJson = {
         type: "Feature",
@@ -237,10 +254,10 @@ const BboxSelector = forwardRef((props: Props, ref) => {
           description: "click to edit",
         },
       } as Feature;
-      
+
       // Update the bbox state
       setBbox(updatedGeoJson);
-    }
+    },
   }));
 
   return (

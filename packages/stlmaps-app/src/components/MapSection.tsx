@@ -33,7 +33,8 @@ const MapSection: React.FC<MapSectionProps> = ({ mapCenter, flex, display }) => 
         }}
         options={{
           center: mapCenter,
-          zoom: 14,
+          
+          zoom: 15,
           style: "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
         }}
       />

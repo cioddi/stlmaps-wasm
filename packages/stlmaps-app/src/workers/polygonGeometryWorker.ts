@@ -8,10 +8,28 @@ import createPolygonGeometry from "../three_maps/createPolygonGeometry";
 import { GeometryData } from "../components/VectorTileFunctions";
 import { GridSize, VtDataSet } from "../components/GenerateMeshButton";
 
+// Track whether the current task should be cancelled
+let isCancelled = false;
+
 // Set up the worker message handler
 self.onmessage = (event) => {
+  // Check if this is a cancellation message
+  if (event.data.type === 'cancel') {
+    console.log(`[Worker]: Received cancellation signal`);
+    isCancelled = true;
+    // Send an acknowledgment that cancellation was received
+    self.postMessage({
+      status: 'cancelled',
+      message: 'Worker acknowledged cancellation'
+    });
+    return;
+  }
+  
   try {
     const { id, data } = event.data;
+    
+    // Reset cancellation state at the start of a new task
+    isCancelled = false;
     
     console.log(`[Worker ${id}]: Starting polygon geometry processing`);
 
@@ -37,6 +55,12 @@ self.onmessage = (event) => {
 
     // Track the start time to monitor performance
     const startTime = performance.now();
+    
+    // Check if we've been cancelled before starting expensive operation
+    if (isCancelled) {
+      console.log(`[Worker ${id}]: Task was cancelled before processing started`);
+      throw new Error('Task was cancelled');
+    }
 
     // Call the existing createPolygonGeometry function to process the polygons
     const geometry = createPolygonGeometry({
@@ -54,6 +78,12 @@ self.onmessage = (event) => {
     // More robust check for valid geometry
     if (!geometry) {
       throw new Error("Invalid geometry: geometry is null or undefined");
+    }
+    
+    // Check if task was cancelled during processing
+    if (isCancelled) {
+      console.log(`[Worker ${id}]: Task was cancelled during processing`);
+      throw new Error('Task was cancelled');
     }
     
     console.log(`[Worker ${id}]: Geometry created with attributes:`, 
