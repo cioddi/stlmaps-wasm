@@ -18,7 +18,7 @@ import LayerList from "./LayerList";
 import RenderingControls from "./RenderingControls";
 import useLayerStore from "../stores/useLayerStore";
 
-const SIDEBAR_WIDTH = 440;
+const SIDEBAR_WIDTH = 340;
 
 export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
     const { terrainSettings, buildingSettings, vtLayers, bbox, setBbox } = useLayerStore();

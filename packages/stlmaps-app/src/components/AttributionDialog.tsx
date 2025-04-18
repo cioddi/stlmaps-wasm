@@ -48,7 +48,7 @@ const attributionItems: AttributionItem[] = [
     description:
       'This application utilizes the Precise Global Digital 3D Map "ALOS World 3D" (AW3D) provided by the Japan Aerospace Exploration Agency (JAXA).',
     icon: "satellite",
-    logoSrc: "/assets/jaxa.svg",
+    logoSrc: "assets/jaxa.svg",
     logoAlt: "JAXA Logo",
     linkText: "JAXA AW3D Dataset Information",
     linkUrl: "https://earth.jaxa.jp/en/data/2552/index.html",
@@ -60,7 +60,7 @@ const attributionItems: AttributionItem[] = [
     description:
       "Map data is provided by OpenStreetMap contributors, serving as the foundation for the vector tile dataset used in this application. OpenStreetMap is an open collaborative project creating freely available geographic data.",
     icon: "map",
-    logoSrc: "/assets/osm.svg",
+    logoSrc: "assets/osm.svg",
     logoAlt: "OpenStreetMap Logo",
     linkText: "© OpenStreetMap Contributors",
     linkUrl: "https://www.openstreetmap.org/copyright",
@@ -72,7 +72,7 @@ const attributionItems: AttributionItem[] = [
     description:
       "This application is built using @mapcomponents/react-maplibre, a modern React framework for interactive map applications. MapComponents provides developer-friendly tools for creating customizable mapping solutions.",
     icon: "code",
-    logoSrc: "/assets/mapcomponents.png",
+    logoSrc: "assets/mapcomponents.png",
     logoAlt: "MapComponents Logo",
     linkText: "MapComponents Project",
     linkUrl: "https://mapcomponents.org",

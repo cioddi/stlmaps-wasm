@@ -8,7 +8,7 @@ import {
   DialogActions, 
   Typography, 
   Paper, 
-  Grid, 
+  Grid2 as Grid, 
   Divider, 
   Chip, 
   useTheme,
@@ -405,7 +405,7 @@ const ExportButtons: React.FC = () => {
             {exportFormats.map((format) => {
               const { url, isLoading, handler } = getFormatData(format.id);
               return (
-                <Grid item xs={6} key={format.id}>
+                <Grid size={{ xs: 12, sm: 6 }} key={format.id}>
                   <Paper 
                     elevation={2}
                     sx={{

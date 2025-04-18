@@ -151,7 +151,7 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
           </Typography>
           
           <Typography variant="body1" paragraph>
-            By simply dragging or resizing a bounding box over the map, you can define the area of interest. Once selected, the app retrieves elevation data from a raster DEM and downloads up to 9 vector tiles at zoom level 14 that intersect with the area. Using this data, it generates detailed 3D meshes representing buildings, roads, water bodies, parks, and land use features.
+            By dragging or resizing a bounding box over the map, you can define the area of interest. Once selected, the app retrieves elevation data from a raster DEM and downloads up to 9 vector tiles at zoom level 14 that intersect with the area. Using this data, it generates detailed 3D meshes representing buildings, roads, water bodies, parks, and land use features.
           </Typography>
           
           <Typography variant="body1" paragraph>

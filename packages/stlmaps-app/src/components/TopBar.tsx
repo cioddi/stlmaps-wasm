@@ -72,13 +72,14 @@ export const TopBar: React.FC<TopBarProps> = ({
               <MenuIcon />
             </IconButton>
           )}
-          <img src="assets/logo.png" alt="Logo" width={isMobile ? 20 : 30} />
+          <img src="assets/logo.png" alt="Logo" width={isMobile ? 30 : 30} />
           <Typography
             variant={isMobile ? "body2" : "h6"}
             color="primary"
             sx={{
               fontSize: isMobile ? "0.75rem" : undefined,
               fontWeight: "bold",
+              marginTop: "5px"
             }}
           >
             STLMaps
