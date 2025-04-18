@@ -141,7 +141,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   let totalScore = 0;
   
   // Device factors
-  totalScore -= isMobileDevice ? 3 : 0;
+  totalScore -= isMobileDevice ? 3 : 2;
   totalScore += Math.min(deviceMemory / 2, 4); // Up to 4 points for 8GB+ RAM
   totalScore += Math.min(cpuCores / 2, 4);     // Up to 4 points for 8+ cores
   totalScore -= isHighResolution ? 1 : 0;      // High resolution is demanding
@@ -164,7 +164,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   console.log("Device capability score:", totalScore);
   
   // Set threshold for quality mode
-  useQualityMode = totalScore >= 4;
+  useQualityMode = totalScore >= 2;
   
   const recommendedMode = useQualityMode ? 'quality' : 'performance';
   console.log("Recommended rendering mode:", recommendedMode);
