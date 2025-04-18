@@ -19,6 +19,9 @@ import MobileMenu from "./components/MobileMenu";
 import MapSection from "./components/MapSection";
 import ModelSection from "./components/ModelSection";
 import { Feature } from "geojson";
+import { MlGeoJsonLayer } from "@mapcomponents/react-maplibre";
+import TerraBboxSelector from "./components/TerraBboxSelector";
+import NewBboxSelector from "./components/NewBboxSelector";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 440;
@@ -45,12 +48,13 @@ const App: React.FC = () => {
   const {
     terrainSettings,
     buildingSettings,
-    setBbox
+    setBbox,bbox
   } = useLayerStore();
 
   // Handle city selection to update both center and bbox
   const handleCitySelect = (city: any) => {
     if (city) {
+      _map.setZoom(14);
       setBboxCenter(city.coordinates);
       
       // Add a small delay to ensure state is updated before triggering bbox update
@@ -156,15 +160,14 @@ const App: React.FC = () => {
       open={openTodoList}
       onClose={() => setOpenTodoList(false)}
     />
-    <GenerateMeshButton />      <BboxSelector
+    <GenerateMeshButton />
+    <BboxSelector
       ref={bboxSelectorRef}
       options={{
-        center: bboxCenter,
         scale: [1, 1],
         rotate: 0,
-        orientation: "portrait",
-        width: 800,
-        height: 800,
+        width: 200,
+        height: 200,
       }}
       onChange={(geojson) => {
         console.log("BboxSelector onChange triggered with:", geojson);
