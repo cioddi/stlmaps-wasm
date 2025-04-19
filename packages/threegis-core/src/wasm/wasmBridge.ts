@@ -6,14 +6,27 @@ import * as WasmModule from '@threegis/core-wasm';
  */
 export async function initializeWasm(): Promise<void> {
   try {
-    if (typeof WasmModule.default === 'function') {
-      await WasmModule.default();
-      console.log('WASM module initialized');
+    // Create a global WebAssembly table with generous size
+    // This helps prevent the "WebAssembly.Table.grow()" error
+    if (typeof window !== 'undefined') {
+      const table = new WebAssembly.Table({
+        initial: 1000,
+        element: 'anyfunc'
+      });
+      
+      // Store it globally to prevent garbage collection
+      (window as any).__WASM_TABLE = table;
     }
     
+    // For the wasm-bindgen generated modules, we don't need to call default()
+    // The module initializes itself when imported
+    
+    // Call the initialize function if it exists
     if (typeof WasmModule.initialize === 'function') {
       WasmModule.initialize();
     }
+    
+    console.log('WASM module initialized');
   } catch (error) {
     console.error('Failed to initialize WASM module:', error);
     throw error;
