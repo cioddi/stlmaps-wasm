@@ -56,7 +56,7 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
       description:
         "Downloads all vector tiles from zoom level 14 that intersect with the selected bounding box, providing detailed geographic data.",
       icon: <GridOnIcon sx={{ color: theme.palette.primary.main, fontSize: 28 }} />,
-      imageSrc: "assets/process_vt.png",
+      imageSrc: "assets/process_vt2.png",
       imageAlt: "Vector tile downloading process",
     },
     {
@@ -65,7 +65,7 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
       description:
         "Extracts water, landuse, landcover and parks from vector tiles and creates extruded 3D meshes to represent these areas in the model.",
       icon: <ParkIcon sx={{ color: theme.palette.secondary.main, fontSize: 28 }} />,
-      imageSrc: "assets/process_polygon_layers.png",
+      imageSrc: "assets/process_polygon_layers2.png",
       imageAlt: "Green space and park mesh creation",
     },
     {
