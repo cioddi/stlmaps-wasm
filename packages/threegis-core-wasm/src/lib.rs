@@ -22,6 +22,17 @@ macro_rules! console_log {
     ($($t:tt)*) => (log(&format!($($t)*)))
 }
 
+// This sets up the wasm_bindgen start functionality
+#[wasm_bindgen(start)]
+pub fn start() {
+    // Set the panic hook for better error messages
+    #[cfg(feature = "console_error_panic_hook")]
+    console_error_panic_hook::set_once();
+    
+    // Log that the module has been initialized
+    console_log!("WASM module initialized");
+}
+
 #[wasm_bindgen]
 pub fn initialize() {
     // Set up the panic hook if the feature is enabled.

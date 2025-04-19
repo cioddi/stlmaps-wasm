@@ -1,11 +1,9 @@
-import resolve from '@rollup/plugin-node-resolve';
-import commonjs from '@rollup/plugin-commonjs';
-import typescript from '@rollup/plugin-typescript';
-import dts from 'rollup-plugin-dts';
-import wasm from '@rollup/plugin-wasm';
-import { createRequire } from 'module';
+const resolve = require('@rollup/plugin-node-resolve');
+const commonjs = require('@rollup/plugin-commonjs');
+const typescript = require('@rollup/plugin-typescript');
+const dts = require('rollup-plugin-dts');
+const wasm = require('@rollup/plugin-wasm');
 
-const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
 
 // Define configuration
@@ -47,6 +45,6 @@ const config = [
 ];
 
 // Filter out the types bundle if in watch mode
-export default process.env.ROLLUP_WATCH 
+module.exports = process.env.ROLLUP_WATCH 
   ? [config[0]] 
   : config;

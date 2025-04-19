@@ -1,5 +1,5 @@
 [package]
-name = "core-wasm"
+name = "threegis_core_wasm"
 version = "0.1.0"
 edition = "2021"
 description = "WebAssembly core implementation for threegis geometry processing"

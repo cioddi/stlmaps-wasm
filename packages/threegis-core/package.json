@@ -9,8 +9,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "rollup -c",
-    "dev": "rollup -c -w",
+    "build": "rollup -c rollup.config.mjs",
+    "dev": "rollup -c rollup.config.mjs -w",
     "lint": "eslint ."
   },
   "dependencies": {
@@ -22,6 +22,7 @@
     "@rollup/plugin-commonjs": "^25.0.7",
     "@rollup/plugin-node-resolve": "^15.2.3",
     "@rollup/plugin-typescript": "^11.1.6",
+    "@rollup/plugin-wasm": "^6.0.1",
     "@types/node": "^20.11.5",
     "rollup": "^4.13.0",
     "rollup-plugin-dts": "^6.1.0",
