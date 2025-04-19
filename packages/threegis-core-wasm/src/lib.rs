@@ -2,6 +2,11 @@ use wasm_bindgen::prelude::*;
 use geojson::{Feature, GeoJson, Geometry, Value};
 use geo::{Coord, LineString, Polygon};
 use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen::to_value;
+
+// Enable better panic messages in console during development
+#[cfg(feature = "console_error_panic_hook")]
+pub use console_error_panic_hook::set_once as set_panic_hook;
 
 // This exports the function to JavaScript
 #[wasm_bindgen]
@@ -15,6 +20,41 @@ extern "C" {
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
 macro_rules! console_log {
     ($($t:tt)*) => (log(&format!($($t)*)))
+}
+
+#[wasm_bindgen]
+pub fn initialize() {
+    // Set up the panic hook if the feature is enabled.
+    #[cfg(feature = "console_error_panic_hook")]
+    set_panic_hook();
+    console_log!("ThreeGIS WASM module initialized");
+}
+
+// Example struct to return
+#[derive(Serialize)]
+pub struct RustResponse {
+    pub message: String,
+    pub value: i32,
+}
+
+#[wasm_bindgen]
+pub fn hello_from_rust(name: &str) -> Result<JsValue, JsValue> {
+    let response = RustResponse {
+        message: format!("Hello, {}! This response comes from Rust.", name),
+        value: 42,
+    };
+    // Use serde_wasm_bindgen to convert Rust struct to JS object
+    Ok(to_value(&response)?)
+}
+
+// Add a placeholder for projection testing later
+#[wasm_bindgen]
+pub fn transform_coordinate(lon: f64, lat: f64, from_epsg: u32, to_epsg: u32) -> Result<JsValue, JsValue> {
+    // Implementation will use the 'proj' crate
+    // Placeholder: just return input for now
+    #[derive(Serialize)]
+    struct Coords { lon: f64, lat: f64 };
+    Ok(to_value(&Coords{lon, lat})?)
 }
 
 // Example of a simple function that will be exposed to JavaScript
