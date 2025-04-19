@@ -80,7 +80,7 @@ function createPolygonGeometry({
   const clipBoxGeometry = new THREE.BoxGeometry(
     TERRAIN_SIZE, // much wider
     TERRAIN_SIZE, // much longer
-    TERRAIN_SIZE // much taller
+    TERRAIN_SIZE*5 // much taller
   );
 
   // Position the clipping box at the center of the terrain but lower to include water bodies

@@ -74,13 +74,14 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
             title: "3D Mesh Generation from Elevation Data",
             description:
                 "Develop an algorithm to convert JAXA ALOS World 3D elevation data into navigable 3D terrain meshes.",
-            status: "completed",
+            status: "in-progress",
             tags: ["3D", "Algorithm", "Elevation"],
-            progress: 100,
+            progress: 80,
             children: [
                 { title: "Process terrain height data", done: true },
                 { title: "Convert to triangulated mesh", done: true },
-                { title: "Optimize mesh for rendering", done: true }
+                { title: "Optimize mesh for rendering", done: true },
+                { title: "Improve terrain generation: make exaggeration effect stronger", done: false }
             ]
         },
         {
@@ -99,6 +100,7 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                 { title: "Add landuse, park, landcover polygons", done: true },
                 { title: "Move processing intensive tasks to a web-worker to keep the UI responsive", done: true },
                 { title: "Fix Align Vertices to Terrain layer-option", done: true },
+                { title: "Fix building adaptive scale factor", done: false },
                 { title: "Add 3mf export option", done: false },
             ]
         },
