@@ -60,9 +60,9 @@ export const vtGeometries: VtDataSet[] = [
     {
         sourceLayer: "building",
         color: new THREE.Color(0xafafaf), // Gray color for buildings
-        zOffset: 0,
+        zOffset: -0.1,
         useAdaptiveScaleFactor: true,
-        heightScaleFactor: 0.4,
+        heightScaleFactor: 0.8,
         enabled: true,
     },
 ];
