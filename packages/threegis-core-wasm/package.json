@@ -1,0 +1,29 @@
+{
+  "name": "@threegis/core-wasm",
+  "version": "0.1.0",
+  "private": false,
+  "description": "WebAssembly core implementation for threegis geometry processing",
+  "main": "pkg/threegis_core_wasm.js",
+  "types": "pkg/threegis_core_wasm.d.ts",
+  "files": [
+    "pkg"
+  ],
+  "scripts": {
+    "build": "wasm-pack build --target bundler --release --out-dir pkg",
+    "build:dev": "wasm-pack build --target bundler --dev --out-dir pkg",
+    "watch": "npm run build:dev -- --watch",
+    "test": "cargo test",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "webassembly",
+    "wasm",
+    "rust",
+    "threegis",
+    "geometry"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

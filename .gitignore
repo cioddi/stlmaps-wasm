@@ -10,6 +10,8 @@ lerna-debug.log*
 .husky
 .vite
 
+target
+pkg
 node_modules
 dist
 dist-ssr

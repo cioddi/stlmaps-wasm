@@ -20,6 +20,8 @@ A web application for generating 3D terrain and building models from map data. T
 
 - Node.js 18.x or later
 - npm 9.x or later
+- Rust and Cargo (install via [rustup](https://rustup.rs/))
+- wasm-pack (install via [installer](https://rustwasm.github.io/wasm-pack/installer/))
 
 ### Dev environment setup
 
