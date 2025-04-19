@@ -98,7 +98,7 @@ const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
                 { title: "Implement road networks (LineString support)", done: true },
                 { title: "Add landuse, park, landcover polygons", done: true },
                 { title: "Move processing intensive tasks to a web-worker to keep the UI responsive", done: true },
-                { title: "Fix Align Vertices to Terrain layer-option", done: false },
+                { title: "Fix Align Vertices to Terrain layer-option", done: true },
                 { title: "Add 3mf export option", done: false },
             ]
         },
