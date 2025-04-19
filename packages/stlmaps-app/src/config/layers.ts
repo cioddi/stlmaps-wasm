@@ -16,6 +16,7 @@ export const vtGeometries: VtDataSet[] = [
         zOffset: -0.3,
         bufferSize: 2,
         enabled: true,
+        alignVerticesToTerrain: true,
     },
     {
         sourceLayer: "park",
@@ -24,6 +25,7 @@ export const vtGeometries: VtDataSet[] = [
         zOffset: -0.3,
         bufferSize: 2,
         enabled: true,
+        alignVerticesToTerrain: true,
     },
     {
         sourceLayer: "landuse",
@@ -32,6 +34,7 @@ export const vtGeometries: VtDataSet[] = [
         zOffset: -0.4,
         bufferSize: 2,
         enabled: true,
+        alignVerticesToTerrain: true,
         // Filter to include green areas
         filter: [
             "in",
@@ -47,7 +50,7 @@ export const vtGeometries: VtDataSet[] = [
         zOffset: -0.2,
         bufferSize: 2.4,
         enabled: true,
-        alignVerticesToTerrain: false,
+        alignVerticesToTerrain: true,
         // Updated filter to include more street types
         filter: [
             "all",

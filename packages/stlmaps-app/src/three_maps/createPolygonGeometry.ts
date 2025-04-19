@@ -293,46 +293,79 @@ function createPolygonGeometry({
 
     // Align vertices to terrain if specified
     if (vtDataSet.alignVerticesToTerrain) {
-      // Get position attribute for direct manipulation
+      // For ExtrudeGeometry, we need to:
+      // 1. Identify top face vertices (they have higher z-values)
+      // 2. Adjust only those vertices based on terrain height
+      // 3. Keep bottom face at a consistent level
+      // This preserves the structure of the extruded geometry
+      
       const positions = geometry.attributes.position;
-
-      // For each vertex in the geometry
+      const meshSize = 200; // Standard terrain mesh size
+      
+      // Create a heightmap to store terrain heights by vertex X,Y position
+      const terrainHeightMap = new Map<string, number>();
+      
+      // First, detect which vertices are on the top face by their z-value
+      // and pre-compute terrain heights for each unique X,Y coordinate
       for (let i = 0; i < positions.count; i++) {
-        // Get current vertex coordinates
         const x = positions.getX(i);
         const y = positions.getY(i);
         const z = positions.getZ(i);
-
-        // Skip bottom vertices (we only want to adjust the top surface)
-        // In ExtrudeGeometry, vertices come in pairs - top and bottom
-        // We can identify top vertices as they have higher z values
-        if (z <= zBottom + 0.1) continue; // Small epsilon to account for floating point errors
-
-        // Convert mesh coordinates back to geographic coordinates
-        const meshSize = Math.min(200, 200); // Typical terrain mesh size
-        const geoLng = minLng + ((x + meshSize / 2) / meshSize) * (maxLng - minLng);
-        const geoLat = minLat + ((y + meshSize / 2) / meshSize) * (maxLat - minLat);
-
-        // Sample terrain elevation at this point
-        const terrainZ = sampleTerrainElevationAtPoint(
-          geoLng,
-          geoLat,
-          elevationGrid,
-          gridSize,
-          { minLng, minLat, maxLng, maxLat },
-          minElevation,
-          maxElevation
-        );
-
-        // Apply height offset from base terrain
-        const heightOffset = z - zBottom;
-
-        // Set new Z position to terrain height plus original height offset
-        positions.setZ(i, terrainZ + heightOffset);
+        
+        // Skip if this is clearly a bottom vertex
+        if (z <= zBottom + 0.1) continue;
+        
+        // Create a key based on x,y coordinates (with rounding to handle floating point issues)
+        const posKey = `${Math.round(x * 1000)},${Math.round(y * 1000)}`;
+        
+        // Only calculate terrain height once per unique x,y position
+        if (!terrainHeightMap.has(posKey)) {
+          // Convert mesh coordinates to geographic coordinates
+          const geoLng = minLng + ((x + meshSize / 2) / meshSize) * (maxLng - minLng);
+          const geoLat = minLat + ((y + meshSize / 2) / meshSize) * (maxLat - minLat);
+          
+          // Sample terrain height at this position
+          const terrainZ = sampleTerrainElevationAtPoint(
+            geoLng,
+            geoLat,
+            elevationGrid,
+            gridSize,
+            { minLng, minLat, maxLng, maxLat },
+            minElevation,
+            maxElevation
+          );
+          
+          terrainHeightMap.set(posKey, terrainZ);
+        }
       }
-
-      // Update the geometry
+      
+      // Now apply the terrain height adjustments to the top face
+      // We'll examine each vertex to determine if it's part of the top face
+      for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i);
+        const y = positions.getY(i);
+        const z = positions.getZ(i);
+        
+        // A more reliable way to identify top face vertices:
+        // In an ExtrudeGeometry, the top face vertices have z values 
+        // very close to zBottom + validatedHeight
+        const isTopFace = Math.abs(z - (zBottom + validatedHeight)) < 0.1;
+        
+        if (isTopFace) {
+          const posKey = `${Math.round(x * 1000)},${Math.round(y * 1000)}`;
+          const terrainZ = terrainHeightMap.get(posKey);
+          
+          if (terrainZ !== undefined) {
+            // Set the top vertex to terrain height + building height
+            // This maintains the building's height while conforming to terrain
+            positions.setZ(i, terrainZ + validatedHeight);
+          }
+        }
+      }
+      
+      // Update the geometry and recompute normals
       positions.needsUpdate = true;
+      geometry.computeVertexNormals();
     }
 
     geometry.computeVertexNormals();
