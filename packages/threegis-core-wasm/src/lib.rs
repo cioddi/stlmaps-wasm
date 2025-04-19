@@ -50,11 +50,30 @@ pub fn hello_from_rust(name: &str) -> Result<JsValue, JsValue> {
 // Add a placeholder for projection testing later
 #[wasm_bindgen]
 pub fn transform_coordinate(lon: f64, lat: f64, from_epsg: u32, to_epsg: u32) -> Result<JsValue, JsValue> {
-    // Implementation will use the 'proj' crate
-    // Placeholder: just return input for now
+    // Simple implementation without using the 'proj' crate
+    // For EPSG:4326 (WGS84) to EPSG:3857 (Web Mercator)
+    // This is a basic implementation - for production, use a proper projection library
+    
     #[derive(Serialize)]
-    struct Coords { lon: f64, lat: f64 };
-    Ok(to_value(&Coords{lon, lat})?)
+    struct Coords { 
+        lon: f64, 
+        lat: f64,
+        original_epsg: u32,
+        target_epsg: u32
+    };
+    
+    // Log the conversion request
+    console_log!("Transforming coordinates: ({}, {}) from EPSG:{} to EPSG:{}", 
+                 lon, lat, from_epsg, to_epsg);
+    
+    // Just return the input coordinates with EPSG information for now
+    // In a real implementation, we would do the actual transformation
+    Ok(to_value(&Coords{
+        lon, 
+        lat, 
+        original_epsg: from_epsg, 
+        target_epsg: to_epsg
+    })?)
 }
 
 // Example of a simple function that will be exposed to JavaScript
