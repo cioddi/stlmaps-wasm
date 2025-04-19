@@ -23,6 +23,7 @@ import { Feature } from "geojson";
 import { MlGeoJsonLayer } from "@mapcomponents/react-maplibre";
 import TerraBboxSelector from "./components/TerraBboxSelector";
 import NewBboxSelector from "./components/NewBboxSelector";
+import { initializeWasm, callHelloFromRust } from "@threegis/core";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 340;
@@ -40,11 +41,30 @@ const App: React.FC = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const bboxSelectorRef = useRef<{ updateBbox: () => void } | null>(null);
+  const [wasmInitialized, setWasmInitialized] = useState(false);
   
   // Close sidebar by default on mobile devices
   useEffect(() => {
     setSidebarOpen(!isMobile);
   }, [isMobile]);
+
+  // Initialize WebAssembly module
+  useEffect(() => {
+    initializeWasm()
+      .then(() => {
+        setWasmInitialized(true);
+        console.log('WASM ready in App component.');
+        try {
+          const response = callHelloFromRust('stlmaps-app');
+          console.log('Message from Rust:', response.message);
+        } catch (error) {
+          console.error('Error calling Rust function:', error);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to initialize WASM:', error);
+      });
+  }, []);
 
   // Get layer settings and geometries from Zustand store
   const {

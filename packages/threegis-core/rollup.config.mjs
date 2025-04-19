@@ -2,6 +2,7 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import dts from 'rollup-plugin-dts';
+import wasm from '@rollup/plugin-wasm';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -23,8 +24,14 @@ export default [
       },
     ],
     plugins: [
-      resolve(),
+      resolve({
+        preferBuiltins: false,
+      }),
       commonjs(),
+      wasm({
+        // This tells Rollup to include the wasm files as base64-encoded strings
+        maxFileSize: 10000000, // Allow larger WASM files (10MB)
+      }),
       typescript({
         tsconfig: './tsconfig.json',
         declaration: true,
@@ -32,7 +39,9 @@ export default [
         outDir: 'dist',
       }),
     ],
-    external: Object.keys(pkg.dependencies || {}),
+    external: Object.keys(pkg.dependencies || {}).filter(
+      dep => dep !== '@threegis/core-wasm'
+    ),
   },
   // Only include the dts bundle in production build, not in watch mode
   process.env.ROLLUP_WATCH ? null : {

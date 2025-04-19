@@ -15,9 +15,11 @@
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
+    "@rollup/plugin-wasm": "^6.2.2",
     "husky": "^9.0.0",
     "lerna": "^8.1.2",
     "prettier": "^3.2.5",
+    "rollup-plugin-wasm": "^3.0.0",
     "turbo": "^2.0.0"
   },
   "packageManager": "npm@10.2.3",

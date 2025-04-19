@@ -70,6 +70,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-wasm"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "geo",
+ "geo-types",
+ "geojson",
+ "js-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+ "web-sys",
+]
+
+[[package]]
 name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -460,23 +477,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "threegis-core-wasm"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "geo",
- "geo-types",
- "geojson",
- "js-sys",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-test",
- "web-sys",
 ]
 
 [[package]]
