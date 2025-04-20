@@ -30,6 +30,156 @@ pub struct TerrainGeometryResult {
     pub processed_max_elevation: f64,
 }
 
+// Function to smooth the elevation grid using a gaussian kernel
+fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Vec<Vec<f64>> {
+    let mut result = vec![vec![0.0; width]; height];
+    let kernel_size = 3; // Smaller 3x3 kernel for less smoothing (was 5)
+    let kernel_radius = kernel_size / 2;
+    let sigma = 0.8; // Reduced sigma for sharper falloff (was 1.0)
+    
+    console_log!("Applying terrain smoothing with kernel size: {}, sigma: {}", kernel_size, sigma);
+    
+    // Precompute gaussian weights for optimization
+    let mut kernel_weights = vec![vec![0.0; kernel_size]; kernel_size];
+    let mut weight_sum = 0.0;
+    
+    for ky in 0..kernel_size {
+        for kx in 0..kernel_size {
+            let dx = (kx as isize - kernel_radius as isize) as f64;
+            let dy = (ky as isize - kernel_radius as isize) as f64;
+            let dist_sq = dx * dx + dy * dy;
+            // Gaussian function: e^(-(d²/2σ²))
+            let weight = (-dist_sq / (2.0 * sigma * sigma)).exp();
+            kernel_weights[ky][kx] = weight;
+            weight_sum += weight;
+        }
+    }
+    
+    // Normalize weights
+    for ky in 0..kernel_size {
+        for kx in 0..kernel_size {
+            kernel_weights[ky][kx] /= weight_sum;
+        }
+    }
+    
+    // Apply the kernel to each grid cell
+    for y in 0..height {
+        for x in 0..width {
+            let mut weighted_sum = 0.0;
+            let mut total_weight = 0.0;
+            
+            for ky in 0..kernel_size {
+                let grid_y = y as isize + (ky as isize - kernel_radius as isize);
+                if grid_y < 0 || grid_y >= height as isize {
+                    continue;
+                }
+                
+                for kx in 0..kernel_size {
+                    let grid_x = x as isize + (kx as isize - kernel_radius as isize);
+                    if grid_x < 0 || grid_x >= width as isize {
+                        continue;
+                    }
+                    
+                    let weight = kernel_weights[ky][kx];
+                    weighted_sum += grid[grid_y as usize][grid_x as usize] * weight;
+                    total_weight += weight;
+                }
+            }
+            
+            // Normalize by the actual weights used (for edge pixels)
+            if total_weight > 0.0 {
+                result[y][x] = weighted_sum / total_weight;
+            } else {
+                // Fall back to original value if no valid neighbors (shouldn't happen)
+                result[y][x] = grid[y][x];
+            }
+        }
+    }
+    
+    result
+}
+
+// Function to remove outliers from the elevation data
+fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) -> (Vec<Vec<f64>>, f64, f64) {
+    let width = grid[0].len();
+    let height = grid.len();
+    let mut result = vec![vec![0.0; width]; height];
+    
+    // Calculate the range and derive reasonable thresholds
+    let range = max_elevation - min_elevation;
+    
+    // Calculate mean and standard deviation
+    let mut sum = 0.0;
+    let mut count = 0;
+    for row in &grid {
+        for &val in row {
+            if val.is_finite() {
+                sum += val;
+                count += 1;
+            }
+        }
+    }
+    
+    let mean = if count > 0 { sum / count as f64 } else { (min_elevation + max_elevation) / 2.0 };
+    
+    // Calculate standard deviation
+    let mut sum_sq_diff = 0.0;
+    for row in &grid {
+        for &val in row {
+            if val.is_finite() {
+                let diff = val - mean;
+                sum_sq_diff += diff * diff;
+            }
+        }
+    }
+    
+    let std_dev = if count > 0 { (sum_sq_diff / count as f64).sqrt() } else { range / 4.0 };
+    
+    // Set thresholds for clipping (mean ± 2.5 standard deviations)
+    let lower_threshold = mean - 2.5 * std_dev;
+    let upper_threshold = mean + 2.5 * std_dev;
+    
+    console_log!("Elevation stats - Mean: {:.2}, StdDev: {:.2}", mean, std_dev);
+    console_log!("Clipping outliers: < {:.2} or > {:.2}", lower_threshold, upper_threshold);
+    
+    // Apply clipping
+    let mut new_min = f64::INFINITY;
+    let mut new_max = f64::NEG_INFINITY;
+    
+    for y in 0..height {
+        for x in 0..width {
+            let val = grid[y][x];
+            // Clamp value to thresholds
+            let clamped_val = val.max(lower_threshold).min(upper_threshold);
+            result[y][x] = clamped_val;
+            
+            // Track new min/max
+            if clamped_val.is_finite() {
+                new_min = new_min.min(clamped_val);
+                new_max = new_max.max(clamped_val);
+            }
+        }
+    }
+    
+    // Apply a second smoothing pass after outlier removal to blend the clamped values
+    let final_result = smooth_elevation_grid(result, width, height);
+    
+    // Recalculate min/max after the second smoothing
+    let mut final_min = f64::INFINITY;
+    let mut final_max = f64::NEG_INFINITY;
+    
+    for row in &final_result {
+        for &val in row {
+            if val.is_finite() {
+                final_min = final_min.min(val);
+                final_max = final_max.max(val);
+            }
+        }
+    }
+    
+    (final_result, final_min, final_max)
+}
+
 // Main function to create terrain geometry from elevation data
 #[wasm_bindgen]
 pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
@@ -69,13 +219,22 @@ pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     let width = elevation_grid[0].len() as u32;
     let height = elevation_grid.len() as u32;
     
+    // Apply smoothing to reduce spikiness
+    let smoothed_grid = smooth_elevation_grid(elevation_grid.clone(), width as usize, height as usize);
+    
+    // Remove extreme values by clamping outliers
+    let (cleaned_grid, clean_min, clean_max) = remove_outliers(smoothed_grid, min_elevation, max_elevation);
+    
+    console_log!("Terrain smoothing applied: min:{:.2} -> {:.2}, max:{:.2} -> {:.2}", 
+                min_elevation, clean_min, max_elevation, clean_max);
+    
     let elevation_result = ElevationProcessingResult {
-        elevation_grid: elevation_grid.clone(),
+        elevation_grid: cleaned_grid,
         grid_size: GridSize { width, height },
-        min_elevation,
-        max_elevation,
-        processed_min_elevation: min_elevation,
-        processed_max_elevation: max_elevation,
+        min_elevation: clean_min,
+        max_elevation: clean_max,
+        processed_min_elevation: clean_min,
+        processed_max_elevation: clean_max,
         cache_hit_rate: 1.0, // Not important for this function
     };
     
