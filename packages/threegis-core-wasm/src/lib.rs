@@ -3,23 +3,36 @@ use geojson::{Feature, GeoJson, Geometry, Value};
 use geo::{Coord, LineString, Polygon};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
+use std::collections::HashMap;
+use js_sys::Date;
+
+// Create a console module for logging
+pub mod console;
+// Import our elevation processing module
+mod elevation;
+// Import our module state management
+mod module_state;
+// Import our models
+mod models;
+
+use module_state::{ModuleState, TileData, create_tile_key};
+use models::{CacheStats, RustResponse};
 
 // Enable better panic messages in console during development
 #[cfg(feature = "console_error_panic_hook")]
 pub use console_error_panic_hook::set_once as set_panic_hook;
 
-// This exports the function to JavaScript
 #[wasm_bindgen]
 extern "C" {
-    // Use `js_namespace` to bind `console.log(..)` instead of just
-    // `log(..)`
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
+    // JavaScript function to fetch tile data from URL
+    #[wasm_bindgen(js_namespace = wasmJsHelpers, catch)]
+    pub fn fetch_tile(z: u32, x: u32, y: u32, source_type: &str) -> Result<js_sys::Promise, JsValue>;
 }
 
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
+// Use the macro from our console module
+#[macro_export]
 macro_rules! console_log {
-    ($($t:tt)*) => (log(&format!($($t)*)))
+    ($($t:tt)*) => (crate::console::log(&format!($($t)*)))
 }
 
 // This sets up the wasm_bindgen start functionality
@@ -29,29 +42,95 @@ pub fn start() {
     #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
     
+    // Initialize the module state
+    let state = ModuleState::global();
+    let mut state = state.lock().unwrap();
+    // Set initial cache limits
+    state.max_raster_tiles = 200;
+    state.max_vector_tiles = 100;
+    
     // Log that the module has been initialized
-    console_log!("WASM module initialized");
+    console_log!("ThreeGIS WASM module initialized with caching");
 }
 
+// Function to store a raster tile in the cache
 #[wasm_bindgen]
-pub fn initialize() {
-    // Set up the panic hook if the feature is enabled.
-    #[cfg(feature = "console_error_panic_hook")]
-    set_panic_hook();
-    console_log!("ThreeGIS WASM module initialized");
+pub fn store_raster_tile(x: u32, y: u32, z: u32, source: &str, width: u32, height: u32, data: &[u8]) -> bool {
+    let state = ModuleState::global();
+    let mut state = state.lock().unwrap();
+    
+    let key = create_tile_key(x, y, z, source);
+    let tile_data = TileData {
+        width,
+        height,
+        x,
+        y,
+        z,
+        data: data.to_vec(),
+        timestamp: Date::now(),
+    };
+    
+    state.add_raster_tile(key, tile_data);
+    true
 }
 
-// Example struct to return
-#[derive(Serialize)]
-pub struct RustResponse {
-    pub message: String,
-    pub value: i32,
+// Function to check if a raster tile exists in the cache
+#[wasm_bindgen]
+pub fn has_raster_tile(x: u32, y: u32, z: u32, source: &str) -> bool {
+    let state = ModuleState::global();
+    let mut state = state.lock().unwrap();
+    
+    let key = create_tile_key(x, y, z, source);
+    state.get_raster_tile(&key).is_some()
+}
+
+// Function to get cache statistics
+#[wasm_bindgen]
+pub fn get_cache_stats() -> Result<JsValue, JsValue> {
+    let state = ModuleState::global();
+    let state = state.lock().unwrap();
+    
+    let (raster_count, vector_count, elevation_count, max_raster, max_vector, total_requests) = state.get_stats();
+    
+    let hit_rate = if total_requests > 0 {
+        state.cache_hits as f64 / total_requests as f64
+    } else {
+        0.0
+    };
+    
+    let stats = CacheStats {
+        raster_tiles_count: raster_count,
+        vector_tiles_count: vector_count,
+        elevation_grids_count: elevation_count,
+        max_raster_tiles: max_raster,
+        max_vector_tiles: max_vector,
+        total_requests,
+        hit_rate,
+    };
+    
+    Ok(to_value(&stats)?)
+}
+
+// Function to clear all caches
+#[wasm_bindgen]
+pub fn clear_caches() -> bool {
+    let state = ModuleState::global();
+    let mut state = state.lock().unwrap();
+    
+    state.clear_all_caches();
+    true
 }
 
 #[wasm_bindgen]
 pub fn hello_from_rust(name: &str) -> Result<JsValue, JsValue> {
+    // Get cache stats for demonstration
+    let state = ModuleState::global();
+    let state = state.lock().unwrap();
+    let (raster_count, vector_count, _, _, _, _) = state.get_stats();
+    
     let response = RustResponse {
-        message: format!("Hello, {}! This response comes from Rust.", name),
+        message: format!("Hello, {}! Cache contains {} raster tiles and {} vector tiles.", 
+                        name, raster_count, vector_count),
         value: 42,
     };
     // Use serde_wasm_bindgen to convert Rust struct to JS object

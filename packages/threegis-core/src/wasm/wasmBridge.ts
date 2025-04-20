@@ -30,22 +30,30 @@ export async function initializeWasm(): Promise<void> {
       throw new Error('WASM Module failed to import properly');
     }
     
-    // Check for module initialization
-    // First check if we have the expected initialize function
-    if (WasmModule.initialize && typeof WasmModule.initialize === 'function') {
-      try {
-        WasmModule.initialize();
-        console.log('WASM module explicitly initialized via initialize() function');
-      } catch (initError) {
-        console.warn('Error during explicit WASM initialization:', initError);
-        // Continue anyway, as the module might be usable without initialization
+    // Modern wasm-bindgen modules often don't have an explicit initialize function
+    // Instead, they initialize automatically when imported
+    // Only try to call initialize if it actually exists
+    if (typeof WasmModule === 'object' && WasmModule !== null) {
+      // Check for explicit initialization functions with different possible names
+      const initFn = (WasmModule as any).__wbindgen_init || 
+                    (WasmModule as any).__wbg_init;
+      
+      if (initFn && typeof initFn === 'function') {
+        try {
+          initFn();
+          console.log('WASM module explicitly initialized');
+        } catch (initError) {
+          console.warn('Non-critical: Error during explicit WASM initialization:', initError);
+          // Continue anyway, as many WASM modules self-initialize on import
+        }
+      } else {
+        console.log('WASM module has no explicit initialization function (normal for wasm-bindgen modules)');
       }
-    } else {
-      console.log('WASM module has no initialize function, using auto-initialization');
     }
     
     // Store the module instance for later use
     wasmModuleInstance = WasmModule;
+    (window as any).wasmDebugInstance = wasmModuleInstance;
     
     console.log('WASM module initialized successfully');
   } catch (error) {

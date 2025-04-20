@@ -9,7 +9,9 @@
     "lint": {},
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "dependsOn": ["^build"],
+      "inputs": ["src/**/*.{ts,tsx}"]
     }
   }
 }

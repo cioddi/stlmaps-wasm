@@ -156,8 +156,8 @@ export const processElevationDataWasm = async (
   
   try {
     // Call the WASM function
-    const result = await wasmModule.process_elevation_data(inputJson);
-    console.log('WASM elevation processing complete', result);
+    const result = await wasmModule.process_elevation_data_async(inputJson);
+    console.log('test WASM elevation processing complete', result);
     return result as ElevationProcessingResult;
   } catch (error) {
     console.error('Failed to process elevation data in WASM:', error);
