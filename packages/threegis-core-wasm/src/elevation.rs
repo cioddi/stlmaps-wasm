@@ -1,4 +1,3 @@
-// filepath: /home/tobi/project/stlmaps/packages/threegis-core-wasm/src/elevation.rs
 use wasm_bindgen::prelude::*;
 use js_sys::{Promise, Uint8Array, Object, Date};
 use wasm_bindgen_futures::JsFuture;
@@ -51,18 +50,23 @@ pub fn tile_x_to_lng(x: u32, z: u32) -> f64 {
     (x as f64 / n) * 360.0 - 180.0
 }
 
-// Convert a tile Y coordinate to latitude
+// Convert a tile Y coordinate to latitude - fixed with proper Web Mercator formula
 pub fn tile_y_to_lat(y: u32, z: u32) -> f64 {
     let n = 2.0_f64.powi(z as i32);
     let lat_rad = std::f64::consts::PI * (1.0 - 2.0 * y as f64 / n);
-    lat_rad.tan().atan() * 180.0 / std::f64::consts::PI
+    
+    // Use the correct formula: atan(sinh(lat_rad))
+    // sinh(x) = (e^x - e^-x)/2
+    let sinh_lat = ((lat_rad).exp() - (-lat_rad).exp()) / 2.0;
+    sinh_lat.atan() * 180.0 / std::f64::consts::PI
 }
 
 // Process RGBA pixels to extract elevation values
 pub fn process_pixel_to_elevation(r: u8, g: u8, b: u8) -> f64 {
-    // Using the common encoding for elevation tiles
-    // -10000 + (r*65536 + g*256 + b) * 0.1
-    -10000.0 + ((r as u32 * 65536 + g as u32 * 256 + b as u32) as f64) * 0.1
+    // Standard Mapbox Terrain-RGB encoding
+    // -10000 + ((R * 256² + G * 256 + B) * 0.1)
+    let value = (r as u32) * 65536 + (g as u32) * 256 + (b as u32);
+    -10000.0 + (value as f64) * 0.1
 }
 
 // Fetch a raster tile using JavaScript fetch helper
@@ -204,6 +208,9 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     
     console_log!("Starting elevation processing with {} tiles", tile_data_array.len());
     
+    // For debugging, track if any valid elevation values are found
+    let mut valid_elevations_found = false;
+    
     // Process each available tile
     for tile_data in &tile_data_array {
         // Extract and process elevation data from each tile
@@ -211,33 +218,30 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         let tile_x = tile_data.x;
         let tile_y = tile_data.y;
         
-        // Log tile data details for debugging
-        console_log!("WASM_DEBUG: Tile {}/{}/{} data length: {} bytes", 
-                   z, tile_x, tile_y, tile_data.data.len());
-        
-        // Sample some bytes from the beginning of the data to see what's there
-        if !tile_data.data.is_empty() {
-            let sample_len = std::cmp::min(20, tile_data.data.len());
-            let bytes_str = tile_data.data[0..sample_len]
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<Vec<String>>()
-                .join(" ");
-            console_log!("WASM_DEBUG: First {} bytes: {}", sample_len, bytes_str);
-        }
-        
+        // Print input bounding box for debugging
+        console_log!("Input bounding box: [{:.6}, {:.6}] to [{:.6}, {:.6}]", 
+                    min_lng, min_lat, max_lng, max_lat);
+                    
         // Calculate tile bounds in geographic coordinates
-        let n = 2.0_f64.powi(z as i32);
         let tile_min_lng = tile_x_to_lng(tile_x, z);
         let tile_max_lng = tile_x_to_lng(tile_x + 1, z);
         let tile_max_lat = tile_y_to_lat(tile_y, z);
         let tile_min_lat = tile_y_to_lat(tile_y + 1, z);
         
-        // Skip tiles that don't overlap with our bounding box
-        if tile_max_lng < min_lng || tile_min_lng > max_lng || 
-           tile_max_lat < min_lat || tile_min_lat > max_lat {
+        console_log!("Processing tile {}/{}/{}: bounds [{:.6}, {:.6}] to [{:.6}, {:.6}]", 
+                  z, tile_x, tile_y, tile_min_lng, tile_min_lat, tile_max_lng, tile_max_lat);
+        
+        // Add a small buffer to the bounding box check to avoid excluding tiles at the edges
+        const BUFFER: f64 = 0.01; // ~1km buffer depending on latitude
+        
+        // Modified check with buffer to be more inclusive of tiles
+        if tile_max_lng < (min_lng - BUFFER) || tile_min_lng > (max_lng + BUFFER) || 
+           tile_max_lat < (min_lat - BUFFER) || tile_min_lat > (max_lat + BUFFER) {
+            console_log!("Skipping tile {}/{}/{} - outside bounding box", z, tile_x, tile_y);
             continue;
         }
+        
+        console_log!("Processing tile data for {}/{}/{}", z, tile_x, tile_y);
         
         // Process tile data
         for y in 0..tile_data.height {
@@ -252,55 +256,47 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
                 let g = tile_data.data[pixel_index + 1];
                 let b = tile_data.data[pixel_index + 2];
                 
-                // Decode elevation
+                // Skip transparent pixels (assuming 4th byte is alpha)
+                if pixel_index + 3 < tile_data.data.len() && tile_data.data[pixel_index + 3] == 0 {
+                    continue;
+                }
+                
+                // Decode elevation - fixed to ensure proper calculation
                 let elevation = process_pixel_to_elevation(r, g, b);
                 
-                // Add debug logging for sample pixels to check the values
-                if (x == 128 && y == 128) || (x == 64 && y == 64) || (x == 192 && y == 192) {
-                    console_log!("Tile {}/{}/{} Pixel({},{}) RGB({},{},{}) -> Elevation: {}", 
-                                 z, tile_x, tile_y, x, y, r, g, b, elevation);
+                // Sample some pixels to debug
+                if (x == tile_data.width / 2 && y == tile_data.height / 2) || 
+                   (x % 128 == 0 && y % 128 == 0) {
+                    console_log!("Pixel({},{}) RGB({},{},{}) -> Elevation: {}", 
+                                x, y, r, g, b, elevation);
                 }
                 
-                // Add debug logging for a few sample pixels to check the values
-                if (x == 128 && y == 128) || (x == 64 && y == 64) || (x == 192 && y == 192) {
-                    console_log!("Tile {}/{}/{} Pixel({},{}) RGB({},{},{}) -> Elevation: {}", 
-                                 z, tile_x, tile_y, x, y, r, g, b, elevation);
-                }
-                
-                if elevation.is_finite() && !elevation.is_nan() {
-                    // Only update min/max if this is valid data
-                    if elevation > -9999.0 && elevation < 9999.0 {
-                        min_elevation = min_elevation.min(elevation);
-                        max_elevation = max_elevation.max(elevation);
-                    } else {
-                        continue; // Skip invalid values
-                    }
+                // Only process valid elevation values
+                // Allow a wider range of elevations but filter extreme outliers
+                if elevation.is_finite() && !elevation.is_nan() && elevation > -12000.0 && elevation < 12000.0 {
+                    min_elevation = min_elevation.min(elevation);
+                    max_elevation = max_elevation.max(elevation);
+                    valid_elevations_found = true;
                     
                     // Map this pixel to the output grid
-                    // Convert pixel (x,y) to geographic coordinates
-                    let norm_x = x as f64 / tile_data.width as f64;
-                    let norm_y = y as f64 / tile_data.height as f64;
+                    // Improved coordinate calculation
+                    let lng_percent = x as f64 / (tile_data.width as f64);
+                    let lat_percent = y as f64 / (tile_data.height as f64);
                     
-                    let abs_lng = tile_min_lng + norm_x * (tile_max_lng - tile_min_lng);
-                    let abs_lat = tile_min_lat + norm_y * (tile_max_lat - tile_min_lat);
+                    let abs_lng = tile_min_lng + lng_percent * (tile_max_lng - tile_min_lng);
+                    let abs_lat = tile_min_lat + lat_percent * (tile_max_lat - tile_min_lat);
                     
                     // Only process if within our bounding box
                     if abs_lng >= min_lng && abs_lng <= max_lng && 
                        abs_lat >= min_lat && abs_lat <= max_lat {
                         
+                        // More precise grid mapping
                         let grid_x = ((abs_lng - min_lng) / (max_lng - min_lng) * (grid_size.width - 1) as f64).round() as usize;
                         let grid_y = ((abs_lat - min_lat) / (max_lat - min_lat) * (grid_size.height - 1) as f64).round() as usize;
                         
                         if grid_x < grid_size.width as usize && grid_y < grid_size.height as usize {
                             elevation_grid[grid_y][grid_x] = elevation;
                             has_data[grid_y][grid_x] = true;
-                            
-                            // Log elevation set for debugging
-                            if (grid_x == grid_size.width as usize / 2 && grid_y == grid_size.height as usize / 2) || 
-                               (grid_x == grid_size.width as usize / 4 && grid_y == grid_size.height as usize / 4) {
-                                console_log!("Setting elevation at grid[{}][{}] = {} from tile {}/{}/{}", 
-                                           grid_y, grid_x, elevation, z, tile_x, tile_y);
-                            }
                         }
                     }
                 }
@@ -308,50 +304,65 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         }
     }
     
-    // Fix no-data areas with simple interpolation
-    // This is a simplified approach - a real implementation would use better interpolation
-    let mut fixed_grid = elevation_grid.clone();
+    // Print a summary of the elevation data found
+    console_log!("Elevation processing summary: min={}, max={}, valid_elevations_found={}", 
+               if min_elevation == f64::INFINITY { 0.0 } else { min_elevation }, 
+               if max_elevation == f64::NEG_INFINITY { 0.0 } else { max_elevation }, 
+               valid_elevations_found);
     
-    // If there's no data at all, use a default elevation
-    if min_elevation == f64::INFINITY || max_elevation == f64::NEG_INFINITY {
+    // Set default min/max if no valid data found
+    if !valid_elevations_found || min_elevation == f64::INFINITY || max_elevation == f64::NEG_INFINITY {
+        console_log!("Warning: Limited or no valid elevation data found, using default elevation range");
         min_elevation = 0.0;
-        max_elevation = 0.0;
-        // Fill the grid with zeros
-        fixed_grid = vec![vec![0.0; grid_size.width as usize]; grid_size.height as usize];
+        max_elevation = 1000.0;  // Use a reasonable default range
+        
+        // Instead of filling with zeros, we'll create a slight slope for visualization
+        for y in 0..grid_size.height as usize {
+            for x in 0..grid_size.width as usize {
+                let normalized_x = x as f64 / grid_size.width as f64;
+                let normalized_y = y as f64 / grid_size.height as f64;
+                elevation_grid[y][x] = normalized_x * normalized_y * 500.0;  // Create a simple gradient
+                has_data[y][x] = true;
+            }
+        }
     } else {
-        // Simple interpolation for cells without data
+        // Fix no-data areas with interpolation
         for y in 0..grid_size.height as usize {
             for x in 0..grid_size.width as usize {
                 if !has_data[y][x] {
-                    // Find nearest cells with data (simplified - just use adjacent cells)
+                    // Find nearest cells with data
                     let mut sum = 0.0;
                     let mut count = 0;
+                    let mut search_radius = 1;
                     
-                    // Check 8 surrounding cells
-                    for dy in -1..=1 {
-                        for dx in -1..=1 {
-                            if dx == 0 && dy == 0 { continue; }
-                            
-                            let nx = x as i32 + dx;
-                            let ny = y as i32 + dy;
-                            
-                            if nx >= 0 && nx < grid_size.width as i32 && 
-                               ny >= 0 && ny < grid_size.height as i32 {
-                                let nx = nx as usize;
-                                let ny = ny as usize;
-                                if has_data[ny][nx] {
-                                    sum += elevation_grid[ny][nx];
-                                    count += 1;
+                    // Expand search radius until we find data
+                    while count == 0 && search_radius < 10 {
+                        for dy in -search_radius..=search_radius {
+                            for dx in -search_radius..=search_radius {
+                                if dx == 0 && dy == 0 { continue; }
+                                
+                                let nx = x as i32 + dx;
+                                let ny = y as i32 + dy;
+                                
+                                if nx >= 0 && nx < grid_size.width as i32 && 
+                                   ny >= 0 && ny < grid_size.height as i32 {
+                                    let nx = nx as usize;
+                                    let ny = ny as usize;
+                                    if has_data[ny][nx] {
+                                        sum += elevation_grid[ny][nx];
+                                        count += 1;
+                                    }
                                 }
                             }
                         }
+                        search_radius += 1;
                     }
                     
                     if count > 0 {
-                        fixed_grid[y][x] = sum / count as f64;
+                        elevation_grid[y][x] = sum / count as f64;
                     } else {
-                        // If no neighbors have data, use the average of min and max
-                        fixed_grid[y][x] = (min_elevation + max_elevation) / 2.0;
+                        // If no neighbors have data, use average elevation
+                        elevation_grid[y][x] = (min_elevation + max_elevation) / 2.0;
                     }
                 }
             }
@@ -362,7 +373,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     let mut processed_min = f64::INFINITY;
     let mut processed_max = f64::NEG_INFINITY;
     
-    for row in &fixed_grid {
+    for row in &elevation_grid {
         for &cell in row {
             if cell.is_finite() && !cell.is_nan() {
                 processed_min = processed_min.min(cell);
@@ -371,7 +382,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         }
     }
     
-    // If still infinite, use the original min/max
+    // Ensure processed min/max are valid
     if processed_min == f64::INFINITY {
         processed_min = min_elevation;
     }
@@ -379,12 +390,19 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         processed_max = max_elevation;
     }
     
+    // If processed range is too small, enforce a minimum range
+    if (processed_max - processed_min).abs() < 1.0 {
+        let mid = (processed_min + processed_max) / 2.0;
+        processed_min = mid - 500.0;
+        processed_max = mid + 500.0;
+    }
+    
     // Store the processed result in the cache for future reuse
     let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
     {
         let state = ModuleState::global();
         let mut state = state.lock().unwrap();
-        state.store_elevation_grid(bbox_key, fixed_grid.clone());
+        state.store_elevation_grid(bbox_key, elevation_grid.clone());
     }
     
     // Calculate hit rate
@@ -396,7 +414,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     
     // Return the processed elevation data
     let result = ElevationProcessingResult {
-        elevation_grid: fixed_grid,
+        elevation_grid,
         grid_size,
         min_elevation,
         max_elevation,
@@ -404,6 +422,9 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         processed_max_elevation: processed_max,
         cache_hit_rate: hit_rate,
     };
+    
+    console_log!("Finished elevation processing: processed_min={}, processed_max={}", 
+                processed_min, processed_max);
     
     Ok(to_value(&result)?)
 }

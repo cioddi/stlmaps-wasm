@@ -185,13 +185,13 @@ export const processElevationDataWasm = async (
     
     // Create a properly structured result with all required fields
     const processedResult: ElevationProcessingResult = {
-      elevationGrid: result.elevationGrid || [],
+      elevationGrid: result.elevation_grid || [],
       gridSize: {
         width: gridSize.width || 256,
         height: gridSize.height || 256
       },
-      minElevation: typeof result.minElevation === 'number' ? result.minElevation : 0,
-      maxElevation: typeof result.maxElevation === 'number' ? result.maxElevation : 1000
+      minElevation: typeof result.processed_min_elevation === 'number' ? result.processed_min_elevation : 0,
+      maxElevation: typeof result.processed_max_elevation === 'number' ? result.processed_max_elevation : 1000
     };
     
     return processedResult;
