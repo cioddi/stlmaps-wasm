@@ -21,8 +21,14 @@ export async function initializeWasm(): Promise<void> {
     // For the wasm-bindgen generated modules, we don't need to call default()
     // The module initializes itself when imported
     
+    // Check if the module was properly imported
+    if (!WasmModule) {
+      throw new Error('WASM Module failed to import properly');
+    }
+    
     // Call the initialize function if it exists
-    if (typeof WasmModule.initialize === 'function') {
+    // Note: Many wasm-bindgen generated modules don't have an initialize function
+    if (WasmModule.initialize && typeof WasmModule.initialize === 'function') {
       WasmModule.initialize();
     }
     
