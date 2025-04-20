@@ -88,6 +88,24 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
     let pixel_data_js = js_sys::Reflect::get(&js_obj, &JsValue::from_str("pixelData"))?;
     let pixel_data = Uint8Array::new(&pixel_data_js);
     
+    
+    // Sample some bytes from the data to see what's there
+    if pixel_data.length() > 20 {
+        let mut sample_bytes = vec![0u8; 20];
+        // Use slice() to get only the first 20 bytes, then copy that smaller slice
+        let sample_slice = Uint8Array::new_with_byte_offset_and_length(
+            &pixel_data.buffer(), 
+            pixel_data.byte_offset(), 
+            20
+        );
+        sample_slice.copy_to(&mut sample_bytes[..]);
+        let bytes_str = sample_bytes.iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<String>>()
+            .join(" ");
+        console_log!("First 20 bytes of pixel data: {}", bytes_str);
+    }
+    
     // Create our TileData struct
     let tile_data = TileData {
         width,
@@ -111,7 +129,7 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
 // The main elevation processing function that uses cached tiles when available
 #[wasm_bindgen]
 pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, JsValue> {
-    console_log!("Processing elevation data with cached tiles...");
+    console_log!("WASM: Processing elevation data with cached tiles...");
     
     // Parse the input JSON
     let input: ElevationProcessingInput = serde_json::from_str(input_json)
@@ -178,11 +196,13 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         }
     }
     
-    // Process the elevation data using the ava, source: &strilable tiles
+    // Process the elevation data using the available tiles
     let mut elevation_grid: Vec<Vec<f64>> = vec![vec![0.0; grid_size.width as usize]; grid_size.height as usize];
     let mut has_data: Vec<Vec<bool>> = vec![vec![false; grid_size.width as usize]; grid_size.height as usize];
     let mut min_elevation = f64::INFINITY;
     let mut max_elevation = f64::NEG_INFINITY;
+    
+    console_log!("Starting elevation processing with {} tiles", tile_data_array.len());
     
     // Process each available tile
     for tile_data in &tile_data_array {
@@ -190,6 +210,21 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         let z = tile_data.z;
         let tile_x = tile_data.x;
         let tile_y = tile_data.y;
+        
+        // Log tile data details for debugging
+        console_log!("WASM_DEBUG: Tile {}/{}/{} data length: {} bytes", 
+                   z, tile_x, tile_y, tile_data.data.len());
+        
+        // Sample some bytes from the beginning of the data to see what's there
+        if !tile_data.data.is_empty() {
+            let sample_len = std::cmp::min(20, tile_data.data.len());
+            let bytes_str = tile_data.data[0..sample_len]
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<String>>()
+                .join(" ");
+            console_log!("WASM_DEBUG: First {} bytes: {}", sample_len, bytes_str);
+        }
         
         // Calculate tile bounds in geographic coordinates
         let n = 2.0_f64.powi(z as i32);
@@ -220,6 +255,18 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
                 // Decode elevation
                 let elevation = process_pixel_to_elevation(r, g, b);
                 
+                // Add debug logging for sample pixels to check the values
+                if (x == 128 && y == 128) || (x == 64 && y == 64) || (x == 192 && y == 192) {
+                    console_log!("Tile {}/{}/{} Pixel({},{}) RGB({},{},{}) -> Elevation: {}", 
+                                 z, tile_x, tile_y, x, y, r, g, b, elevation);
+                }
+                
+                // Add debug logging for a few sample pixels to check the values
+                if (x == 128 && y == 128) || (x == 64 && y == 64) || (x == 192 && y == 192) {
+                    console_log!("Tile {}/{}/{} Pixel({},{}) RGB({},{},{}) -> Elevation: {}", 
+                                 z, tile_x, tile_y, x, y, r, g, b, elevation);
+                }
+                
                 if elevation.is_finite() && !elevation.is_nan() {
                     // Only update min/max if this is valid data
                     if elevation > -9999.0 && elevation < 9999.0 {
@@ -247,6 +294,13 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
                         if grid_x < grid_size.width as usize && grid_y < grid_size.height as usize {
                             elevation_grid[grid_y][grid_x] = elevation;
                             has_data[grid_y][grid_x] = true;
+                            
+                            // Log elevation set for debugging
+                            if (grid_x == grid_size.width as usize / 2 && grid_y == grid_size.height as usize / 2) || 
+                               (grid_x == grid_size.width as usize / 4 && grid_y == grid_size.height as usize / 4) {
+                                console_log!("Setting elevation at grid[{}][{}] = {} from tile {}/{}/{}", 
+                                           grid_y, grid_x, elevation, z, tile_x, tile_y);
+                            }
                         }
                     }
                 }

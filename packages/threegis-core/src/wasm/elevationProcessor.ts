@@ -54,8 +54,8 @@ export interface ProcessElevationInput {
 export const initWasmJsHelpers = () => {
   // Create global namespace for our helper functions
   (window as any).wasmJsHelpers = {
-    // Function to fetch tile data
-    fetchTile: async (z: number, x: number, y: number): Promise<TileData> => {
+    // Function to fetch tile data - the name must match what's used in Rust (fetch_tile)
+    fetch_tile: async (z: number, x: number, y: number): Promise<TileData> => {
       const url = `https://wms.wheregroup.com/dem_tileserver/raster_dem/${z}/${x}/${y}.webp`;
       console.log(`JS Helper: Fetching tile from ${url}`);
       
@@ -68,21 +68,28 @@ export const initWasmJsHelpers = () => {
         // Get the image as blob
         const blob = await response.blob();
         
-        // Use image bitmap for processing
+        // Decode the WebP image to get actual pixel data
         const imageBitmap = await createImageBitmap(blob);
         
-        // Create a canvas to read pixel data
+        // Create a canvas to extract the pixel data
         const canvas = document.createElement('canvas');
         canvas.width = imageBitmap.width;
         canvas.height = imageBitmap.height;
         
+        // Draw the image on the canvas
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('Could not get canvas context');
-        
         ctx.drawImage(imageBitmap, 0, 0);
         
-        // Get the raw pixel data
+        // Get the decoded pixel data
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixelData = new Uint8Array(imageData.data);
+        
+        console.log(`Tile ${z}/${x}/${y}: Decoded pixel data, dimensions ${canvas.width}x${canvas.height}, length: ${pixelData.length} bytes`);
+        
+        // Sample RGB values from center pixel for debugging
+        const centerIdx = ((canvas.height/2) * canvas.width + canvas.width/2) * 4;
+        console.log(`Sample RGB at center: R:${pixelData[centerIdx]}, G:${pixelData[centerIdx+1]}, B:${pixelData[centerIdx+2]}`);
         
         return {
           width: canvas.width,
@@ -90,7 +97,7 @@ export const initWasmJsHelpers = () => {
           x,
           y,
           z,
-          pixelData: new Uint8Array(imageData.data)
+          pixelData
         };
       } catch (error) {
         console.error(`Error downloading tile ${z}/${x}/${y}:`, error);

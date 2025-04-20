@@ -159,7 +159,7 @@ export function useElevationProcessor() {
     maxTiles: number = 9
   ): number => {
     // Start with maximum reasonable zoom level for DEM (usually 14)
-    let zoom = 14;
+    let zoom = 12;
     
     // Decrease zoom until we get a manageable number of tiles
     while (zoom > 0) {

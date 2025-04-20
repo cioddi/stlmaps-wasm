@@ -10,8 +10,7 @@
   ],
   "scripts": {
     "build": "RUSTFLAGS=\"-C target-feature=+bulk-memory\" wasm-pack build --target web --release --out-dir pkg",
-    "build:dev": "wasm-pack build --target bundler --dev --out-dir pkg",
-    "watch": "npm run build:dev -- --watch",
+    "dev": "nodemon --watch src --ext rs --exec \"RUSTFLAGS=\\\"-gC target-feature=+bulk-memory\\\" wasm-pack build --dev --target web --out-dir pkg\"",
     "test": "cargo test",
     "prepublishOnly": "npm run build"
   },
@@ -24,6 +23,7 @@
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
 }
