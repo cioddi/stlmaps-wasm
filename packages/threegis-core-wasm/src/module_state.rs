@@ -24,7 +24,6 @@ pub struct TileKey {
     pub x: u32,
     pub y: u32,
     pub z: u32,
-    pub source: String, // To distinguish between different tile sources
 }
 
 // Vector tile feature cache
@@ -165,11 +164,10 @@ impl ModuleState {
 // Wrapper functions to interact with the module state from wasm-bindgen exports
 
 // Create a tile key from x, y, z, and source
-pub fn create_tile_key(x: u32, y: u32, z: u32, source: &str) -> TileKey {
+pub fn create_tile_key(x: u32, y: u32, z: u32) -> TileKey {
     TileKey {
         x,
         y,
         z,
-        source: source.to_string(),
     }
 }

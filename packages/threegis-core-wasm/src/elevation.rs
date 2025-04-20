@@ -13,7 +13,6 @@ pub struct TileRequest {
     pub x: u32,
     pub y: u32,
     pub z: u32,
-    pub source: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,9 +66,9 @@ pub fn process_pixel_to_elevation(r: u8, g: u8, b: u8) -> f64 {
 }
 
 // Fetch a raster tile using JavaScript fetch helper
-pub async fn fetch_raster_tile(x: u32, y: u32, z: u32, source_type: &str) -> Result<TileData, JsValue> {
+pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsValue> {
     // Call the JavaScript helper to fetch the tile
-    let promise_result = fetch_tile(z, x, y, source_type);
+    let promise_result = fetch_tile(z, x, y);
     // We need to unwrap the Result to get the Promise before passing it to JsFuture
     let promise = promise_result?;
     let js_result = JsFuture::from(promise).await?;
@@ -103,7 +102,7 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32, source_type: &str) -> Res
     // Update the cache
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
-    let key = create_tile_key(x, y, z, source_type);
+    let key = create_tile_key(x, y, z);
     state.add_raster_tile(key, tile_data.clone());
     
     Ok(tile_data)
@@ -134,7 +133,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     let mut cache_misses = 0;
     
     // First pass: Check cache and record hits and misses
-    let mut missing_tiles: Vec<(u32, u32, u32, String)> = Vec::new();
+    let mut missing_tiles: Vec<(u32, u32, u32)> = Vec::new();
     
     {
         let state = ModuleState::global();
@@ -145,7 +144,6 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
                 tile_request.x, 
                 tile_request.y, 
                 tile_request.z, 
-                &tile_request.source
             );
             
             if let Some(tile_data) = state.get_raster_tile(&key) {
@@ -157,7 +155,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
                 // Not in cache, add to missing tiles list
                 cache_misses += 1;
                 console_log!("Missing tile {}/{}/{} in cache", tile_request.z, tile_request.x, tile_request.y);
-                missing_tiles.push((tile_request.z, tile_request.x, tile_request.y, tile_request.source.clone()));
+                missing_tiles.push((tile_request.z, tile_request.x, tile_request.y));
             }
         }
     }
@@ -166,8 +164,8 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     if !missing_tiles.is_empty() {
         console_log!("Fetching {} missing tiles...", missing_tiles.len());
         
-        for (z, x, y, source) in missing_tiles {
-            match fetch_raster_tile(x, y, z, &source).await {
+        for (z, x, y) in missing_tiles {
+            match fetch_raster_tile(x, y, z).await {
                 Ok(tile_data) => {
                     console_log!("Successfully fetched and cached tile {}/{}/{}", z, x, y);
                     tile_data_array.push(tile_data);
@@ -180,7 +178,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         }
     }
     
-    // Process the elevation data using the available tiles
+    // Process the elevation data using the ava, source: &strilable tiles
     let mut elevation_grid: Vec<Vec<f64>> = vec![vec![0.0; grid_size.width as usize]; grid_size.height as usize];
     let mut has_data: Vec<Vec<bool>> = vec![vec![false; grid_size.width as usize]; grid_size.height as usize];
     let mut min_elevation = f64::INFINITY;

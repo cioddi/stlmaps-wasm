@@ -26,7 +26,7 @@ pub use console_error_panic_hook::set_once as set_panic_hook;
 extern "C" {
     // JavaScript function to fetch tile data from URL
     #[wasm_bindgen(js_namespace = wasmJsHelpers, catch)]
-    pub fn fetch_tile(z: u32, x: u32, y: u32, source_type: &str) -> Result<js_sys::Promise, JsValue>;
+    pub fn fetch_tile(z: u32, x: u32, y: u32) -> Result<js_sys::Promise, JsValue>;
 }
 
 // Use the macro from our console module
@@ -59,7 +59,7 @@ pub fn store_raster_tile(x: u32, y: u32, z: u32, source: &str, width: u32, heigh
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
     
-    let key = create_tile_key(x, y, z, source);
+    let key = create_tile_key(x, y, z);
     let tile_data = TileData {
         width,
         height,
@@ -80,7 +80,7 @@ pub fn has_raster_tile(x: u32, y: u32, z: u32, source: &str) -> bool {
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
     
-    let key = create_tile_key(x, y, z, source);
+    let key = create_tile_key(x, y, z);
     state.get_raster_tile(&key).is_some()
 }
 
