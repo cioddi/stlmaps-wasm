@@ -142,13 +142,19 @@ export const processElevationDataWasm = async (
     initWasmJsHelpers();
   }
   
-  // Create the input for the WASM function
-  const input: ProcessElevationInput = {
-    minLng,
-    minLat,
-    maxLng,
-    maxLat,
-    tiles
+  // Create the input for the WASM function with snake_case keys to match Rust struct
+  const input = {
+    min_lng: minLng,
+    min_lat: minLat,
+    max_lng: maxLng,
+    max_lat: maxLat,
+    tiles: tiles.map(tile => ({
+      x: tile.x,
+      y: tile.y,
+      z: tile.z
+    })),
+    grid_width: 256,  // Default tile width
+    grid_height: 256  // Default tile height
   };
   
   // Convert to JSON string to pass to WASM
@@ -157,8 +163,31 @@ export const processElevationDataWasm = async (
   try {
     // Call the WASM function
     const result = await wasmModule.process_elevation_data_async(inputJson);
-    console.log('test WASM elevation processing complete', result);
-    return result as ElevationProcessingResult;
+    console.log('WASM elevation processing complete', result);
+    
+    // Validate the result structure and provide defaults if needed
+    if (!result) {
+      throw new Error('WASM returned empty result');
+    }
+    
+    // Ensure gridSize exists with width and height properties using the input values
+    const gridSize = result.gridSize || { 
+      width: input.grid_width, 
+      height: input.grid_height 
+    };
+    
+    // Create a properly structured result with all required fields
+    const processedResult: ElevationProcessingResult = {
+      elevationGrid: result.elevationGrid || [],
+      gridSize: {
+        width: gridSize.width || 256,
+        height: gridSize.height || 256
+      },
+      minElevation: typeof result.minElevation === 'number' ? result.minElevation : 0,
+      maxElevation: typeof result.maxElevation === 'number' ? result.maxElevation : 1000
+    };
+    
+    return processedResult;
   } catch (error) {
     console.error('Failed to process elevation data in WASM:', error);
     throw error;
