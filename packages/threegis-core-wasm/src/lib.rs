@@ -14,6 +14,8 @@ mod elevation;
 mod module_state;
 // Import our models
 mod models;
+// Import our cache manager
+mod cache_manager;
 
 use module_state::{ModuleState, TileData, create_tile_key};
 use models::{CacheStats, RustResponse};
@@ -293,4 +295,15 @@ pub fn create_terrain_geometry(dem_data: &[u8], width: u32, height: u32, scale: 
     };
     
     serde_json::to_string(&mesh).unwrap()
+}
+
+// Export cache manager functions
+#[wasm_bindgen]
+pub fn register_cache_group(group_id: &str) -> Result<(), JsValue> {
+    crate::cache_manager::register_group_js(group_id)
+}
+
+#[wasm_bindgen]
+pub fn free_cache_group(group_id: &str) -> Result<(), JsValue> {
+    crate::cache_manager::free_group_js(group_id)
 }

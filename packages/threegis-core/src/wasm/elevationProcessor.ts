@@ -160,8 +160,8 @@ export const processElevationDataWasm = async (
       y: tile.y,
       z: tile.z
     })),
-    grid_width: 256,  // Default tile width
-    grid_height: 256  // Default tile height
+    grid_width: 200,  // Default tile width
+    grid_height: 200  // Default tile height
   };
   
   // Convert to JSON string to pass to WASM
