@@ -16,6 +16,7 @@ import useLayerStore from "../stores/useLayerStore";
 import {
   createComponentHashes,
   createConfigHash,
+  hashBbox,
 } from "../utils/configHashing";
 import { WorkerService } from "../workers/WorkerService";
 import { tokenManager } from "../utils/CancellationToken";
@@ -65,6 +66,9 @@ export const GenerateMeshButton = function () {
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
     null
   );
+
+  // Store the last processed bbox hash to detect changes for cache management
+  const [lastProcessedBboxHash, setLastProcessedBboxHash] = useState<string>("");
 
   // Get WASM-related hooks
   const {
@@ -247,6 +251,10 @@ export const GenerateMeshButton = function () {
 
       let elevationResult: ElevationProcessingResult;
 
+      // Get the bbox hash to check for changes
+      const currentBboxHash = hashBbox(bbox);
+      const bboxChanged = currentBboxHash !== lastProcessedBboxHash;
+
       // Process terrain data using WASM if available and initialized
       if (isWasmInitialized && !isWasmLoading && terrainSettings.enabled) {
         updateProcessingState({
@@ -255,15 +263,38 @@ export const GenerateMeshButton = function () {
         });
 
         try {
+          // Get current bbox hash for cache management
+          const currentBboxHash = hashBbox(bbox);
+          const bboxChanged = currentBboxHash !== lastProcessedBboxHash;
+
+          if (bboxChanged) {
+            console.log(
+              "%c 🔄 New bbox detected - previous cache will be freed automatically",
+              "color: #FF9800;"
+            );
+            setLastProcessedBboxHash(currentBboxHash);
+          } else {
+            console.log(
+              "%c ♻️ Using existing cached elevation data for bbox",
+              "color: #4CAF50;"
+            );
+          }
+
           // Use the WASM-based elevation processing
+          // The WASM module will register/free cache groups internally based on the bbox
+          console.log("🌍 Processing elevation data with WASM for bbox:", currentBboxHash);
           elevationResult = await processElevationForBbox(bbox);
+
           console.log(
-            "✅ Successfully processed elevation data with WASM:",
-            elevationResult
+            "✅ Successfully processed elevation data with WASM - now stored in Rust context"
           );
 
-          // Store the processed elevation data for reuse
-          setProcessedTerrainData(elevationResult);
+          // Store the processed elevation data for reuse in JavaScript
+          setProcessedTerrainData({
+            processedElevationGrid: elevationResult.elevationGrid,
+            processedMinElevation: elevationResult.minElevation,
+            processedMaxElevation: elevationResult.maxElevation
+          });
         } catch (error) {
           console.error("Error processing elevation data with WASM:", error);
           // Fall back to JavaScript implementation
