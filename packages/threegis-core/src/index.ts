@@ -1,3 +1,5 @@
-// Export all utilities from the package
-export * from './sources/VectortileSource';
+// Export the hooks for WASM integration
+export * from './hooks/useWasm';
+
+// Export the direct WASM bridge functions
 export * from './wasm/wasmBridge';

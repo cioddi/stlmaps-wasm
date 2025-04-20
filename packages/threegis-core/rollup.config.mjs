@@ -3,10 +3,14 @@ import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import dts from 'rollup-plugin-dts';
 import wasm from '@rollup/plugin-wasm';
-import { createRequire } from 'module';
+import babel from '@rollup/plugin-babel';
+import peerDepsExternal from 'rollup-plugin-peer-deps-external';
+import { readFileSync } from 'fs';
 
-const require = createRequire(import.meta.url);
-const pkg = require('./package.json');
+// Read package.json as ESM
+const pkg = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8')
+);
 
 // Define configuration
 const config = [
@@ -25,11 +29,19 @@ const config = [
       },
     ],
     plugins: [
+      // Extract peer dependencies
+      peerDepsExternal(),
+      
       resolve({
         preferBuiltins: false,
         extensions: ['.ts', '.js', '.mjs', '.wasm'],
       }),
       commonjs(),
+      babel({
+        presets: ['@babel/preset-react'],
+        babelHelpers: 'bundled',
+        extensions: ['.ts', '.tsx', '.js', '.jsx'],
+      }),
       wasm({
         maxFileSize: 10000000,
       }),
@@ -37,7 +49,8 @@ const config = [
         tsconfig: './tsconfig.json',
       }),
     ],
-    external: ['@threegis/core-wasm'],
+    // Make sure to include all externals including React and React DOM
+    external: ['@threegis/core-wasm', 'react', 'react-dom'],
   },
   {
     input: 'dist/index.d.ts',
