@@ -19,11 +19,7 @@ import { TopBar, ViewMode } from "./components/TopBar";
 import MobileMenu from "./components/MobileMenu";
 import MapSection from "./components/MapSection";
 import ModelSection from "./components/ModelSection";
-import { Feature } from "geojson";
-import { MlGeoJsonLayer } from "@mapcomponents/react-maplibre";
-import TerraBboxSelector from "./components/TerraBboxSelector";
-import NewBboxSelector from "./components/NewBboxSelector";
-import { useWasm, callHelloFromRust } from "@threegis/core";
+import { useWasm } from "@threegis/core";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 340;
@@ -54,12 +50,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isInitialized) {
       console.log('WASM ready in App component.');
-      try {
-        const response = callHelloFromRust('stlmaps-app');
-        console.log('Message from Rust:', response.message);
-      } catch (error) {
-        console.error('Error calling Rust function:', error);
-      }
     }
   }, [isInitialized]);
   

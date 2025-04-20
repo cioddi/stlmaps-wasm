@@ -1,5 +1,23 @@
-// Export the hooks for WASM integration
-export * from './hooks/useWasm';
+// filepath: /home/tobi/project/stlmaps/packages/threegis-core/src/index.ts
+// Export the common types from the elevation processor hook
+export type { 
+  GridSize, 
+  ElevationProcessingResult, 
+  Tile 
+} from './hooks/useElevationProcessor';
 
-// Export the direct WASM bridge functions
-export * from './wasm/wasmBridge';
+// Export the hooks
+export { useWasm } from './hooks/useWasm';
+export { useElevationProcessor } from './hooks/useElevationProcessor';
+
+// Export the WASM bridge functions
+export { 
+  initializeWasm,
+  getWasmModule
+} from './wasm/wasmBridge';
+
+// Export additional types and functions needed for elevation processing
+export { 
+  initWasmJsHelpers, 
+  processElevationDataWasm 
+} from './wasm/elevationProcessor';

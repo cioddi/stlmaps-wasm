@@ -1,24 +1,22 @@
 import { useState, useEffect } from "react";
-import { Slider, Typography, Box } from "@mui/material";
 import {
   GeometryData,
   calculateTileCount,
   extractGeojsonFeaturesFromVectorTiles,
-  fetchVtData,
   getTilesForBbox,
-  processBuildings,
 } from "./VectorTileFunctions";
 import * as THREE from "three";
 //@ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { createPolygonGeometryAsync } from "../three_maps/createPolygonGeometryAsync";
-import { createBuildingsGeometry } from "../three_maps/createBuildingsGeometry";
 import { createTerrainGeometry } from "../three_maps/createTerrainGeometry";
 import { bufferLineString } from "../three_maps/bufferLineString";
 import useLayerStore from "../stores/useLayerStore";
 import { createComponentHashes, createConfigHash } from "../utils/configHashing";
 import { WorkerService } from "../workers/WorkerService";
-import { CancellationToken, tokenManager } from "../utils/CancellationToken";
+import { tokenManager } from "../utils/CancellationToken";
+// Import WASM functionality
+import { useWasm, useElevationProcessor } from "@threegis/core";
 
 // Define interfaces for our data structures
 export interface GridSize {
@@ -26,60 +24,7 @@ export interface GridSize {
   height: number;
 }
 
-/**
- * Interface representing a vector tile dataset configuration for 3D rendering.
- */
-export interface VtDataSet {
-  /** The source layer name from the vector tile data */
-  sourceLayer: string;
-
-  /** Optional array of subclass identifiers to filter features by class */
-  subClass?: string[];
-
-  /** THREE.js Color to apply to the geometry */
-  color: THREE.Color;
-
-  /** Optional array of pre-processed geometry data */
-  data?: GeometryData[];
-
-  /** Optional THREE.js buffer geometry for the dataset */
-  geometry?: THREE.BufferGeometry;
-
-  /** Optional depth value for extruding 2D geometries into 3D */
-  extrusionDepth?: number;
-
-  /** Optional minimum extrusion depth when using variable extrusion */
-  minExtrusionDepth?: number;
-
-  /** Optional z-axis offset for vertical positioning */
-  zOffset?: number;
-
-  /** Optional buffer size for geometry operations like polygon buffering */
-  bufferSize?: number;
-
-  /** Optional array for MapLibre-style filter expressions to filter features */
-  filter?: any[];
-
-  /** Whether to use adaptive scaling based on zoom level or other factors */
-  useAdaptiveScaleFactor?: boolean;
-
-  /** Factor to multiply height values by when extruding */
-  heightScaleFactor?: number;
-
-  /** Whether to align the vertices to match terrain elevation */
-  alignVerticesToTerrain?: boolean;
-
-  /** Whether this dataset is enabled for rendering */
-  enabled?: boolean;
-}
-
-export interface Tile {
-  x: number;
-  y: number;
-  z: number;
-}
-
-interface TileData {
+export interface TileData {
   imageData?: ImageData;
   width: number;
   height: number;
@@ -115,6 +60,15 @@ interface ConfigHashes {
 
 export const GenerateMeshButton = function () {
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+
+  // Get WASM-related hooks
+  const { isInitialized: isWasmInitialized, isLoading: isWasmLoading, error: wasmError } = useWasm();
+  const { 
+    processElevationForBbox,
+    isProcessing: isWasmProcessing,
+    error: elevationProcessingError,
+    progress: elevationProcessingProgress
+  } = useElevationProcessor();
 
   // Get settings and setter functions directly from Zustand store
   const {
@@ -231,7 +185,7 @@ export const GenerateMeshButton = function () {
           maxLat,
           zoom
         );
-        if (tileCount <= 4) break;
+        if (tileCount <= 4)
         zoom--;
       }
 
@@ -250,44 +204,53 @@ export const GenerateMeshButton = function () {
       // Check for cancellation before downloading tiles
       cancellationToken.throwIfCancelled();
 
-      // Download tile data
-      console.log("🌐 Downloading tile data for tiles:", tiles);
-      const tileData = await Promise.all(
-        tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
-      );
-      console.log("✅ Successfully downloaded all tile data:", tileData.length);
+      let elevationResult: ElevationProcessingResult;
+
+      // Process terrain data using WASM if available and initialized
+      if (isWasmInitialized && !isWasmLoading && terrainSettings.enabled) {
+        updateProcessingState({ status: "Processing elevation data with WASM...", progress: 25 });
+        
+        try {
+          // Use the WASM-based elevation processing
+          elevationResult = await processElevationForBbox(bbox);
+          console.log("✅ Successfully processed elevation data with WASM:", elevationResult);
+          
+          // Store the processed elevation data for reuse
+          setProcessedTerrainData(elevationResult);
+        } catch (error) {
+          console.error("Error processing elevation data with WASM:", error);
+          // Fall back to JavaScript implementation
+          console.log("Falling back to JavaScript elevation processing...");
+          
+          // Download tile data
+          console.log("🌐 Downloading tile data for tiles:", tiles);
+          const tileData = await Promise.all(
+            tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
+          );
+          console.log("✅ Successfully downloaded all tile data:", tileData.length);
+          
+          // Process elevation data with JavaScript implementation
+          elevationResult = processElevationData(tileData, tiles, minLng, minLat, maxLng, maxLat);
+          setProcessedTerrainData(elevationResult);
+        }
+      } else {
+        // If WASM is not available, use the JavaScript implementation
+        console.log("Using JavaScript implementation for elevation processing");
+        
+        // Download tile data
+        console.log("🌐 Downloading tile data for tiles:", tiles);
+        const tileData = await Promise.all(
+          tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
+        );
+        console.log("✅ Successfully downloaded all tile data:", tileData.length);
+        
+        // Process elevation data with JavaScript implementation
+        elevationResult = processElevationData(tileData, tiles, minLng, minLat, maxLng, maxLat);
+        setProcessedTerrainData(elevationResult);
+      }
 
       // Update processing status
-      updateProcessingState({ status: "Processing elevation data...", progress: 35 });
-
-      // Check for cancellation before processing elevation data
-      cancellationToken.throwIfCancelled();
-
-      // Process elevation data to create a grid
-      console.log("🏔️ Processing elevation data...");
-      const { elevationGrid, gridSize, minElevation, maxElevation } =
-        processElevationData(tileData, tiles, minLng, minLat, maxLng, maxLat);
-      console.log("✅ Elevation data processed:", { gridSize, minElevation, maxElevation });
-
-      // Update processing status
-      updateProcessingState({ status: "Fetching vector tile data...", progress: 50 });
-
-      // Check for cancellation before fetching vector tile data
-      cancellationToken.throwIfCancelled();
-
-      // Always use zoom level 14 for building data, since that's where buildings are available
-      const buildingZoom = 14; // Force zoom 14 for buildings
-      console.log(`Fetching buildings at fixed zoom level ${buildingZoom}`);
-
-      // Fetch vt data for this bbox
-      let vtData = await fetchVtData({
-        bbox: [minLng, minLat, maxLng, maxLat],
-        zoom: 14,
-        gridSize,
-      });
-
-      // Update processing status
-      updateProcessingState({ status: "Generating terrain geometry...", progress: 65 });
+      updateProcessingState({ status: "Generating terrain geometry...", progress: 40 });
 
       // Check for cancellation before generating terrain geometry
       cancellationToken.throwIfCancelled();

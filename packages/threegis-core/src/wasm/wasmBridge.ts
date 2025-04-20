@@ -1,5 +1,9 @@
+// filepath: /home/tobi/project/stlmaps/packages/threegis-core/src/wasm/wasmBridge.ts
 // A simplified bridge to the WebAssembly module
 import * as WasmModule from '@threegis/core-wasm';
+
+// Store the module instance globally once initialized
+let wasmModuleInstance: typeof WasmModule | null = null;
 
 /**
  * Initialize the WebAssembly module
@@ -26,17 +30,39 @@ export async function initializeWasm(): Promise<void> {
       throw new Error('WASM Module failed to import properly');
     }
     
-    // Call the initialize function if it exists
-    // Note: Many wasm-bindgen generated modules don't have an initialize function
+    // Check for module initialization
+    // First check if we have the expected initialize function
     if (WasmModule.initialize && typeof WasmModule.initialize === 'function') {
-      WasmModule.initialize();
+      try {
+        WasmModule.initialize();
+        console.log('WASM module explicitly initialized via initialize() function');
+      } catch (initError) {
+        console.warn('Error during explicit WASM initialization:', initError);
+        // Continue anyway, as the module might be usable without initialization
+      }
+    } else {
+      console.log('WASM module has no initialize function, using auto-initialization');
     }
     
-    console.log('WASM module initialized');
+    // Store the module instance for later use
+    wasmModuleInstance = WasmModule;
+    
+    console.log('WASM module initialized successfully');
   } catch (error) {
     console.error('Failed to initialize WASM module:', error);
     throw error;
   }
+}
+
+/**
+ * Get the initialized WASM module instance
+ * @returns The WASM module instance
+ */
+export function getWasmModule(): typeof WasmModule {
+  if (!wasmModuleInstance) {
+    throw new Error('WASM module not initialized. Call initializeWasm() first.');
+  }
+  return wasmModuleInstance;
 }
 
 /**
@@ -45,57 +71,4 @@ export async function initializeWasm(): Promise<void> {
 export interface HelloResponse {
   message: string;
   value: number;
-}
-
-/**
- * Call the hello_from_rust function in the WebAssembly module
- */
-export function callHelloFromRust(name: string): HelloResponse {
-  if (typeof WasmModule.hello_from_rust !== 'function') {
-    return {
-      message: 'WASM function not available',
-      value: -1
-    };
-  }
-  
-  try {
-    return WasmModule.hello_from_rust(name) as HelloResponse;
-  } catch (error) {
-    console.error('Error calling WASM function:', error);
-    return {
-      message: `Error: ${error}`,
-      value: -1
-    };
-  }
-}
-
-/**
- * Coordinate transformation result
- */
-export interface TransformedCoords {
-  lon: number;
-  lat: number;
-  original_epsg: number;
-  target_epsg: number;
-}
-
-/**
- * Transform coordinates between different coordinate systems
- */
-export function callTransformCoordinate(
-  lon: number, 
-  lat: number, 
-  fromEpsg: number, 
-  toEpsg: number
-): TransformedCoords {
-  if (typeof WasmModule.transform_coordinate !== 'function') {
-    return { lon, lat, original_epsg: fromEpsg, target_epsg: toEpsg };
-  }
-  
-  try {
-    return WasmModule.transform_coordinate(lon, lat, fromEpsg, toEpsg) as TransformedCoords;
-  } catch (error) {
-    console.error('Error transforming coordinates:', error);
-    return { lon, lat, original_epsg: fromEpsg, target_epsg: toEpsg };
-  }
 }
