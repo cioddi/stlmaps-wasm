@@ -16,6 +16,8 @@ mod module_state;
 mod models;
 // Import our cache manager
 mod cache_manager;
+// Import our terrain geometry generation module
+mod terrain;
 
 use module_state::{ModuleState, TileData, create_tile_key};
 use models::{CacheStats, RustResponse};
@@ -276,25 +278,6 @@ pub struct ProcessedMesh {
     vertices: Vec<f64>,
     indices: Vec<u32>,
     normals: Vec<f64>,
-}
-
-// Example function to create terrain geometry
-#[wasm_bindgen]
-pub fn create_terrain_geometry(dem_data: &[u8], width: u32, height: u32, scale: f64) -> String {
-    console_log!("Creating terrain geometry from {}x{} DEM", width, height);
-    
-    // In a real implementation, this would:
-    // 1. Process the DEM data
-    // 2. Create a 3D mesh
-    // 3. Return the mesh as JSON
-    
-    let mesh = ProcessedMesh {
-        vertices: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-        indices: vec![0, 1, 2],
-        normals: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
-    };
-    
-    serde_json::to_string(&mesh).unwrap()
 }
 
 // Export cache manager functions
