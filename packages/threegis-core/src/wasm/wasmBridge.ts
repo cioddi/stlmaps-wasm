@@ -10,16 +10,42 @@ let wasmModuleInstance: typeof WasmModule | null = null;
  */
 export async function initializeWasm(): Promise<void> {
   try {
-    // Create a global WebAssembly table with generous size
-    // This helps prevent the "WebAssembly.Table.grow()" error
+    // Configure WASM memory and tables for dynamic growth with large limits
     if (typeof window !== "undefined") {
+      // Create a memory object with large initial and maximum size
+      // 128MB initial (2048 pages of 64KB)
+      // 2GB maximum (32768 pages of 64KB)
+      const memory = new WebAssembly.Memory({
+        initial: 2048,
+        maximum: 32768
+      });
+      
+      // Store memory globally to prevent garbage collection
+      (window as any).__WASM_MEMORY = memory;
+      
+      // Create function table with generous size and maximum growth limit
       const table = new WebAssembly.Table({
-        initial: 1000,
+        initial: 10000,    // Increased initial size
+        maximum: 50000,    // Higher maximum limit
         element: "anyfunc",
       });
 
       // Store it globally to prevent garbage collection
       (window as any).__WASM_TABLE = table;
+      
+      // Also create a reference table for externref (used by wasm-bindgen)
+      const refTable = new WebAssembly.Table({
+        initial: 10000,    // Increased initial size
+        maximum: 50000,    // Higher maximum limit
+        element: "externref",
+      });
+      
+      // Store it globally as well
+      (window as any).__WASM_EXTERNREF_TABLE = refTable;
+      
+      // Make it accessible to wasm-bindgen explicitly
+      (window as any).__wbindgen_externref_table_ptr = refTable;
+      (window as any).__wbindgen_anyfunc_table_ptr = table;
     }
 
     // For the wasm-bindgen generated modules, we don't need to call default()

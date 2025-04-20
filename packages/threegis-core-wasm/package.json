@@ -9,7 +9,7 @@
     "pkg"
   ],
   "scripts": {
-    "build": "wasm-pack build --target web --release --out-dir pkg",
+    "build": "RUSTFLAGS=\"-C target-feature=+bulk-memory\" wasm-pack build --target web --release --out-dir pkg",
     "build:dev": "wasm-pack build --target bundler --dev --out-dir pkg",
     "watch": "npm run build:dev -- --watch",
     "test": "cargo test",
