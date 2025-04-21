@@ -54,15 +54,14 @@ export interface ProcessElevationInput {
 export const initWasmJsHelpers = () => {
   // Create global namespace for our helper functions
   (window as any).wasmJsHelpers = {
-    // Function to fetch tile data - the name must match what's used in Rust (fetch_tile)
-    fetch_tile: async (z: number, x: number, y: number): Promise<TileData> => {
-      const url = `https://wms.wheregroup.com/dem_tileserver/raster_dem/${z}/${x}/${y}.webp`;
-      console.log(`JS Helper: Fetching tile from ${url}`);
+    // Function to fetch data from a URL - the name must match what's used in Rust (fetch)
+    fetch: async (url: string): Promise<TileData> => {
+      console.log(`JS Helper: Fetching from ${url}`);
       
       try {
         const response = await fetch(url);
         if (!response.ok) {
-          throw new Error(`Failed to fetch tile: ${response.status}`);
+          throw new Error(`Failed to fetch data: ${response.status}`);
         }
         
         // Get the image as blob
@@ -85,11 +84,35 @@ export const initWasmJsHelpers = () => {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const pixelData = new Uint8Array(imageData.data);
         
-        console.log(`Tile ${z}/${x}/${y}: Decoded pixel data, dimensions ${canvas.width}x${canvas.height}, length: ${pixelData.length} bytes`);
+        console.log(`Decoded pixel data, dimensions ${canvas.width}x${canvas.height}, length: ${pixelData.length} bytes`);
         
         // Sample RGB values from center pixel for debugging
         const centerIdx = ((canvas.height/2) * canvas.width + canvas.width/2) * 4;
         console.log(`Sample RGB at center: R:${pixelData[centerIdx]}, G:${pixelData[centerIdx+1]}, B:${pixelData[centerIdx+2]}`);
+        
+        // Extract x, y, z from URL if possible
+        const urlParts = url.split('/');
+        let x = 0, y = 0, z = 0;
+        
+        // Try to extract tile coordinates from URL
+        if (urlParts.length >= 3) {
+          const possibleZ = parseInt(urlParts[urlParts.length - 3], 10);
+          const possibleX = parseInt(urlParts[urlParts.length - 2], 10);
+          const possibleY = parseInt(urlParts[urlParts.length - 1], 10);
+          
+          if (!isNaN(possibleZ)) z = possibleZ;
+          if (!isNaN(possibleX)) x = possibleX;
+          if (!isNaN(possibleY)) {
+            // The Y coordinate might have a file extension
+            const yStr = urlParts[urlParts.length - 1];
+            const dotIndex = yStr.indexOf('.');
+            if (dotIndex > 0) {
+              y = parseInt(yStr.substring(0, dotIndex), 10);
+            } else {
+              y = possibleY;
+            }
+          }
+        }
         
         return {
           width: canvas.width,
@@ -100,7 +123,7 @@ export const initWasmJsHelpers = () => {
           pixelData
         };
       } catch (error) {
-        console.error(`Error downloading tile ${z}/${x}/${y}:`, error);
+        console.error(`Error downloading from ${url}:`, error);
         throw error;
       }
     },

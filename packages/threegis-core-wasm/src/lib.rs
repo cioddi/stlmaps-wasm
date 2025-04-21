@@ -32,9 +32,9 @@ pub use console_error_panic_hook::set_once as set_panic_hook;
 
 #[wasm_bindgen]
 extern "C" {
-    // JavaScript function to fetch tile data from URL
+    // JavaScript function to fetch data from URL
     #[wasm_bindgen(js_namespace = wasmJsHelpers, catch)]
-    pub fn fetch_tile(z: u32, x: u32, y: u32) -> Result<js_sys::Promise, JsValue>;
+    pub fn fetch(url: &str) -> Result<js_sys::Promise, JsValue>;
 }
 
 // Use the macro from our console module

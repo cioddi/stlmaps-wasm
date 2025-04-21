@@ -7,7 +7,7 @@ use wasm_bindgen_futures::JsFuture;
 use std::collections::HashMap;
 
 use crate::module_state::{ModuleState, TileData, create_tile_key};
-use crate::{console_log, fetch_tile};
+use crate::{console_log, fetch};
 
 // Reuse the TileRequest struct from elevation.rs
 #[derive(Serialize, Deserialize, Clone)]
@@ -491,8 +491,12 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         let tile_data = if let Some(existing_data) = module_state_lock.get_tile_data(&tile_key) {
             existing_data
         } else {
+            // Construct the appropriate URL for vector tiles
+            // Using Mapbox Vector Tile format
+            let url = format!("https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/{}/{}/{}.mvt?access_token=pk.eyJ1IjoidG9iaWFzb2thZmYiLCJhIjoiY2xtdHRhOW9vMDVvaDJqbzI3aDlxZGR6NyJ9.QVnAlQR7pJ5MGLyXyyNCYg", tile.z, tile.x, tile.y);
+            
             // Fetch the tile if not cached
-            let fetch_promise = fetch_tile(tile.x, tile.y, tile.z)?;
+            let fetch_promise = fetch(&url)?;
             let fetch_result = JsFuture::from(fetch_promise).await?;
             let data_array = Uint8Array::new(&fetch_result);
             let data_vec = data_array.to_vec();
