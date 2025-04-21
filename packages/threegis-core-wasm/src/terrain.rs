@@ -186,15 +186,41 @@ pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse parameters
     let params: TerrainGeometryParams = serde_wasm_bindgen::from_value(params_js)?;
     
+    console_log!("🏔️ [Terrain] Starting terrain geometry creation...");
+    console_log!("🏔️ [Terrain] Using process_id: '{}'", params.process_id);
+    console_log!("🏔️ [Terrain] Terrain params: bbox=[{}, {}, {}, {}], vertical_exaggeration={}, base_height={}", 
+                params.min_lng, params.min_lat, params.max_lng, params.max_lat, 
+                params.vertical_exaggeration, params.terrain_base_height);
+    
     // Get module state to access cached elevation data
     let state = ModuleState::global();
     let state = state.lock().unwrap();
     
-    // Try to get cached elevation data for this process_id
-    let elevation_grid = match state.get_elevation_grid(&params.process_id) {
-        Some(grid) => grid,
+    console_log!("🏔️ [Terrain] Current elevation cache has {} entries", state.elevation_grids.len());
+    
+    // List all keys in cache for debugging
+    let keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
+    console_log!("🏔️ [Terrain] Available cache keys: {:?}", keys);
+    
+    // Create the bbox_key format - this is the same format used in elevation.rs
+    let bbox_key = format!("{}_{}_{}_{}", params.min_lng, params.min_lat, params.max_lng, params.max_lat);
+    let has_bbox_key = state.elevation_grids.contains_key(&bbox_key);
+    
+    console_log!("🏔️ [Terrain] Looking for elevation data with bbox_key: '{}'", bbox_key);
+    console_log!("🏔️ [Terrain] Elevation data with this key exists: {}", has_bbox_key);
+    
+    // Get elevation data using ONLY the bbox_key format
+    let elevation_grid = match state.get_elevation_grid(&bbox_key) {
+        Some(grid) => {
+            console_log!("🏔️ [Terrain] ✅ Successfully retrieved elevation grid using bbox_key: '{}'", bbox_key);
+            console_log!("🏔️ [Terrain] Grid dimensions: {}x{}", grid[0].len(), grid.len());
+            grid
+        },
         None => {
-            return Err(JsValue::from_str("No elevation data found for this process_id. Process elevation data first."));
+            console_log!("🏔️ [Terrain] ❌ ERROR: No elevation data found for bbox_key: '{}'", bbox_key);
+            console_log!("🏔️ [Terrain] ℹ️ Available cache keys: {:?}", keys);
+            return Err(JsValue::from_str(&format!("No elevation data found for bbox [{}, {}, {}, {}]. Process elevation data first.",
+                params.min_lng, params.min_lat, params.max_lng, params.max_lat)));
         }
     };
     

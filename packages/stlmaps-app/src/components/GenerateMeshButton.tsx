@@ -10,7 +10,6 @@ import * as THREE from "three";
 //@ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { createPolygonGeometryAsync } from "../three_maps/createPolygonGeometryAsync";
-import { createTerrainGeometry } from "../three_maps/createTerrainGeometry";
 import { bufferLineString } from "../three_maps/bufferLineString";
 import useLayerStore from "../stores/useLayerStore";
 import {
@@ -21,7 +20,7 @@ import {
 import { WorkerService } from "../workers/WorkerService";
 import { tokenManager } from "../utils/CancellationToken";
 // Import WASM functionality
-import { useWasm, useElevationProcessor } from "@threegis/core";
+import { useWasm, useElevationProcessor, getWasmModule } from "@threegis/core";
 
 // Define interfaces for our data structures
 export interface GridSize {
@@ -29,13 +28,11 @@ export interface GridSize {
   height: number;
 }
 
-export interface TileData {
-  imageData?: ImageData;
-  width: number;
-  height: number;
-  x: number;
-  y: number;
-  z: number;
+interface TerrainGeometryResult {
+  geometry: THREE.BufferGeometry;
+  processedElevationGrid: number[][];
+  processedMinElevation: number;
+  processedMaxElevation: number;
 }
 
 interface GeoJSONFeature {
@@ -54,12 +51,21 @@ interface ElevationProcessingResult {
   maxElevation: number;
 }
 
-interface GenerateMeshButtonProps {}
-
 interface ConfigHashes {
   fullConfigHash: string;
   terrainHash: string;
   layerHashes: { index: number; hash: string }[];
+}
+
+// VtDataSet interface for type safety
+interface VtDataSet {
+  sourceLayer: string;
+  subClass?: string;
+  geometry?: THREE.BufferGeometry;
+  // Add other properties as needed
+  enabled?: boolean;
+  color?: string;
+  bufferSize?: number;
 }
 
 export const GenerateMeshButton = function () {
@@ -68,20 +74,13 @@ export const GenerateMeshButton = function () {
   );
 
   // Store the last processed bbox hash to detect changes for cache management
-  const [lastProcessedBboxHash, setLastProcessedBboxHash] = useState<string>("");
+  const [lastProcessedBboxHash, setLastProcessedBboxHash] =
+    useState<string>("");
 
   // Get WASM-related hooks
-  const {
-    isInitialized: isWasmInitialized,
-    isLoading: isWasmLoading,
-    error: wasmError,
-  } = useWasm();
-  const {
-    processElevationForBbox,
-    isProcessing: isWasmProcessing,
-    error: elevationProcessingError,
-    progress: elevationProcessingProgress,
-  } = useElevationProcessor();
+  const { isInitialized: isWasmInitialized, isLoading: isWasmLoading } =
+    useWasm();
+  const { processElevationForBbox } = useElevationProcessor();
 
   // Get settings and setter functions directly from Zustand store
   const {
@@ -92,8 +91,6 @@ export const GenerateMeshButton = function () {
     setGeometryDataSets,
     geometryDataSets,
     setIsProcessing,
-    setProcessingProgress,
-    setProcessingStatus,
     updateProcessingState,
     configHashes,
     setConfigHashes,
@@ -156,7 +153,7 @@ export const GenerateMeshButton = function () {
     // Check which specific components need regeneration
     const terrainChanged = currentTerrainHash !== configHashes.terrainHash;
     const changedLayerIndices = currentLayerHashes
-      .filter((layerHash, idx) => {
+      .filter((layerHash) => {
         const previousHash = configHashes.layerHashes.find(
           (lh) => lh.index === layerHash.index
         )?.hash;
@@ -238,113 +235,71 @@ export const GenerateMeshButton = function () {
 
       // Get tile coordinates
       const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-      console.log(`Downloading ${tiles.length} tiles`);
+      console.log(`Using ${tiles.length} tiles for elevation data`);
 
       // Update processing status
       updateProcessingState({
-        status: `Downloading ${tiles.length} elevation tiles...`,
+        status: `Processing elevation data...`,
         progress: 20,
       });
 
-      // Check for cancellation before downloading tiles
+      // Check for cancellation before processing elevation data
       cancellationToken.throwIfCancelled();
-
-      let elevationResult: ElevationProcessingResult;
 
       // Get the bbox hash to check for changes
       const currentBboxHash = hashBbox(bbox);
       const bboxChanged = currentBboxHash !== lastProcessedBboxHash;
 
-      // Process terrain data using WASM if available and initialized
-      if (isWasmInitialized && !isWasmLoading && terrainSettings.enabled) {
-        updateProcessingState({
-          status: "Processing elevation data with WASM...",
-          progress: 25,
-        });
-
-        try {
-          // Get current bbox hash for cache management
-          const currentBboxHash = hashBbox(bbox);
-          const bboxChanged = currentBboxHash !== lastProcessedBboxHash;
-
-          if (bboxChanged) {
-            console.log(
-              "%c 🔄 New bbox detected - previous cache will be freed automatically",
-              "color: #FF9800;"
-            );
-            setLastProcessedBboxHash(currentBboxHash);
-          } else {
-            console.log(
-              "%c ♻️ Using existing cached elevation data for bbox",
-              "color: #4CAF50;"
-            );
-          }
-
-          // Use the WASM-based elevation processing
-          // The WASM module will register/free cache groups internally based on the bbox
-          console.log("🌍 Processing elevation data with WASM for bbox:", currentBboxHash);
-          elevationResult = await processElevationForBbox(bbox);
-
-          console.log(
-            "✅ Successfully processed elevation data with WASM - now stored in Rust context"
-          );
-
-          // Store the processed elevation data for reuse in JavaScript
-          setProcessedTerrainData({
-            processedElevationGrid: elevationResult.elevationGrid,
-            processedMinElevation: elevationResult.minElevation,
-            processedMaxElevation: elevationResult.maxElevation
-          });
-        } catch (error) {
-          console.error("Error processing elevation data with WASM:", error);
-          // Fall back to JavaScript implementation
-          console.log("Falling back to JavaScript elevation processing...");
-
-          // Download tile data
-          console.log("🌐 Downloading tile data for tiles:", tiles);
-          const tileData = await Promise.all(
-            tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
-          );
-          console.log(
-            "✅ Successfully downloaded all tile data:",
-            tileData.length
-          );
-
-          // Process elevation data with JavaScript implementation
-          elevationResult = processElevationData(
-            tileData,
-            tiles,
-            minLng,
-            minLat,
-            maxLng,
-            maxLat
-          );
-          setProcessedTerrainData(elevationResult);
-        }
-      } else {
-        // If WASM is not available, use the JavaScript implementation
-        console.log("Using JavaScript implementation for elevation processing");
-
-        // Download tile data
-        console.log("🌐 Downloading tile data for tiles:", tiles);
-        const tileData = await Promise.all(
-          tiles.map((tile) => downloadTile(tile.z, tile.x, tile.y))
-        );
+      if (bboxChanged) {
         console.log(
-          "✅ Successfully downloaded all tile data:",
-          tileData.length
+          "%c 🔄 New bbox detected - previous cache will be freed automatically",
+          "color: #FF9800;"
+        );
+        setLastProcessedBboxHash(currentBboxHash);
+      } else {
+        console.log(
+          "%c ♻️ Using existing cached elevation data for bbox",
+          "color: #4CAF50;"
+        );
+      }
+
+      // Only attempt to process elevation data if WASM is initialized
+      if (!isWasmInitialized) {
+        throw new Error("WASM module not initialized. Please try again later.");
+      }
+
+      // Use the WASM-based elevation processing with the bboxHash as process_id
+      console.log(
+        "🌍 Processing elevation data with WASM for bbox:",
+        currentBboxHash
+      );
+
+      updateProcessingState({
+        status: "Processing elevation data with WASM...",
+        progress: 25,
+      });
+      let elevationResult;
+      try {
+        // Pass the currentBboxHash as the process_id to store data in WASM
+        // This will automatically register the data with this ID in the WASM context
+        elevationResult = await processElevationForBbox(bbox, currentBboxHash);
+
+        console.log(
+          "✅ Successfully processed and stored elevation data in WASM context"
         );
 
-        // Process elevation data with JavaScript implementation
-        elevationResult = processElevationData(
-          tileData,
-          tiles,
-          minLng,
-          minLat,
-          maxLng,
-          maxLat
+        // Store just the metadata for JavaScript-side operations, the actual grid
+        // remains in WASM memory and is accessible via the process_id (currentBboxHash)
+        setProcessedTerrainData({
+          processedElevationGrid: elevationResult.elevationGrid,
+          processedMinElevation: elevationResult.minElevation,
+          processedMaxElevation: elevationResult.maxElevation,
+        });
+      } catch (error) {
+        console.error("Error processing elevation data with WASM:", error);
+        throw new Error(
+          `Elevation processing failed: ${error instanceof Error ? error.message : String(error)}`
         );
-        setProcessedTerrainData(elevationResult);
       }
 
       // Update processing status
@@ -360,7 +315,7 @@ export const GenerateMeshButton = function () {
       let terrainGeometry = terrainSettings.enabled
         ? geometryDataSets.terrainGeometry
         : undefined;
-      let processedElevationGrid: number[][] | undefined;
+      let processedElevationGrid = elevationResult.elevationGrid;
       let processedMinElevation = elevationResult.minElevation;
       let processedMaxElevation = elevationResult.maxElevation;
       let elevationGrid = elevationResult.elevationGrid;
@@ -377,76 +332,89 @@ export const GenerateMeshButton = function () {
       const terrainConfigChanged =
         currentTerrainHashHere !== configHashes.terrainHash;
 
-      if (!terrainGeometry || terrainConfigChanged) {
-        // Generate three.js geometry from elevation grid
-        console.log("🗻 Creating terrain geometry...");
-        // Use settings from the Zustand store
-        const terrainResult = createTerrainGeometry(
-          elevationGrid,
-          gridSize,
-          processedMinElevation,
-          processedMaxElevation,
-          terrainSettings.verticalExaggeration,
-          terrainSettings.baseHeight
+      // Generate three.js geometry from elevation grid using WASM
+      console.log("🗻 Creating terrain geometry with WASM...");
+
+      try {
+        // Get the WASM module instance
+        const wasmModule = getWasmModule();
+
+        // First, we need to process and register the elevation data with the process_id
+        // This step is crucial - create_terrain_geometry expects this data to be pre-registered
+        console.log(
+          "Registering elevation data with process_id:",
+          currentBboxHash
         );
 
-        terrainGeometry = terrainResult.geometry;
-        processedElevationGrid = terrainResult.processedElevationGrid;
-        processedMinElevation = terrainResult.processedMinElevation;
-        processedMaxElevation = terrainResult.processedMaxElevation;
+        // We need to explicitly register the elevation data again for terrain generation
+        // Even though processElevationForBbox was called earlier, we need to ensure
+        // the elevation data is registered specifically for terrain generation
+        try {
+          // Call processElevationForBbox again to ensure the data is properly registered
+          // This will register the data with the same process_id (currentBboxHash)
+          console.log(
+            "Re-registering elevation data for terrain generation..."
+          );
+          await processElevationForBbox(bbox, currentBboxHash);
+          console.log(
+            "✅ Successfully re-registered elevation data for terrain generation"
+          );
+        } catch (error) {
+          console.error(
+            "Failed to register elevation data for terrain:",
+            error
+          );
+          throw new Error(
+            `Failed to register elevation data: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
 
-        // Store processed terrain data in the Zustand store
-        setProcessedTerrainData({
-          processedElevationGrid: terrainResult.processedElevationGrid,
-          processedMinElevation: terrainResult.processedMinElevation,
-          processedMaxElevation: terrainResult.processedMaxElevation,
-        });
+        // Now we can create the terrain geometry
+        const terrainParams = {
+          min_lng: minLng,
+          min_lat: minLat,
+          max_lng: maxLng,
+          max_lat: maxLat,
+          vertical_exaggeration: terrainSettings.verticalExaggeration,
+          terrain_base_height: terrainSettings.baseHeight,
+          process_id: currentBboxHash, // Use the bbox hash as the process ID
+        };
 
-        console.log("✅ Terrain geometry created successfully:", {
+        // Call the WASM terrain geometry generator
+        const wasmTerrainResult =
+          wasmModule.create_terrain_geometry(terrainParams);
+
+        // Convert WASM TypedArrays to THREE.js BufferGeometry
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(wasmTerrainResult.positions, 3)
+        );
+        geometry.setAttribute(
+          "normal",
+          new THREE.BufferAttribute(wasmTerrainResult.normals, 3)
+        );
+        geometry.setAttribute(
+          "color",
+          new THREE.BufferAttribute(wasmTerrainResult.colors, 3)
+        );
+        geometry.setIndex(Array.from(wasmTerrainResult.indices));
+
+        terrainGeometry = geometry;
+        processedElevationGrid = wasmTerrainResult.processedElevationGrid;
+        processedMinElevation = wasmTerrainResult.processedMinElevation;
+        processedMaxElevation = wasmTerrainResult.processedMaxElevation;
+
+        console.log("✅ Terrain geometry created successfully with WASM:", {
           geometryExists: !!terrainGeometry,
           vertexCount: terrainGeometry?.attributes?.position?.count || 0,
         });
-      } else {
-        console.log(
-          "%c ♻️ Reusing existing terrain geometry - configuration unchanged",
-          "color: #4CAF50;"
+      } catch (error) {
+        console.error("Error creating terrain geometry with WASM:", error);
+        throw new Error(
+          `Failed to create terrain geometry: ${error instanceof Error ? error.message : String(error)}`
         );
-        // Check if we have processed terrain data from a previous run
-        if (processedTerrainData.processedElevationGrid) {
-          console.log(
-            "%c ♻️ Reusing existing processed terrain data",
-            "color: #4CAF50;"
-          );
-          processedElevationGrid = processedTerrainData.processedElevationGrid;
-          processedMinElevation = processedTerrainData.processedMinElevation;
-          processedMaxElevation = processedTerrainData.processedMaxElevation;
-        } else {
-          // Only recreate terrain data if we don't have it stored
-          console.log(
-            "%c 🔄 Regenerating processed terrain data",
-            "color: #FF9800;"
-          );
-          const tempResult = createTerrainGeometry(
-            elevationGrid,
-            gridSize,
-            processedMinElevation,
-            processedMaxElevation,
-            terrainSettings.verticalExaggeration,
-            terrainSettings.baseHeight
-          );
-          processedElevationGrid = tempResult.processedElevationGrid;
-          processedMinElevation = tempResult.processedMinElevation;
-          processedMaxElevation = tempResult.processedMaxElevation;
-
-          // Store the processed terrain data for future use
-          setProcessedTerrainData({
-            processedElevationGrid: tempResult.processedElevationGrid,
-            processedMinElevation: tempResult.processedMinElevation,
-            processedMaxElevation: tempResult.processedMaxElevation,
-          });
-        }
       }
-
       // Set generated geometries based on settings
       console.log("🔄 Setting output geometries:", {
         terrainEnabled: terrainSettings.enabled,
@@ -454,13 +422,13 @@ export const GenerateMeshButton = function () {
         buildingsEnabled: buildingSettings.enabled,
       });
 
-      //setTerrainGeometry(terrainSettings.enabled ? terrainGeometry : undefined);
       // Fetch vt data for this bbox
       let vtData = await fetchVtData({
         bbox: [minLng, minLat, maxLng, maxLat],
         zoom: 14,
         gridSize,
       });
+
       // Initialize or get existing polygon geometries
       let vtPolygonGeometries: VtDataSet[] = [];
 
@@ -474,11 +442,6 @@ export const GenerateMeshButton = function () {
       const existingGeometries = geometryDataSets.polygonGeometries || [];
 
       // Get changed layer indices from our hash comparison
-      const {
-        terrainHash: currentTerrainHash,
-        layerHashes: currentLayerHashes,
-      } = createComponentHashes(bbox, terrainSettings, vtLayers);
-
       const changedLayerIndices = currentLayerHashes
         .filter((layerHash) => {
           const previousHash = configHashes.layerHashes.find(
@@ -487,8 +450,6 @@ export const GenerateMeshButton = function () {
           return previousHash !== layerHash.hash;
         })
         .map((lh) => lh.index);
-
-      // Update processing status
 
       // Process vector tile layers
       for (let i = 0; i < vtLayers.length; i++) {
@@ -545,8 +506,8 @@ export const GenerateMeshButton = function () {
         let layerData = await extractGeojsonFeaturesFromVectorTiles({
           bbox: [minLng, minLat, maxLng, maxLat],
           vtDataset: currentLayer,
-          vectorTiles: vtData,
-          elevationGrid: processedElevationGrid,
+          vectorTiles: vtData || [],
+          elevationGrid: elevationGrid,
           gridSize,
         });
 
@@ -555,17 +516,6 @@ export const GenerateMeshButton = function () {
         );
 
         if (layerData && layerData.length > 0) {
-          // Define clipping boundaries
-          const TERRAIN_SIZE = 200;
-          const clipBoundaries = {
-            minX: -TERRAIN_SIZE / 2,
-            maxX: TERRAIN_SIZE / 2,
-            minY: -TERRAIN_SIZE / 2,
-            maxY: TERRAIN_SIZE / 2,
-            minZ: terrainSettings.baseHeight - 20,
-            maxZ: terrainSettings.baseHeight + 100,
-          };
-
           // Convert LineString geometries to polygons using a buffer
           layerData = layerData.map((feature) => {
             if (feature.type === "LineString") {
@@ -613,7 +563,6 @@ export const GenerateMeshButton = function () {
       }
 
       // Wait for all async geometry promises to resolve before updating the UI
-
       if (geometryPromises.length > 0) {
         console.log(
           `Waiting for ${geometryPromises.length} geometries to be generated by web workers...`
@@ -683,19 +632,6 @@ export const GenerateMeshButton = function () {
       }
 
       cancellationToken.throwIfCancelled();
-      // Create debug visualization for the terrain area if needed
-      if (vtPolygonGeometries.length > 0) {
-        // Create a box to visualize the clipping area (but don't actually use it for clipping)
-        const TERRAIN_SIZE = 200;
-        const boxGeometry = new THREE.BoxGeometry(
-          TERRAIN_SIZE,
-          TERRAIN_SIZE,
-          TERRAIN_SIZE / 2
-        );
-
-        // Add the box geometry to the geometries (optional, for debugging only)
-        //vtPolygonGeometries.push(boxGeometry);
-      }
 
       // Update the Zustand store with our geometries
       setGeometryDataSets({
@@ -752,344 +688,6 @@ export const GenerateMeshButton = function () {
         setIsProcessing(false);
       }, 3000);
     }
-  };
-
-  // Download a single tile from the WMTS service
-  const downloadTile = async (
-    z: number,
-    x: number,
-    y: number
-  ): Promise<TileData> => {
-    const url = `https://wms.wheregroup.com/dem_tileserver/raster_dem/${z}/${x}/${y}.webp`;
-
-    console.log(`Downloading tile: ${url}`);
-
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to download tile: ${response.status}`);
-      }
-
-      // Get the image as blob
-      const blob = await response.blob();
-
-      // Use image bitmap for processing
-      const imageBitmap = await createImageBitmap(blob);
-
-      // Create a canvas to read pixel data
-      const canvas = document.createElement("canvas");
-      canvas.width = imageBitmap.width;
-      canvas.height = imageBitmap.height;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Could not get canvas context");
-
-      ctx.drawImage(imageBitmap, 0, 0);
-
-      // Get the raw pixel data
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      return {
-        imageData,
-        width: canvas.width,
-        height: canvas.height,
-        x,
-        y,
-        z,
-      };
-    } catch (error) {
-      console.error(`Error downloading tile ${z}/${x}/${y}:`, error);
-      throw error;
-    }
-  };
-
-  // Process the downloaded tiles to create an elevation grid
-  const processElevationData = (
-    tileData: TileData[],
-    tiles: Tile[],
-    minLng: number,
-    minLat: number,
-    maxLng: number,
-    maxLat: number
-  ): ElevationProcessingResult => {
-    // Define grid size for the final model - higher resolution for better quality
-    const gridSize: GridSize = { width: 200, height: 200 };
-
-    // Track accumulated elevation values and weights
-    const elevationGrid: number[][] = new Array(gridSize.height)
-      .fill(0)
-      .map(() => new Array(gridSize.width).fill(0));
-
-    const coverageMap: number[][] = new Array(gridSize.height)
-      .fill(0)
-      .map(() => new Array(gridSize.width).fill(0));
-
-    // Pre-process: Calculate valid elevation range for normalization
-    let minElevationFound = Infinity;
-    let maxElevationFound = -Infinity;
-
-    tileData.forEach((tile) => {
-      if (!tile.imageData) return;
-      const { imageData, width, height } = tile;
-      const data = imageData.data;
-
-      for (let py = 0; py < height; py++) {
-        for (let px = 0; px < width; px++) {
-          const pixelIndex = (py * width + px) * 4;
-          const r = data[pixelIndex];
-          const g = data[pixelIndex + 1];
-          const b = data[pixelIndex + 2];
-
-          // Decode elevation using the RGB encoding
-          const elevation = -10000 + (r * 65536 + g * 256 + b) * 0.1;
-
-          if (isFinite(elevation) && !isNaN(elevation)) {
-            minElevationFound = Math.min(minElevationFound, elevation);
-            maxElevationFound = Math.max(maxElevationFound, elevation);
-          }
-        }
-      }
-    });
-
-    console.log(
-      `Elevation range: ${minElevationFound.toFixed(
-        2
-      )}m - ${maxElevationFound.toFixed(2)}m`
-    );
-
-    // Process each tile to extract elevation data
-    tileData.forEach((tile) => {
-      if (!tile.imageData) return;
-
-      const { imageData, width, height, x: tileX, y: tileY, z: zoom } = tile;
-      const data = imageData.data;
-
-      // Calculate the tile bounds in geographic coordinates
-      const n = Math.pow(2, zoom);
-      const tileMinLng = (tileX / n) * 360 - 180;
-      const tileMaxLng = ((tileX + 1) / n) * 360 - 180;
-
-      // Note: In web mercator, y=0 is at the top (north pole)
-      const tileMaxLat =
-        (Math.atan(Math.sinh(Math.PI * (1 - (2 * tileY) / n))) * 180) / Math.PI;
-      const tileMinLat =
-        (Math.atan(Math.sinh(Math.PI * (1 - (2 * (tileY + 1)) / n))) * 180) /
-        Math.PI;
-
-      // For each pixel in our output grid
-      for (let y = 0; y < gridSize.height; y++) {
-        for (let x = 0; x < gridSize.width; x++) {
-          // Calculate the lat/lng for this grid point
-          const lng = minLng + (maxLng - minLng) * (x / (gridSize.width - 1));
-          const lat = minLat + ((maxLat - minLat) * y) / (gridSize.height - 1);
-
-          // Skip if this point is outside the current tile's geographic bounds
-          if (
-            lng < tileMinLng ||
-            lng > tileMaxLng ||
-            lat < tileMinLat ||
-            lat > tileMaxLat
-          ) {
-            continue;
-          }
-
-          // Convert geographic coordinates to pixel coordinates in the tile
-          // For longitude: simple linear mapping from tileMinLng-tileMaxLng to 0-(width-1)
-          const fracX =
-            ((lng - tileMinLng) / (tileMaxLng - tileMinLng)) * (width - 1);
-
-          // For latitude: account for Mercator projection (y increases downward in the tile image)
-          const fracY =
-            (1 - (lat - tileMinLat) / (tileMaxLat - tileMinLat)) * (height - 1);
-
-          // Get integer pixel coordinates
-          const pixelX = Math.floor(fracX);
-          const pixelY = Math.floor(fracY);
-
-          // Constrain to valid pixel coordinates
-          if (
-            pixelX < 0 ||
-            pixelX >= width - 1 ||
-            pixelY < 0 ||
-            pixelY >= height - 1
-          ) {
-            continue;
-          }
-
-          // Bilinear interpolation factors
-          const dx = fracX - pixelX;
-          const dy = fracY - pixelY;
-
-          // Sample the 4 surrounding pixels
-          const elevations: number[] = [];
-          let hasInvalidElevation = false;
-
-          for (let j = 0; j <= 1; j++) {
-            for (let i = 0; i <= 1; i++) {
-              const px = pixelX + i;
-              const py = pixelY + j;
-
-              if (px >= 0 && px < width && py >= 0 && py < height) {
-                const pixelIndex = (py * width + px) * 4;
-                const r = data[pixelIndex];
-                const g = data[pixelIndex + 1];
-                const b = data[pixelIndex + 2];
-
-                // Decode elevation - make sure this matches the encoding used in the DEM tiles
-                const elevation = -10000 + (r * 65536 + g * 256 + b) * 0.1;
-
-                if (!isFinite(elevation) || isNaN(elevation)) {
-                  hasInvalidElevation = true;
-                  break;
-                }
-
-                elevations.push(elevation);
-              } else {
-                hasInvalidElevation = true;
-                break;
-              }
-            }
-            if (hasInvalidElevation) break;
-          }
-
-          if (hasInvalidElevation || elevations.length !== 4) continue;
-
-          // Bilinear interpolation
-          const topLeft = elevations[0];
-          const topRight = elevations[1];
-          const bottomLeft = elevations[2];
-          const bottomRight = elevations[3];
-
-          const top = topLeft * (1 - dx) + topRight * dx;
-          const bottom = bottomLeft * (1 - dx) + bottomRight * dx;
-          const elevation = top * (1 - dy) + bottom * dy;
-
-          // Calculate edge distance for weighting
-          // This creates a weight that's 1.0 in the center and gradually decreases to 0.3 at the edges
-          const distFromCenterX = Math.abs(
-            2.0 * ((lng - tileMinLng) / (tileMaxLng - tileMinLng) - 0.5)
-          );
-          const distFromCenterY = Math.abs(
-            2.0 * ((lat - tileMinLat) / (tileMaxLat - tileMinLat) - 0.5)
-          );
-          const maxDist = Math.max(distFromCenterX, distFromCenterY);
-
-          // Smoother falloff at edges - gradient starts earlier
-          const edgeWeight = 1.0 - Math.pow(maxDist, 2) * 0.7;
-
-          // Accumulate weighted elevation value
-          elevationGrid[y][x] += elevation * edgeWeight;
-          coverageMap[y][x] += edgeWeight;
-        }
-      }
-    });
-
-    // Normalize by coverage and ensure we have valid data everywhere
-    let missingDataPoints = 0;
-
-    for (let y = 0; y < gridSize.height; y++) {
-      for (let x = 0; x < gridSize.width; x++) {
-        if (coverageMap[y][x] > 0) {
-          elevationGrid[y][x] /= coverageMap[y][x];
-        } else {
-          missingDataPoints++;
-
-          // Find nearest valid point for missing data
-          let nearestValid = null;
-          let minDistance = Infinity;
-
-          for (let ny = 0; ny < gridSize.height; ny++) {
-            for (let nx = 0; nx < gridSize.width; nx++) {
-              if (coverageMap[ny][nx] > 0) {
-                const dist = Math.sqrt(
-                  Math.pow(nx - x, 2) + Math.pow(ny - y, 2)
-                );
-                if (dist < minDistance) {
-                  minDistance = dist;
-                  nearestValid = { x: nx, y: ny };
-                }
-              }
-            }
-          }
-
-          if (nearestValid) {
-            elevationGrid[y][x] = elevationGrid[nearestValid.y][nearestValid.x];
-          } else {
-            // Fallback to average if no valid points at all
-            elevationGrid[y][x] = (minElevationFound + maxElevationFound) / 2;
-          }
-        }
-      }
-    }
-
-    if (missingDataPoints > 0) {
-      console.log(`Filled ${missingDataPoints} missing data points`);
-    }
-
-    // Apply multiple smoothing passes for better results
-    let smoothedGrid = elevationGrid;
-    const smoothingPasses = 2;
-
-    for (let i = 0; i < smoothingPasses; i++) {
-      smoothedGrid = smoothElevationGrid(smoothedGrid, gridSize);
-    }
-
-    return {
-      elevationGrid: smoothedGrid,
-      gridSize,
-      minElevation: minElevationFound,
-      maxElevation: maxElevationFound,
-    };
-  };
-
-  // Helper function to smooth the elevation grid
-  const smoothElevationGrid = (
-    grid: number[][],
-    gridSize: GridSize
-  ): number[][] => {
-    const { width, height } = gridSize;
-    const result = new Array(height)
-      .fill(0)
-      .map(() => new Array(width).fill(0));
-
-    // Larger kernel for better smoothing
-    const kernelSize = 5;
-    const kernelRadius = Math.floor(kernelSize / 2);
-
-    // Apply a gaussian smoothing kernel
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let sum = 0;
-        let totalWeight = 0;
-
-        for (let ky = -kernelRadius; ky <= kernelRadius; ky++) {
-          for (let kx = -kernelRadius; kx <= kernelRadius; kx++) {
-            const ny = y + ky;
-            const nx = x + kx;
-
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-              // Gaussian weight based on distance
-              const dist = Math.sqrt(kx * kx + ky * ky);
-              // Sigma = kernelRadius/2 for a nice falloff
-              const weight = Math.exp(
-                (-dist * dist) / (2 * kernelRadius * kernelRadius)
-              );
-
-              sum += grid[ny][nx] * weight;
-              totalWeight += weight;
-            }
-          }
-        }
-
-        if (totalWeight > 0) {
-          result[y][x] = sum / totalWeight;
-        } else {
-          result[y][x] = grid[y][x];
-        }
-      }
-    }
-
-    return result;
   };
 
   useEffect(() => {
