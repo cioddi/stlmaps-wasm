@@ -9,6 +9,7 @@ export type {
 // Export the hooks
 export { useWasm } from './hooks/useWasm';
 export { useElevationProcessor } from './hooks/useElevationProcessor';
+export { useVectorTiles } from './hooks/useVectorTiles';
 
 // Export the WASM bridge functions
 export { 
@@ -21,3 +22,17 @@ export {
   initWasmJsHelpers, 
   processElevationDataWasm 
 } from './wasm/elevationProcessor';
+
+// Export vector tile functionality
+export {
+  fetchVtData,
+  parseVectorTile,
+  calculateTileCount,
+  lngLatToTile,
+  getTilesForBbox
+} from './sources/VectortileSource';
+
+// Re-export vector tile types
+export type {
+  FetchVtDataOptions
+} from './sources/VectortileSource';

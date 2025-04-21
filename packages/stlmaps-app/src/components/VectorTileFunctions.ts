@@ -1,7 +1,7 @@
 import { VectorTile } from "@mapbox/vector-tile";
 import Pbf from "pbf";
 import { Tile, GridSize, VtDataSet } from "./GenerateMeshButton";
-
+import { hashBbox } from "../utils/configHashing";
 
 export interface BuildingData {
   footprint: number[][]; // Simplified to single polygon ring
@@ -357,12 +357,13 @@ export interface FetchVtDataOptions {
   bbox: number[]; // [minLng, minLat, maxLng, maxLat]
   zoom: number;
   gridSize: GridSize;
+  bboxKey?: string; // Optional key for caching
 }
 
 export const fetchVtData = async (
   config: FetchVtDataOptions
 ): Promise<{ tile: Tile, data: VectorTile }[]> => {
-  const { bbox, zoom, gridSize } = config;
+  const { bbox, zoom, gridSize, bboxKey } = config;
   const [minLng, minLat, maxLng, maxLat] = bbox;
 
   if (!gridSize || !gridSize.width || !gridSize.height) {
@@ -370,41 +371,94 @@ export const fetchVtData = async (
     return [];
   }
 
-  const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
-  if (tileCount > 9) {
-    console.warn(
-      `Skipping geometry data fetch: area too large (${tileCount} tiles, max allowed: 9)`
-    );
+  try {
+    // Check if we can use the Rust/WASM implementation
+    if (window.wasmModule && window.wasmModule.fetch_vector_tiles) {
+      console.log("Using WASM vector tile fetching for performance");
+      
+      // Create a process ID (cache key) using the same approach as terrain
+      // This ensures tiles are cached under the same key for both terrain and vector tiles
+      const processId = bboxKey || hashBbox({
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]]]
+        }
+      });
+      
+      // Prepare the input for the Rust function
+      const input = {
+        min_lng: minLng,
+        min_lat: minLat,
+        max_lng: maxLng,
+        max_lat: maxLat,
+        zoom,
+        grid_width: gridSize.width,
+        grid_height: gridSize.height,
+        process_id: processId
+      };
+      
+      // Call the Rust function
+      const wasmResult = await window.wasmModule.fetch_vector_tiles(input);
+      
+      // Convert the Rust result to JavaScript-friendly format
+      return wasmResult.map((result: any) => {
+        const tile: Tile = {
+          x: result.tile.x,
+          y: result.tile.y,
+          z: result.tile.z
+        };
+        
+        // Convert the binary data to a vector tile
+        const vectorTile = parseVectorTile(result.data);
+        
+        return { tile, data: vectorTile };
+      });
+    } else {
+      console.log("WASM module not available, using JavaScript vector tile fetching");
+      
+      // Fall back to the original JavaScript implementation if WASM is not available
+      const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
+      if (tileCount > 9) {
+        console.warn(
+          `Skipping geometry data fetch: area too large (${tileCount} tiles, max allowed: 9)`
+        );
+        return [];
+      }
+
+      const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
+      console.log(`Fetching geometry data from ${tiles.length} tiles`);
+
+      let vtData: { tile: Tile, data: VectorTile[] }[] = [];
+
+      return (await Promise.all(
+        tiles.map(async (tile) => {
+          const url = `https://wms.wheregroup.com/tileserver/tile/world-0-14/${tile.z}/${tile.x}/${tile.y}.pbf`;
+
+          console.log(`Fetching geometry from: ${url}`);
+
+          try {
+            const response = await fetch(url);
+            if (!response.ok) {
+              console.warn(`Failed to fetch tile: ${response.status}`);
+              return;
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            const vectorTile = parseVectorTile(arrayBuffer);
+
+            return { tile, data: vectorTile };
+          } catch (error) {
+            console.error(`Error fetching tile ${tile.z}/${tile.x}/${tile.y}:`, error);
+          }
+        })
+      )).filter((tile) => tile !== undefined);
+    }
+  } catch (error) {
+    console.error("Error in fetchVtData:", error);
+    // Fall back to an empty result set in case of errors
     return [];
   }
-
-  const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-  console.log(`Fetching geometry data from ${tiles.length} tiles`);
-
-  let vtData: { tile: Tile, data: VectorTile[] }[] = [];
-
-  return (await Promise.all(
-    tiles.map(async (tile) => {
-      const url = `https://wms.wheregroup.com/tileserver/tile/world-0-14/${tile.z}/${tile.x}/${tile.y}.pbf`;
-
-      console.log(`Fetching geometry from: ${url}`);
-
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          console.warn(`Failed to fetch tile: ${response.status}`);
-          return;
-        }
-
-        const arrayBuffer = await response.arrayBuffer();
-        const vectorTile = parseVectorTile(arrayBuffer);
-
-        return { tile, data: vectorTile };
-      } catch (error) {
-        console.error(`Error fetching tile ${tile.z}/${tile.x}/${tile.y}:`, error);
-      }
-    })
-  )).filter((tile) => tile !== undefined);
 };
 
 /**

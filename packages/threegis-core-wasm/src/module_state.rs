@@ -4,7 +4,13 @@ use std::sync::Mutex;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+
+// We need JsValue for caching objects
 use js_sys::{Array, Uint8Array};
+
+// Import the console_log macro
+#[allow(unused_imports)]
+use crate::console_log;
 
 // Define the tile data structure
 #[derive(Clone, Serialize, Deserialize)]
@@ -26,13 +32,33 @@ pub struct TileKey {
     pub z: u32,
 }
 
-// Vector tile feature cache
+// Vector tile data for a bbox
 #[derive(Clone, Serialize, Deserialize)]
-pub struct VectorTileFeature {
-    pub geometry_type: String,
-    pub geometry: Vec<Vec<Vec<f64>>>,
-    pub properties: HashMap<String, serde_json::Value>,
-    pub layer: String,
+pub struct VectorTileData {
+    pub process_id: String,
+    pub timestamp: f64,
+    pub tiles: Vec<serde_json::Value>, // Store the tiles with their associated data
+}
+
+// Elevation data for a bbox
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ElevationData {
+    pub process_id: String,
+    pub elevation_grid: Vec<Vec<f64>>,
+    pub grid_width: u32,
+    pub grid_height: u32,
+    pub min_elevation: f64,
+    pub max_elevation: f64,
+    pub timestamp: f64,
+}
+
+// Feature data for a layer
+#[derive(Clone, Serialize, Deserialize)]
+pub struct FeatureData {
+    pub source_layer: String,
+    pub process_id: String,
+    pub features: Vec<crate::geojson_features::GeometryData>,
+    pub timestamp: f64,
 }
 
 // Module state to keep cached resources
@@ -41,7 +67,7 @@ pub struct ModuleState {
     pub raster_tiles: HashMap<TileKey, TileData>,
     
     // Cache for vector tiles
-    pub vector_tiles: HashMap<TileKey, Vec<VectorTileFeature>>,
+    pub vector_tiles: HashMap<TileKey, Vec<VectorTileData>>,
     
     // Cache for processed data like elevation grids
     pub elevation_grids: HashMap<String, Vec<Vec<f64>>>,
@@ -106,7 +132,7 @@ impl ModuleState {
     }
     
     // Add a vector tile to the cache
-    pub fn add_vector_tile(&mut self, key: TileKey, features: Vec<VectorTileFeature>) {
+    pub fn add_vector_tile(&mut self, key: TileKey, features: Vec<VectorTileData>) {
         // If we're at capacity, remove a random tile (simple strategy)
         if self.vector_tiles.len() >= self.max_vector_tiles && !self.vector_tiles.contains_key(&key) {
             if let Some(first_key) = self.vector_tiles.keys().next().cloned() {
@@ -118,7 +144,7 @@ impl ModuleState {
     }
     
     // Get a vector tile from the cache
-    pub fn get_vector_tile(&mut self, key: &TileKey) -> Option<&Vec<VectorTileFeature>> {
+    pub fn get_vector_tile(&mut self, key: &TileKey) -> Option<&Vec<VectorTileData>> {
         if self.vector_tiles.contains_key(key) {
             self.cache_hits += 1;
             self.vector_tiles.get(key)
@@ -136,6 +162,20 @@ impl ModuleState {
     // Get a processed elevation grid
     pub fn get_elevation_grid(&self, key: &str) -> Option<&Vec<Vec<f64>>> {
         self.elevation_grids.get(key)
+    }
+    
+    // Add a cached object (for general-purpose caching)
+    pub fn add_cached_object(&mut self, key: &str, value: JsValue) {
+        // In a real implementation, you would store this in a HashMap<String, JsValue>
+        // For now, we'll just log it since we're not implementing the full cache
+        console_log!("Caching object with key: {}", key);
+    }
+    
+    // Get a cached object
+    pub fn get_cached_object(&self, key: &str) -> Option<JsValue> {
+        // In a real implementation, you would retrieve from a HashMap<String, JsValue>
+        // For now, we'll just return None
+        None
     }
     
     // Get cache statistics

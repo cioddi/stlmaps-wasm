@@ -1,10 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   GeometryData,
-  calculateTileCount,
   extractGeojsonFeaturesFromVectorTiles,
-  fetchVtData,
-  getTilesForBbox,
 } from "./VectorTileFunctions";
 import * as THREE from "three";
 //@ts-expect-error
@@ -20,7 +17,14 @@ import {
 import { WorkerService } from "../workers/WorkerService";
 import { tokenManager } from "../utils/CancellationToken";
 // Import WASM functionality
-import { useWasm, useElevationProcessor, getWasmModule } from "@threegis/core";
+import { 
+  useWasm, 
+  useElevationProcessor, 
+  getWasmModule,
+  fetchVtData,
+  calculateTileCount,
+  getTilesForBbox
+} from "@threegis/core";
 
 // Define interfaces for our data structures
 export interface GridSize {
