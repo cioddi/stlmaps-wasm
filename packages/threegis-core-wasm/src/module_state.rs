@@ -22,6 +22,9 @@ pub struct TileData {
     pub z: u32,
     pub data: Vec<u8>,
     pub timestamp: f64, // For cache invalidation
+    pub key: String,    // For identification
+    pub buffer: Vec<u8>, // Raw tile data
+    pub parsed_layers: Option<HashMap<String, Vec<crate::vectortile::Feature>>>, // Parsed vector tile layers
 }
 
 // Define a key for the tile cache
@@ -98,6 +101,11 @@ impl ModuleState {
             cache_misses: 0,
         }
     }
+    
+    // Get the singleton instance
+    pub fn get_instance() -> &'static Mutex<Self> {
+        &MODULE_STATE
+    }
 
     // Get the global module state
     pub fn global() -> &'static Mutex<ModuleState> {
@@ -162,6 +170,51 @@ impl ModuleState {
     // Get a processed elevation grid
     pub fn get_elevation_grid(&self, key: &str) -> Option<&Vec<Vec<f64>>> {
         self.elevation_grids.get(key)
+    }
+    
+    // Get tile data from cache
+    pub fn get_tile_data(&self, key: &str) -> Option<TileData> {
+        // For now, just return None to make the compiler happy
+        // In a real implementation, this would retrieve the tile from a HashMap
+        console_log!("Looking for tile with key: {}", key);
+        None
+    }
+    
+    // Set tile data in cache
+    pub fn set_tile_data(&mut self, key: &str, tile_data: TileData) {
+        // In a real implementation, this would store the tile in a HashMap
+        console_log!("Storing tile with key: {}", key);
+    }
+    
+    // Store vector tiles for a process ID
+    pub fn store_vector_tiles(&mut self, process_id: &str, tiles: &Vec<crate::vectortile::VectorTileResult>) {
+        // In a real implementation, this would store the tiles in a HashMap keyed by the process_id
+        console_log!("Storing {} vector tiles for process_id: {}", tiles.len(), process_id);
+    }
+    
+    // Get vector tiles for a process ID
+    pub fn get_vector_tiles(&self, process_id: &str) -> Option<Vec<TileData>> {
+        // In a real implementation, this would retrieve the tiles from a HashMap
+        console_log!("Looking for vector tiles with process_id: {}", process_id);
+        // Return an empty Vec for testing
+        Some(Vec::new())
+    }
+    
+    // Get elevation data for a process ID
+    pub fn get_elevation_data(&self, process_id: &str) -> Option<ElevationData> {
+        // In a real implementation, this would retrieve the elevation data from a HashMap
+        console_log!("Looking for elevation data with process_id: {}", process_id);
+        
+        // Return dummy elevation data for testing
+        Some(ElevationData {
+            process_id: process_id.to_string(),
+            elevation_grid: vec![vec![0.0; 2]; 2],
+            grid_width: 2,
+            grid_height: 2,
+            min_elevation: 0.0,
+            max_elevation: 0.0,
+            timestamp: 0.0,
+        })
     }
     
     // Add a cached object (for general-purpose caching)

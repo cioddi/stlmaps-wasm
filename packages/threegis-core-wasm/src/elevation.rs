@@ -121,13 +121,16 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
         z,
         data: pixel_data.to_vec(),
         timestamp: Date::now(),
+        key: format!("{}/{}/{}", z, x, y),
+        buffer: pixel_data.to_vec(),
+        parsed_layers: None,
     };
     
     // Update the cache
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
-    let key = create_tile_key(x, y, z);
-    state.add_raster_tile(key, tile_data.clone());
+    let key_obj = create_tile_key(x, y, z);
+    state.add_raster_tile(key_obj, tile_data.clone());
     
     Ok(tile_data)
 }

@@ -1,8 +1,10 @@
+// filepath: /home/tobi/project/stlmaps/packages/threegis-core-wasm/src/vectortile.rs
 use wasm_bindgen::prelude::*;
-use js_sys::{Uint8Array, Date, Object, Array, JSON};
+use js_sys::{Uint8Array, Date, Object, Array, JSON, Math};
 use serde::{Serialize, Deserialize};
 use serde_wasm_bindgen::{to_value, from_value};
 use wasm_bindgen_futures::JsFuture;
+use std::collections::HashMap;
 
 use crate::module_state::{ModuleState, TileData, create_tile_key};
 use crate::{console_log, fetch_tile};
@@ -53,15 +55,41 @@ pub struct VtDataset {
     pub filter: Option<serde_json::Value>,
     pub enabled: Option<bool>,
     // Add other properties as needed
+    pub buffer_size: Option<f64>,
 }
 
-// Input for extracting GeoJSON features from vector tiles
+// Input for extracting features from vector tiles
 #[derive(Serialize, Deserialize)]
 pub struct ExtractFeaturesInput {
-    pub bbox: Vec<f64>,                    // [minLng, minLat, maxLng, maxLat]
-    pub vt_dataset: VtDataset,             // Configuration for the layer
-    pub process_id: String,                // Cache key/process ID
+    pub bbox: Vec<f64>,                     // [minLng, minLat, maxLng, maxLat]
+    pub vt_dataset: VtDataset,              // Configuration for the layer
+    pub process_id: String,                 // Cache key/process ID
     pub elevation_process_id: Option<String>, // ID to find cached elevation data
+}
+
+// Feature geometry types
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum GeometryType {
+    Point,
+    LineString,
+    Polygon,
+    MultiPoint,
+    MultiLineString,
+    MultiPolygon,
+}
+
+// GeoJSON-like feature structure
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Feature {
+    pub geometry: FeatureGeometry,
+    pub properties: serde_json::Value,
+}
+
+// Geometry part of a feature
+#[derive(Serialize, Deserialize, Clone)]
+pub struct FeatureGeometry {
+    pub r#type: String,
+    pub coordinates: serde_json::Value, // Using Value for flexibility with different geometry types
 }
 
 // Convert latitude to tile Y coordinate
@@ -99,7 +127,7 @@ fn get_tiles_for_bbox(min_lng: f64, min_lat: f64, max_lng: f64, max_lat: f64, zo
 }
 
 // Calculate the number of tiles that would be needed
-fn calculate_tile_count(min_lng: f64, min_lat: f64, max_lng: f64, max_lat: f64, zoom: u32) -> usize {
+pub fn calculate_tile_count(min_lng: f64, min_lat: f64, max_lng: f64, max_lat: f64, zoom: u32) -> usize {
     let min_x = lng_to_tile_x(min_lng, zoom);
     let min_y = lat_to_tile_y(max_lat, zoom);
     let max_x = lng_to_tile_x(max_lng, zoom);
@@ -108,132 +136,337 @@ fn calculate_tile_count(min_lng: f64, min_lat: f64, max_lng: f64, max_lat: f64, 
     ((max_x - min_x + 1) * (max_y - min_y + 1)) as usize
 }
 
-// Calculate the base elevation for a polygon ring using the elevation grid
+// Calculate base elevation for a geometry based on its position relative to elevation grid
 fn calculate_base_elevation(
-    ring: &Vec<Vec<f64>>,
-    elevation_grid: &Vec<Vec<f64>>,
-    grid_width: u32,
-    grid_height: u32,
+    coordinates: &[Vec<f64>],
+    elevation_grid: &[Vec<f64>],
+    grid_width: usize,
+    grid_height: usize,
     min_lng: f64,
     min_lat: f64,
     max_lng: f64,
     max_lat: f64,
 ) -> f64 {
-    let width = grid_width as usize;
-    let height = grid_height as usize;
-    
-    let mut total_elevation = 0.0;
-    let mut valid_points = 0;
+    // Calculate centroid of the coordinates
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let point_count = coordinates.len();
 
-    for point in ring {
-        if point.len() < 2 {
-            continue;
-        }
+    if point_count == 0 {
+        return 0.0;
+    }
 
-        let lng = point[0];
-        let lat = point[1];
-        
-        let x = ((lng - min_lng) / (max_lng - min_lng) * (width as f64 - 1.0)).floor() as usize;
-        let y = ((lat - min_lat) / (max_lat - min_lat) * (height as f64 - 1.0)).floor() as usize;
-
-        if x < width && y < height {
-            total_elevation += elevation_grid[y][x];
-            valid_points += 1;
+    for point in coordinates {
+        if point.len() >= 2 {
+            sum_x += point[0];
+            sum_y += point[1];
         }
     }
 
-    if valid_points > 0 {
-        total_elevation / valid_points as f64
+    let centroid_lng = sum_x / point_count as f64;
+    let centroid_lat = sum_y / point_count as f64;
+
+    // Map centroid to grid coordinates
+    let grid_x = ((centroid_lng - min_lng) / (max_lng - min_lng).max(f64::EPSILON)) * (grid_width as f64 - 1.0);
+    let grid_y = ((centroid_lat - min_lat) / (max_lat - min_lat).max(f64::EPSILON)) * (grid_height as f64 - 1.0);
+
+    let grid_x_floor = grid_x.floor() as usize;
+    let grid_y_floor = grid_y.floor() as usize;
+
+    // Ensure we're within bounds
+    if grid_x_floor < grid_width && grid_y_floor < grid_height {
+        elevation_grid[grid_y_floor][grid_x_floor]
     } else {
-        0.0
+        // If we're out of bounds, use the nearest valid grid point
+        let nearest_x = grid_x_floor.min(grid_width - 1);
+        let nearest_y = grid_y_floor.min(grid_height - 1);
+        elevation_grid[nearest_y][nearest_x]
     }
 }
 
-// Evaluate a MapLibre filter expression against a feature
-fn evaluate_filter(filter: &serde_json::Value, feature: &serde_json::Value) -> bool {
-    // If no filter is provided, allow all features
-    if filter.is_null() {
-        return true;
-    }
-
-    // Basic filter evaluation - this is a simplified version
-    // In a real implementation, you would handle more filter types
-    if let serde_json::Value::Array(filter_array) = filter {
-        if filter_array.is_empty() {
-            return true;
-        }
-
-        // Get operator type (first element in the array)
-        if let Some(serde_json::Value::String(operator)) = filter_array.get(0) {
-            match operator.as_str() {
-                "all" => {
-                    // All conditions must be true
-                    for i in 1..filter_array.len() {
-                        if !evaluate_filter(&filter_array[i], feature) {
-                            return false;
-                        }
-                    }
-                    return true;
-                },
-                "any" => {
-                    // At least one condition must be true
-                    for i in 1..filter_array.len() {
-                        if evaluate_filter(&filter_array[i], feature) {
-                            return true;
-                        }
-                    }
-                    return false;
-                },
-                "==" => {
-                    // Property equals value
-                    if filter_array.len() < 3 {
-                        return false;
-                    }
-                    
-                    if let Some(serde_json::Value::String(key)) = filter_array.get(1) {
-                        let value = filter_array.get(2).unwrap();
-                        
-                        if key == "$type" {
-                            // Check geometry type
-                            if let Some(geometry) = feature.get("geometry") {
-                                if let Some(geom_type) = geometry.get("type") {
-                                    return geom_type == value;
-                                }
-                            }
-                        } else {
-                            // Check property value
-                            if let Some(properties) = feature.get("properties") {
-                                if let Some(prop_value) = properties.get(key) {
-                                    return prop_value == value;
-                                }
-                            }
-                        }
-                    }
-                },
-                // Add other filter types as needed
-                _ => console_log!("Unsupported filter operator: {}", operator),
-            }
-        }
-    }
-
-    // Default to true for unsupported filters
+// Evaluate if a feature matches a filter expression
+fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
+    // This is a simplified filter evaluation - you may need to implement a more comprehensive 
+    // filter system based on your application's needs
+    
+    // For now, just assume true if there's no filter
+    // In a real implementation, you'd parse and evaluate the filter expression
     true
 }
 
-// Fetch vector tile data for a specified bounding box
+// Main function to extract features from vector tiles
+#[wasm_bindgen]
+pub async fn extract_features_from_vector_tiles(
+    input_js: JsValue
+) -> Result<JsValue, JsValue> {
+    // Parse input
+    let input: ExtractFeaturesInput = from_value(input_js)?;
+    let bbox = &input.bbox;
+    
+    if bbox.len() != 4 {
+        return Err(JsValue::from_str("Invalid bbox: must contain [minLng, minLat, maxLng, maxLat]"));
+    }
+    
+    let min_lng = bbox[0];
+    let min_lat = bbox[1];
+    let max_lng = bbox[2];
+    let max_lat = bbox[3];
+    let vt_dataset = &input.vt_dataset;
+    let process_id = &input.process_id;
+    
+    // Skip processing if layer is disabled
+    if let Some(enabled) = vt_dataset.enabled {
+        if !enabled {
+            console_log!("Skipping disabled layer: {}", vt_dataset.source_layer);
+            return Ok(to_value(&Vec::<GeometryData>::new())?);
+        }
+    }
+    
+    // Retrieve module state
+    let module_state = ModuleState::get_instance();
+    let module_state = module_state.lock().unwrap();
+    
+    // Try to access cached vector tile data
+    let vector_tiles = match module_state.get_vector_tiles(process_id) {
+        Some(tiles) => tiles,
+        None => {
+            console_log!("No cached vector tiles found for process_id: {}", process_id);
+            return Err(JsValue::from_str(&format!("No cached vector tiles found for process_id: {}", process_id)));
+        }
+    };
+    
+    // Get cached elevation data if available
+    let elevation_data = if let Some(elevation_id) = &input.elevation_process_id {
+        module_state.get_elevation_data(elevation_id)
+    } else {
+        module_state.get_elevation_data(process_id)
+    };
+    
+    let (elevation_grid, grid_size) = match elevation_data {
+        Some(elev_data) => (elev_data.elevation_grid, (elev_data.grid_width, elev_data.grid_height)),
+        None => {
+            console_log!("No cached elevation data found. Using flat elevation (0).");
+            // Create a small dummy grid if no elevation data available
+            let dummy_grid = vec![vec![0.0; 2]; 2];
+            ((dummy_grid), (2, 2))
+        }
+    };
+    
+    // Initialize result vector
+    let mut geometry_data: Vec<GeometryData> = Vec::new();
+    
+    // Process each vector tile
+    for vt_entry in vector_tiles {
+        // Check if this tile has data for the requested layer
+        let tile_layers: &HashMap<String, Vec<Feature>> = match vt_entry.parsed_layers {
+            Some(ref layers) => layers,
+            None => continue,
+        };
+        
+        // Find the requested layer
+        let layer_data = match tile_layers.get(&vt_dataset.source_layer) {
+            Some(layer) => layer,
+            None => {
+                console_log!("Source layer '{}' not found in tile", vt_dataset.source_layer);
+                continue;
+            }
+        };
+        
+        // Process each feature in the layer
+        for feature in layer_data {
+            // Filter by subclass if specified
+            if let Some(ref sub_classes) = vt_dataset.sub_class {
+                if let Some(feature_subclass) = feature.properties.get("subclass") {
+                    if feature_subclass.is_string() {
+                        let subclass_str = feature_subclass.as_str().unwrap_or("");
+                        if sub_classes.iter().any(|s| s == subclass_str) {
+                            continue;
+                        }
+                    }
+                }
+            }
+            
+            // Apply filter expression if provided
+            if let Some(ref filter) = vt_dataset.filter {
+                if !evaluate_filter(filter, feature) {
+                    continue;
+                }
+            }
+            
+            // Extract height property
+            let height = feature.properties.get("height")
+                .and_then(|v| v.as_f64())
+                .or_else(|| feature.properties.get("render_height").and_then(|v| v.as_f64()))
+                .unwrap_or(0.0);
+            
+            // Process based on geometry type
+            match feature.geometry.r#type.as_str() {
+                "Polygon" => {
+                    if let Ok(coords) = serde_json::from_value::<Vec<Vec<Vec<f64>>>>(feature.geometry.coordinates.clone()) {
+                        for ring in coords {
+                            let base_elevation = calculate_base_elevation(
+                                &ring,
+                                &elevation_grid,
+                                grid_size.0 as usize,
+                                grid_size.1 as usize,
+                                min_lng,
+                                min_lat,
+                                max_lng,
+                                max_lat
+                            );
+                            
+                            geometry_data.push(GeometryData {
+                                geometry: ring,
+                                r#type: "Polygon".to_string(),
+                                height,
+                                base_elevation,
+                            });
+                        }
+                    }
+                },
+                "MultiPolygon" => {
+                    if let Ok(multi_coords) = serde_json::from_value::<Vec<Vec<Vec<Vec<f64>>>>>(feature.geometry.coordinates.clone()) {
+                        for polygon in multi_coords {
+                            for ring in polygon {
+                                let base_elevation = calculate_base_elevation(
+                                    &ring,
+                                    &elevation_grid,
+                                    grid_size.0 as usize,
+                                    grid_size.1 as usize,
+                                    min_lng,
+                                    min_lat,
+                                    max_lng,
+                                    max_lat
+                                );
+                                
+                                geometry_data.push(GeometryData {
+                                    geometry: ring,
+                                    r#type: "Polygon".to_string(),
+                                    height,
+                                    base_elevation,
+                                });
+                            }
+                        }
+                    }
+                },
+                "LineString" => {
+                    if let Ok(line_coords) = serde_json::from_value::<Vec<Vec<f64>>>(feature.geometry.coordinates.clone()) {
+                        let base_elevation = calculate_base_elevation(
+                            &line_coords,
+                            &elevation_grid,
+                            grid_size.0 as usize,
+                            grid_size.1 as usize,
+                            min_lng,
+                            min_lat,
+                            max_lng,
+                            max_lat
+                        );
+                        
+                        geometry_data.push(GeometryData {
+                            geometry: line_coords,
+                            r#type: "LineString".to_string(),
+                            height,
+                            base_elevation,
+                        });
+                    }
+                },
+                "MultiLineString" => {
+                    if let Ok(multi_line_coords) = serde_json::from_value::<Vec<Vec<Vec<f64>>>>(feature.geometry.coordinates.clone()) {
+                        for line_coords in multi_line_coords {
+                            let base_elevation = calculate_base_elevation(
+                                &line_coords,
+                                &elevation_grid,
+                                grid_size.0 as usize,
+                                grid_size.1 as usize,
+                                min_lng,
+                                min_lat,
+                                max_lng,
+                                max_lat
+                            );
+                            
+                            geometry_data.push(GeometryData {
+                                geometry: line_coords,
+                                r#type: "LineString".to_string(),
+                                height,
+                                base_elevation,
+                            });
+                        }
+                    }
+                },
+                "Point" => {
+                    if let Ok(point_coords) = serde_json::from_value::<Vec<f64>>(feature.geometry.coordinates.clone()) {
+                        let point_as_vec = vec![point_coords.clone()];
+                        let base_elevation = calculate_base_elevation(
+                            &point_as_vec,
+                            &elevation_grid,
+                            grid_size.0 as usize,
+                            grid_size.1 as usize,
+                            min_lng,
+                            min_lat,
+                            max_lng,
+                            max_lat
+                        );
+                        
+                        geometry_data.push(GeometryData {
+                            geometry: vec![point_coords],
+                            r#type: "Point".to_string(),
+                            height,
+                            base_elevation,
+                        });
+                    }
+                },
+                "MultiPoint" => {
+                    if let Ok(multi_point_coords) = serde_json::from_value::<Vec<Vec<f64>>>(feature.geometry.coordinates.clone()) {
+                        for point_coords in multi_point_coords {
+                            let point_as_vec = vec![point_coords.clone()];
+                            let base_elevation = calculate_base_elevation(
+                                &point_as_vec,
+                                &elevation_grid,
+                                grid_size.0 as usize,
+                                grid_size.1 as usize,
+                                min_lng,
+                                min_lat,
+                                max_lng,
+                                max_lat
+                            );
+                            
+                            geometry_data.push(GeometryData {
+                                geometry: vec![point_coords],
+                                r#type: "Point".to_string(),
+                                height,
+                                base_elevation,
+                            });
+                        }
+                    }
+                },
+                _ => {
+                    // Unhandled geometry type
+                    console_log!("Unhandled geometry type: {}", feature.geometry.r#type);
+                }
+            }
+        }
+    }
+    
+    console_log!("Extracted {} geometries from source layer '{}'", 
+        geometry_data.len(), vt_dataset.source_layer);
+    
+    // Return the extracted geometry data
+    Ok(to_value(&geometry_data)?)
+}
+
+// Make this function available to JS
 #[wasm_bindgen]
 pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
-    // Parse input parameters
+    // Parse input
     let input: VectortileProcessingInput = from_value(input_js)?;
     
-    // Get module state
-    let module_state = ModuleState::global();
-    let mut state = module_state.lock().unwrap();
+    // Use the process_id from input or generate one if not provided
+    let process_id = match input.process_id {
+        Some(id) => id,
+        None => format!("vt_{}_{}", Date::now(), Math::random()),
+    };
     
-    // Generate cache key from process_id
-    let cache_group = input.process_id.clone().unwrap_or_else(|| "default_vectortile".to_string());
-    
-    // Calculate tiles needed
+    // Calculate tiles for the requested bounding box
     let tiles = get_tiles_for_bbox(
         input.min_lng,
         input.min_lat,
@@ -242,380 +475,57 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         input.zoom
     );
     
-    // Check if tile count is reasonable (< 10 tiles)
-    let tile_count = tiles.len();
-    if tile_count > 9 {
-        console_log!("Skipping vector tile fetch: area too large ({} tiles, max allowed: 9)", tile_count);
-        return Ok(to_value(&Vec::<VectorTileResult>::new())?);
-    }
-
-    console_log!("Fetching {} vector tiles for bbox", tiles.len());
+    console_log!("Fetching {} vector tiles for zoom level {}", tiles.len(), input.zoom);
     
-    // Store the tile count before we use the tiles vector
-    let tile_count = tiles.len();
+    // Fetch tiles in parallel and store them
+    let module_state = ModuleState::get_instance();
+    let mut module_state_lock = module_state.lock().unwrap();
     
-    // Fetch vector tiles with caching
-    let mut vector_tile_results = Vec::new();
-    let mut cache_hits = 0;
-
-    for tile in &tiles {
-        // Create a unique key for this tile
-        let cache_key = format!("vectortile_{}_{}_{}", tile.z, tile.x, tile.y);
-        let tile_key = create_tile_key(tile.x, tile.y, tile.z);
+    // Store the fetch results for later processing
+    let mut tile_results = Vec::new();
+    
+    for tile in tiles {
+        let tile_key = format!("{}/{}/{}", tile.z, tile.x, tile.y);
         
-        // Try to get tile from cache
-        if let Some(cached_data) = state.get_raster_tile(&tile_key) {
-            // Cache hit
-            cache_hits += 1;
-            console_log!("Cache hit for vector tile {}/{}/{}", tile.z, tile.x, tile.y);
-            
-            vector_tile_results.push(VectorTileResult {
-                tile: TileRequest { x: tile.x, y: tile.y, z: tile.z },
-                data: cached_data.data.clone(),
-            });
+        // Check if we already have this tile cached
+        let tile_data = if let Some(existing_data) = module_state_lock.get_tile_data(&tile_key) {
+            existing_data
         } else {
-            // Cache miss, need to fetch
-            console_log!("Cache miss for vector tile {}/{}/{}", tile.z, tile.x, tile.y);
+            // Fetch the tile if not cached
+            let fetch_promise = fetch_tile(tile.x, tile.y, tile.z)?;
+            let fetch_result = JsFuture::from(fetch_promise).await?;
+            let data_array = Uint8Array::new(&fetch_result);
+            let data_vec = data_array.to_vec();
             
-            // Get the Promise from fetch_tile
-            let promise = fetch_tile(tile.z, tile.x, tile.y)?;
-            
-            // Use JsFuture to await the Promise
-            let fetch_result = JsFuture::from(promise).await?;
-            
-            // Convert result to Uint8Array and then to Rust Vec<u8>
-            let array_buffer = Uint8Array::new(&fetch_result);
-            let data = array_buffer.to_vec();
-            
-            // Store in cache
+            // Create new tile data entry
             let tile_data = TileData {
-                width: 512, // Default values for vector tiles
-                height: 512,
+                width: 256, // Default tile size
+                height: 256,
                 x: tile.x,
                 y: tile.y,
                 z: tile.z,
-                data: data.clone(),
+                data: data_vec.clone(),
                 timestamp: Date::now(),
+                key: tile_key.clone(),
+                buffer: data_vec.clone(),
+                parsed_layers: None, // We'll parse this later when needed
             };
             
-            // Add the tile to the cache
-            state.add_raster_tile(tile_key, tile_data);
-            
-            // Add to results
-            vector_tile_results.push(VectorTileResult {
-                tile: TileRequest { x: tile.x, y: tile.y, z: tile.z },
-                data,
-            });
-        }
-    }
-    
-    // Log cache efficiency
-    let cache_hit_rate = if tile_count > 0 {
-        (cache_hits as f64) / (tile_count as f64) * 100.0
-    } else {
-        0.0
-    };
-    console_log!("Vector tile cache hit rate: {:.1}%", cache_hit_rate);
-    
-    // Return the results
-    Ok(to_value(&vector_tile_results)?)
-}
-
-// Extract GeoJSON features from vector tiles
-#[wasm_bindgen]
-pub async fn extract_geojson_features(input_js: JsValue) -> Result<JsValue, JsValue> {
-    // Parse input parameters
-    let input: ExtractFeaturesInput = from_value(input_js)?;
-    
-    // Get module state
-    let module_state = ModuleState::global();
-    let mut state = module_state.lock().unwrap();
-    
-    // Extract bbox coordinates
-    if input.bbox.len() != 4 {
-        return Err(JsValue::from_str("Invalid bbox: expected [minLng, minLat, maxLng, maxLat]"));
-    }
-    
-    let min_lng = input.bbox[0];
-    let min_lat = input.bbox[1];
-    let max_lng = input.bbox[2];
-    let max_lat = input.bbox[3];
-    
-    // Generate a cache key for this extraction operation
-    let feature_cache_key = format!("features_{}_{}", input.process_id, input.vt_dataset.source_layer);
-    
-    // Check if we already have cached results for this exact configuration
-    let cache_key = create_tile_key(
-        input.vt_dataset.source_layer.len() as u32, 
-        input.process_id.len() as u32, 
-        0
-    );
-    
-    if let Some(cached_data) = state.get_cached_object(&feature_cache_key) {
-        console_log!("Cache hit for GeoJSON features: {}", feature_cache_key);
-        return Ok(cached_data.clone());
-    }
-    
-    console_log!("Cache miss for GeoJSON features: {}. Extracting features...", feature_cache_key);
-    
-    // We need to get the vector tiles first
-    let vt_input = VectortileProcessingInput {
-        min_lng,
-        min_lat,
-        max_lng,
-        max_lat,
-        zoom: 14, // Standard zoom level for detail
-        grid_width: 256,
-        grid_height: 256,
-        process_id: Some(input.process_id.clone()),
-    };
-    
-    // First fetch the vector tiles (which are cached internally)
-    let vector_tiles_js = fetch_vector_tiles(to_value(&vt_input)?).await?;
-    let vector_tiles: Vec<VectorTileResult> = from_value(vector_tiles_js)?;
-    
-    // Skip processing if the layer is explicitly disabled
-    if let Some(enabled) = input.vt_dataset.enabled {
-        if !enabled {
-            console_log!("Skipping disabled layer: {}", input.vt_dataset.source_layer);
-            return Ok(to_value(&Vec::<GeometryData>::new())?);
-        }
-    }
-    
-    // We need to get the elevation grid
-    let mut elevation_grid = Vec::new();
-    let mut grid_width = 0;
-    let mut grid_height = 0;
-    
-    if let Some(elevation_id) = &input.elevation_process_id {
-        // Try to get elevation data from cache
-        if let Some(elevation_data) = state.get_elevation_grid(elevation_id) {
-            elevation_grid = elevation_data.clone(); // Just clone the entire grid
-            grid_width = 256; // Default values or get from elsewhere if needed
-            grid_height = 256;
-            console_log!("Using cached elevation grid: {}x{}", grid_width, grid_height);
-        } else {
-            console_log!("Elevation grid not found in cache. Using flat terrain.");
-            // Create a flat terrain if elevation data is not available
-            grid_width = 256;
-            grid_height = 256;
-            elevation_grid = vec![vec![0.0; grid_width as usize]; grid_height as usize];
-        }
-    } else {
-        console_log!("No elevation_process_id provided. Using flat terrain.");
-        // Create a flat terrain if no elevation_process_id is provided
-        grid_width = 256;
-        grid_height = 256;
-        elevation_grid = vec![vec![0.0; grid_width as usize]; grid_height as usize];
-    }
-    
-    // Now process each vector tile to extract GeoJSON features
-    let mut geometry_data = Vec::new();
-    
-    // Call to extract the features from all vector tiles
-    for vt_result in &vector_tiles {
-        // We need to process the binary data and extract features
-        // This is where we'd use a Rust library for parsing PBF/MVT data
-        // For now, we'll use JavaScript for this part via a helper function
+            // Cache the tile
+            module_state_lock.set_tile_data(&tile_key, tile_data.clone());
+            tile_data
+        };
         
-        let extract_args = to_value(&serde_json::json!({
-            "tileData": vt_result.data,
-            "tile": vt_result.tile,
-            "sourceLayer": input.vt_dataset.source_layer,
-            "subClass": input.vt_dataset.sub_class,
-            "filter": input.vt_dataset.filter
-        }))?;
-        
-        // Call JavaScript helper to extract features from the tile
-        // In a real implementation, you'd use a Rust MVT parser library
-        let window = web_sys::window().expect("no global window exists");
-        let js_extractors = js_sys::Reflect::get(&window, &JsValue::from_str("wasmJsHelpers"))?;
-        let extract_fn = js_sys::Reflect::get(&js_extractors, &JsValue::from_str("extractFeaturesFromTile"))?;
-        let features_js = js_sys::Reflect::apply(
-            &extract_fn.dyn_into::<js_sys::Function>()?,
-            &JsValue::NULL,
-            &Array::of1(&extract_args)
-        )?;
-        
-        // Process the features
-        let features: Vec<serde_json::Value> = from_value(features_js)?;
-        
-        for feature in features {
-            if let Some(geometry) = feature.get("geometry") {
-                if let Some(geom_type) = geometry.get("type") {
-                    if let Some(coordinates) = geometry.get("coordinates") {
-                        // Process based on geometry type
-                        match geom_type.as_str() {
-                            Some("Polygon") => {
-                                if let Some(rings) = coordinates.as_array() {
-                                    for ring in rings {
-                                        if let Some(points) = ring.as_array() {
-                                            let coords: Vec<Vec<f64>> = points
-                                                .iter()
-                                                .filter_map(|p| {
-                                                    if let Some(coords) = p.as_array() {
-                                                        if coords.len() >= 2 {
-                                                            if let (Some(lng), Some(lat)) = (coords[0].as_f64(), coords[1].as_f64()) {
-                                                                return Some(vec![lng, lat]);
-                                                            }
-                                                        }
-                                                    }
-                                                    None
-                                                })
-                                                .collect();
-                                            
-                                            if !coords.is_empty() {
-                                                let base_elevation = calculate_base_elevation(
-                                                    &coords,
-                                                    &elevation_grid,
-                                                    grid_width,
-                                                    grid_height,
-                                                    min_lng,
-                                                    min_lat,
-                                                    max_lng,
-                                                    max_lat
-                                                );
-                                                
-                                                // Get height from properties
-                                                let mut height = 0.0;
-                                                if let Some(properties) = feature.get("properties") {
-                                                    if let Some(h) = properties.get("height").and_then(|h| h.as_f64()) {
-                                                        height = h;
-                                                    } else if let Some(h) = properties.get("render_height").and_then(|h| h.as_f64()) {
-                                                        height = h;
-                                                    }
-                                                }
-                                                
-                                                geometry_data.push(GeometryData {
-                                                    geometry: coords,
-                                                    r#type: "Polygon".to_string(),
-                                                    height,
-                                                    base_elevation,
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            Some("MultiPolygon") => {
-                                if let Some(polygons) = coordinates.as_array() {
-                                    for polygon in polygons {
-                                        if let Some(rings) = polygon.as_array() {
-                                            for ring in rings {
-                                                if let Some(points) = ring.as_array() {
-                                                    let coords: Vec<Vec<f64>> = points
-                                                        .iter()
-                                                        .filter_map(|p| {
-                                                            if let Some(coords) = p.as_array() {
-                                                                if coords.len() >= 2 {
-                                                                    if let (Some(lng), Some(lat)) = (coords[0].as_f64(), coords[1].as_f64()) {
-                                                                        return Some(vec![lng, lat]);
-                                                                    }
-                                                                }
-                                                            }
-                                                            None
-                                                        })
-                                                        .collect();
-                                                    
-                                                    if !coords.is_empty() {
-                                                        let base_elevation = calculate_base_elevation(
-                                                            &coords,
-                                                            &elevation_grid,
-                                                            grid_width,
-                                                            grid_height,
-                                                            min_lng,
-                                                            min_lat,
-                                                            max_lng,
-                                                            max_lat
-                                                        );
-                                                        
-                                                        // Get height from properties
-                                                        let mut height = 0.0;
-                                                        if let Some(properties) = feature.get("properties") {
-                                                            if let Some(h) = properties.get("height").and_then(|h| h.as_f64()) {
-                                                                height = h;
-                                                            } else if let Some(h) = properties.get("render_height").and_then(|h| h.as_f64()) {
-                                                                height = h;
-                                                            }
-                                                        }
-                                                        
-                                                        geometry_data.push(GeometryData {
-                                                            geometry: coords,
-                                                            r#type: "Polygon".to_string(),
-                                                            height,
-                                                            base_elevation,
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            Some("LineString") => {
-                                if let Some(points) = coordinates.as_array() {
-                                    let coords: Vec<Vec<f64>> = points
-                                        .iter()
-                                        .filter_map(|p| {
-                                            if let Some(coords) = p.as_array() {
-                                                if coords.len() >= 2 {
-                                                    if let (Some(lng), Some(lat)) = (coords[0].as_f64(), coords[1].as_f64()) {
-                                                        return Some(vec![lng, lat]);
-                                                    }
-                                                }
-                                            }
-                                            None
-                                        })
-                                        .collect();
-                                    
-                                    if !coords.is_empty() {
-                                        let base_elevation = calculate_base_elevation(
-                                            &coords,
-                                            &elevation_grid,
-                                            grid_width,
-                                            grid_height,
-                                            min_lng,
-                                            min_lat,
-                                            max_lng,
-                                            max_lat
-                                        );
-                                        
-                                        // Get height from properties
-                                        let mut height = 0.0;
-                                        if let Some(properties) = feature.get("properties") {
-                                            if let Some(h) = properties.get("height").and_then(|h| h.as_f64()) {
-                                                height = h;
-                                            } else if let Some(h) = properties.get("render_height").and_then(|h| h.as_f64()) {
-                                                height = h;
-                                            }
-                                        }
-                                        
-                                        geometry_data.push(GeometryData {
-                                            geometry: coords,
-                                            r#type: "LineString".to_string(),
-                                            height,
-                                            base_elevation,
-                                        });
-                                    }
-                                }
-                            },
-                            // Add handling for Point, MultiLineString, MultiPoint as needed
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
+        // Add to results
+        tile_results.push(VectorTileResult {
+            tile: tile.clone(),
+            data: tile_data.buffer,
+        });
     }
     
-    console_log!("Extracted {} geometry features for layer {}", geometry_data.len(), input.vt_dataset.source_layer);
+    // Store all tiles under the process_id for later retrieval
+    module_state_lock.store_vector_tiles(&process_id, &tile_results);
     
-    // Convert results to JsValue
-    let result = to_value(&geometry_data)?;
-    
-    // Cache the results
-    state.add_cached_object(&feature_cache_key, result.clone());
-    
-    // Return the results
-    Ok(result)
+    // Return success with the process_id
+    Ok(to_value(&process_id)?)
 }

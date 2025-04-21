@@ -67,7 +67,7 @@ pub fn store_raster_tile(x: u32, y: u32, z: u32, source: &str, width: u32, heigh
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
     
-    let key = create_tile_key(x, y, z);
+    let key_obj = create_tile_key(x, y, z);
     let tile_data = TileData {
         width,
         height,
@@ -76,9 +76,12 @@ pub fn store_raster_tile(x: u32, y: u32, z: u32, source: &str, width: u32, heigh
         z,
         data: data.to_vec(),
         timestamp: Date::now(),
+        key: format!("{}/{}/{}", z, x, y),
+        buffer: data.to_vec(),
+        parsed_layers: None,
     };
     
-    state.add_raster_tile(key, tile_data);
+    state.add_raster_tile(key_obj, tile_data);
     true
 }
 
@@ -88,8 +91,8 @@ pub fn has_raster_tile(x: u32, y: u32, z: u32, source: &str) -> bool {
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
     
-    let key = create_tile_key(x, y, z);
-    state.get_raster_tile(&key).is_some()
+    let key_obj = create_tile_key(x, y, z);
+    state.get_raster_tile(&key_obj).is_some()
 }
 
 // Function to get cache statistics

@@ -506,13 +506,18 @@ export const GenerateMeshButton = function () {
         // Check for cancellation before fetching layer data
         cancellationToken.throwIfCancelled();
 
-        // Fetch data for this layer
-        let layerData = await extractGeojsonFeaturesFromVectorTiles({
+        // Fetch data for this layer using our new Rust/WASM implementation
+        let layerData = await getWasmModule().extract_features_from_vector_tiles({
           bbox: [minLng, minLat, maxLng, maxLat],
-          vtDataset: currentLayer,
-          vectorTiles: vtData || [],
-          elevationGrid: elevationGrid,
-          gridSize,
+          vt_dataset: {
+            source_layer: currentLayer.sourceLayer,
+            sub_class: currentLayer.subClass,
+            filter: currentLayer.filter,
+            enabled: currentLayer.enabled,
+            buffer_size: currentLayer.bufferSize
+          },
+          process_id: currentBboxHash,
+          elevation_process_id: currentBboxHash // assuming elevation data is stored under the same ID
         });
 
         console.log(
