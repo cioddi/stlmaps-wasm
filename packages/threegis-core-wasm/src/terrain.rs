@@ -16,7 +16,7 @@ pub struct TerrainGeometryParams {
     pub max_lat: f64,
     pub vertical_exaggeration: f64,
     pub terrain_base_height: f64,
-    pub process_id: String,
+    pub bbox_key: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -187,7 +187,7 @@ pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     let params: TerrainGeometryParams = serde_wasm_bindgen::from_value(params_js)?;
     
     console_log!("🏔️ [Terrain] Starting terrain geometry creation...");
-    console_log!("🏔️ [Terrain] Using process_id: '{}'", params.process_id);
+    console_log!("🏔️ [Terrain] Using bbox_key: '{}'", params.bbox_key);
     console_log!("🏔️ [Terrain] Terrain params: bbox=[{}, {}, {}, {}], vertical_exaggeration={}, base_height={}", 
                 params.min_lng, params.min_lat, params.max_lng, params.max_lat, 
                 params.vertical_exaggeration, params.terrain_base_height);

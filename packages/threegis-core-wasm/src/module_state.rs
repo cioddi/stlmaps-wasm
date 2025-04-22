@@ -37,7 +37,7 @@ pub struct TileKey {
 // Vector tile data for a bbox
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VectorTileData {
-    pub process_id: String,
+    pub bbox_key: String,
     pub timestamp: f64,
     pub tiles: Vec<serde_json::Value>, // Store the tiles with their associated data
 }
@@ -45,7 +45,7 @@ pub struct VectorTileData {
 // Elevation data for a bbox
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ElevationData {
-    pub process_id: String,
+    pub bbox_key: String,
     pub elevation_grid: Vec<Vec<f64>>,
     pub grid_width: u32,
     pub grid_height: u32,
@@ -58,7 +58,7 @@ pub struct ElevationData {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FeatureData {
     pub source_layer: String,
-    pub process_id: String,
+    pub bbox_key: String,
     pub features: Vec<crate::geojson_features::GeometryData>,
     pub timestamp: f64,
 }
@@ -231,15 +231,14 @@ impl ModuleState {
     // Get vector tiles for a process ID or bbox_key
     pub fn get_vector_tiles(&self, id: &str) -> Option<Vec<TileData>> {
         // Parse the id - if it's a bbox key (contains underscores), use it directly
-        // If it's a process_id, use it to lookup the associated bbox_key
+        // If it's not in standard format, convert it to the standard format
         let lookup_key = if id.contains('_') {
             // This is already a bbox_key in the format min_lng_min_lat_max_lng_max_lat
             id.to_string()
         } else {
-            // This is a process_id, need to map it to a bbox_key
-            // In a real implementation, you would have a HashMap that maps process_ids to bbox_keys
-            // For now, we'll just use the process_id directly and log the issue
-            console_log!("Warning: Using process_id directly instead of bbox_key: {}", id);
+            // This is not in the standard format, need to convert it
+            // For now, we'll just use the id directly and log the issue
+            console_log!("Warning: Using non-standard key instead of standard bbox_key format: {}", id);
             id.to_string()
         };
         
@@ -260,13 +259,13 @@ impl ModuleState {
     }
     
     // Get elevation data for a process ID
-    pub fn get_elevation_data(&self, process_id: &str) -> Option<ElevationData> {
+    pub fn get_elevation_data(&self, bbox_key: &str) -> Option<ElevationData> {
         // In a real implementation, this would retrieve the elevation data from a HashMap
-        console_log!("Looking for elevation data with process_id: {}", process_id);
+        console_log!("Looking for elevation data with bbox_key: {}", bbox_key);
         
         // Return dummy elevation data for testing
         Some(ElevationData {
-            process_id: process_id.to_string(),
+            bbox_key: bbox_key.to_string(),
             elevation_grid: vec![vec![0.0; 2]; 2],
             grid_width: 2,
             grid_height: 2,
@@ -276,13 +275,13 @@ impl ModuleState {
         })
     }
     
-    // Get cached geometry data for a specific layer and process ID
-    pub fn get_cached_geometry_data(&self, process_id: &str, source_layer: &str) -> Option<Vec<crate::polygon_geometry::GeometryData>> {
-        // Get data using the proper process_id/bbox_key format used throughout the app
-        console_log!("Looking for cached geometry data for layer: {} with process_id: {}", source_layer, process_id);
+    // Get cached geometry data for a specific layer and bbox key
+    pub fn get_cached_geometry_data(&self, bbox_key: &str, source_layer: &str) -> Option<Vec<crate::polygon_geometry::GeometryData>> {
+        // Get data using the proper bbox_key format used throughout the app
+        console_log!("Looking for cached geometry data for layer: {} with bbox_key: {}", source_layer, bbox_key);
         
-        // Try to get vector tiles for this process_id - using the same format as extract_features_from_vector_tiles
-        if let Some(vector_tiles) = self.get_vector_tiles(process_id) {
+        // Try to get vector tiles for this bbox_key - using the same format as extract_features_from_vector_tiles
+        if let Some(vector_tiles) = self.get_vector_tiles(bbox_key) {
             // Extract features from the vector tiles for the specified source layer
             let mut features = Vec::new();
             

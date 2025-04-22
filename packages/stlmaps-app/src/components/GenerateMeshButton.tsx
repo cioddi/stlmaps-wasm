@@ -272,7 +272,7 @@ export const GenerateMeshButton = function () {
         throw new Error("WASM module not initialized. Please try again later.");
       }
 
-      // Use the WASM-based elevation processing with the bboxHash as process_id
+      // Use the WASM-based elevation processing with the bboxHash as bbox_key
       console.log(
         "🌍 Processing elevation data with WASM for bbox:",
         currentBboxHash
@@ -284,7 +284,7 @@ export const GenerateMeshButton = function () {
       });
       let elevationResult;
       try {
-        // Pass the currentBboxHash as the process_id to store data in WASM
+        // Pass the currentBboxHash as the bbox_key to store data in WASM
         // This will automatically register the data with this ID in the WASM context
         elevationResult = await processElevationForBbox(bbox, currentBboxHash);
 
@@ -293,7 +293,7 @@ export const GenerateMeshButton = function () {
         );
 
         // Store just the metadata for JavaScript-side operations, the actual grid
-        // remains in WASM memory and is accessible via the process_id (currentBboxHash)
+        // remains in WASM memory and is accessible via the bbox_key (currentBboxHash)
         setProcessedTerrainData({
           processedElevationGrid: elevationResult.elevationGrid,
           processedMinElevation: elevationResult.minElevation,
@@ -343,10 +343,10 @@ export const GenerateMeshButton = function () {
         // Get the WASM module instance
         const wasmModule = getWasmModule();
 
-        // First, we need to process and register the elevation data with the process_id
+        // First, we need to process and register the elevation data with the bbox_key
         // This step is crucial - create_terrain_geometry expects this data to be pre-registered
         console.log(
-          "Registering elevation data with process_id:",
+          "Registering elevation data with bbox_key:",
           currentBboxHash
         );
 
@@ -355,7 +355,7 @@ export const GenerateMeshButton = function () {
         // the elevation data is registered specifically for terrain generation
         try {
           // Call processElevationForBbox again to ensure the data is properly registered
-          // This will register the data with the same process_id (currentBboxHash)
+          // This will register the data with the same bbox_key (currentBboxHash)
           console.log(
             "Re-registering elevation data for terrain generation..."
           );
@@ -381,7 +381,7 @@ export const GenerateMeshButton = function () {
           max_lat: maxLat,
           vertical_exaggeration: terrainSettings.verticalExaggeration,
           terrain_base_height: terrainSettings.baseHeight,
-          process_id: currentBboxHash, // Use the bbox hash as the process ID
+          bbox_key: currentBboxHash, // Use the bbox hash as the cache key
         };
 
         // Call the WASM terrain geometry generator
@@ -516,8 +516,8 @@ export const GenerateMeshButton = function () {
             enabled: currentLayer.enabled,
             buffer_size: currentLayer.bufferSize
           },
-          process_id: currentBboxHash,
-          elevation_process_id: currentBboxHash // assuming elevation data is stored under the same ID
+          bbox_key: currentBboxHash,
+          elevation_bbox_key: currentBboxHash // assuming elevation data is stored under the same ID
         });
 
         console.log(
@@ -556,7 +556,7 @@ export const GenerateMeshButton = function () {
               maxElevation: processedMaxElevation,
               vtDataSet: currentLayer,
               useSameZOffset: true,
-              process_id: currentBboxHash, // Pass the process ID to access cached features
+              bbox_key: currentBboxHash, // Pass the bbox key to access cached features
             };
 
             const serializedInput = JSON.stringify(polygonGeometryInput);

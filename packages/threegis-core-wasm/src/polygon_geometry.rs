@@ -122,7 +122,7 @@ pub struct PolygonGeometryInput {
     pub vtDataSet: VtDataSet,
     #[serde(default)]
     pub useSameZOffset: bool,
-    pub process_id: String,
+    pub bbox_key: String,
 }
 
 // Output struct for the polygon geometry
@@ -510,17 +510,17 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     let max_lat = input.bbox[3];
     
     console_log!(
-        "Processing polygons for {} using process_id: {}",
+        "Processing polygons for {} using bbox_key: {}",
         input.vtDataSet.sourceLayer,
-        input.process_id
+        input.bbox_key
     );
     
-    // Get polygons from module state cache using the process_id
+    // Get polygons from module state cache using the bbox_key
     let state = ModuleState::global();
     let state = state.lock().unwrap();
     
     // Try to get the cached geometry data
-    let polygons = match state.get_cached_geometry_data(&input.process_id, &input.vtDataSet.sourceLayer) {
+    let polygons = match state.get_cached_geometry_data(&input.bbox_key, &input.vtDataSet.sourceLayer) {
         Some(cached_polygons) => {
             console_log!("Using {} cached geometry features for {}", cached_polygons.len(), input.vtDataSet.sourceLayer);
             cached_polygons

@@ -28,8 +28,8 @@ pub struct VectortileProcessingInput {
     pub zoom: u32,
     pub grid_width: u32,
     pub grid_height: u32,
-    // Use the same process_id concept for caching as terrain
-    pub process_id: Option<String>,
+    // Bbox key for consistent caching across the application
+    pub bbox_key: Option<String>,
 }
 
 // Result structure compatible with JS expectations
@@ -64,8 +64,8 @@ pub struct VtDataset {
 pub struct ExtractFeaturesInput {
     pub bbox: Vec<f64>,                     // [minLng, minLat, maxLng, maxLat]
     pub vt_dataset: VtDataset,              // Configuration for the layer
-    pub process_id: String,                 // Cache key/process ID
-    pub elevation_process_id: Option<String>, // ID to find cached elevation data
+    pub bbox_key: String,                   // Cache key for vector tiles
+    pub elevation_bbox_key: Option<String>, // ID to find cached elevation data
 }
 
 // Feature geometry types
@@ -213,7 +213,7 @@ pub async fn extract_features_from_vector_tiles(
     let max_lng = bbox[2];
     let max_lat = bbox[3];
     let vt_dataset = &input.vt_dataset;
-    let process_id = &input.process_id;
+    let bbox_key = &input.bbox_key;
     
     // Skip processing if layer is disabled
     if let Some(enabled) = vt_dataset.enabled {
@@ -465,8 +465,8 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse input
     let input: VectortileProcessingInput = from_value(input_js)?;
     
-    // Use the process_id from input or generate one if not provided
-    let process_id = match input.process_id {
+    // Use the bbox_key from input or generate one if not provided
+    let bbox_key = match input.bbox_key {
         Some(id) => id,
         None => format!("vt_{}_{}", Date::now(), Math::random()),
     };
@@ -544,15 +544,15 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         });
     }
     
-    // Store all tiles under the process_id for later retrieval
-    console_log!("🔍 DEBUG: Storing {} vector tiles under process_id: {}", tile_results.len(), process_id);
-    module_state_lock.store_vector_tiles(&process_id, &tile_results);
-    
-    // Also store tiles under bbox_key format for consistency across the application
-    let bbox_key = format!("{}_{}_{}_{}", input.min_lng, input.min_lat, input.max_lng, input.max_lat);
-    console_log!("🔍 DEBUG: Also storing vector tiles under bbox_key: {}", bbox_key);
+    // Store all tiles under the bbox_key for later retrieval
+    console_log!("🔍 DEBUG: Storing {} vector tiles under bbox_key: {}", tile_results.len(), bbox_key);
     module_state_lock.store_vector_tiles(&bbox_key, &tile_results);
     
-    // Return success with the process_id
-    Ok(to_value(&process_id)?)
+    // Also store tiles under standard bbox_key format for consistency across the application
+    let standard_bbox_key = format!("{}_{}_{}_{}", input.min_lng, input.min_lat, input.max_lng, input.max_lat);
+    console_log!("🔍 DEBUG: Also storing vector tiles under standard bbox_key: {}", standard_bbox_key);
+    module_state_lock.store_vector_tiles(&standard_bbox_key, &tile_results);
+    
+    // Return success with the bbox_key
+    Ok(to_value(&bbox_key)?)
 }

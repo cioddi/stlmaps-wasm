@@ -129,9 +129,9 @@ export const fetchVtData = async (
     if (wasmModule && wasmModule.fetch_vector_tiles) {
       console.log("Using WASM vector tile fetching for performance");
       
-      // Create a process ID (cache key) using the same approach as terrain
+      // Create a bbox_key using the same approach as terrain
       // This ensures tiles are cached under the same key for both terrain and vector tiles
-      const processId = bboxKey || hashBbox({
+      const bboxKeyValue = bboxKey || hashBbox({
         type: "Feature",
         geometry: {
           type: "Polygon",
@@ -148,7 +148,7 @@ export const fetchVtData = async (
         zoom,
         grid_width: gridSize.width,
         grid_height: gridSize.height,
-        process_id: processId
+        bbox_key: bboxKeyValue
       };
       
       // Call the Rust function

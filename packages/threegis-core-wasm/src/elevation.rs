@@ -23,8 +23,8 @@ pub struct ElevationProcessingInput {
     pub tiles: Vec<TileRequest>,
     pub grid_width: u32,
     pub grid_height: u32,
-    // NEW: process identifier for grouping cache entries
-    pub process_id: Option<String>,
+    // NEW: bbox key for grouping cache entries
+    pub bbox_key: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -346,28 +346,28 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         // Debug current cache state
         console_log!("📦 [Cache] Current elevation cache size: {} entries", state.elevation_grids.len());
         
-        // If a process_id is provided, store the elevation grid with that ID directly
-        // This ensures the terrain generation can find it using just the process_id
-        if let Some(ref process_id) = input.process_id {
-            console_log!("📦 [Cache] Process ID provided: '{}'", process_id);
+        // If a bbox_key is provided, store the elevation grid with that ID directly
+        // This ensures the terrain generation can find it using just the bbox_key
+        if let Some(ref bbox_key) = input.bbox_key {
+            console_log!("📦 [Cache] Bbox key provided: '{}'", bbox_key);
             
-            // Store using the process_id directly as the key
-            state.elevation_grids.insert(process_id.clone(), elevation_grid.clone());
-            console_log!("📦 [Cache] ✅ Stored elevation grid with direct process_id: '{}'", process_id);
+            // Store using the bbox_key directly as the key
+            state.elevation_grids.insert(bbox_key.clone(), elevation_grid.clone());
+            console_log!("📦 [Cache] ✅ Stored elevation grid with direct bbox_key: '{}'", bbox_key);
             
-            // Also store with a prefixed version of the process_id for redundancy
-            let alt_key = format!("process_{}", process_id);
+            // Also store with a prefixed version of the bbox_key for redundancy
+            let alt_key = format!("bbox_{}", bbox_key);
             state.elevation_grids.insert(alt_key.clone(), elevation_grid.clone());
             console_log!("📦 [Cache] ✅ Stored elevation grid with alternate key: '{}'", alt_key);
             
-            // Create a mapping from bbox to process_id for debugging
-            console_log!("📦 [Cache] ✅ Associated process_id '{}' with bbox_key '{}'", process_id, bbox_key);
+            // Create a mapping for debugging
+            console_log!("📦 [Cache] ✅ Using standardized bbox_key format '{}'", bbox_key);
             
             // List all keys in cache for debugging 
             let keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
             console_log!("📦 [Cache] All cache keys after storage: {:?}", keys);
         } else {
-            console_log!("📦 [Cache] ⚠️ No process_id provided, elevation data only stored with bbox_key");
+            console_log!("📦 [Cache] ⚠️ No bbox_key provided, elevation data only stored with bbox_key");
         }
     }
     
