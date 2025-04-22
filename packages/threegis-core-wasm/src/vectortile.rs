@@ -225,8 +225,14 @@ pub async fn extract_features_from_vector_tiles(
     let max_lng = bbox[2];
     let max_lat = bbox[3];
     let vt_dataset = &input.vt_dataset;
-    // Use the specific bbox_key passed in the input for cache lookup
-    let bbox_key = &input.bbox_key; 
+    
+    // Always use standard bbox_key format: lng_min_lat_min_lng_max_lat_max
+    let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
+    
+    // Log if input.bbox_key was in a non-standard format
+    if input.bbox_key != bbox_key {
+        console_log!("Converting non-standard key to standard bbox_key format: {} -> {}", input.bbox_key, bbox_key);
+    }
     
     console_log!("Starting feature extraction for layer '{}' using cache key: {}", vt_dataset.source_layer, bbox_key);
 
@@ -265,7 +271,7 @@ pub async fn extract_features_from_vector_tiles(
         }
         None => {
             console_log!("No elevation_bbox_key provided, using default bbox_key for elevation lookup: {}", bbox_key);
-            module_state.get_elevation_data(bbox_key) // Fallback to main bbox_key if specific one not given
+            module_state.get_elevation_data(&bbox_key) // Fallback to main bbox_key if specific one not given
         }
     };
     
@@ -495,10 +501,20 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse input
     let input: VectortileProcessingInput = from_value(input_js)?;
     
-    // Use the bbox_key from input or generate one if not provided
-    let bbox_key = match input.bbox_key {
-        Some(id) => id,
-        None => format!("vt_{}_{}", Date::now(), Math::random()),
+    // Always use standard bbox_key format for consistent caching
+    let standard_bbox_key = format!("{}_{}_{}_{}", input.min_lng, input.min_lat, input.max_lng, input.max_lat);
+    
+    // Use the standard bbox_key or override with input.bbox_key if provided and it matches the format
+    let bbox_key = match &input.bbox_key {
+        Some(key) => {
+            if key.contains("{") || key.contains("}") {
+                console_log!("Converting non-standard key to standard bbox_key format: {} -> {}", key, standard_bbox_key);
+                standard_bbox_key
+            } else {
+                key.clone()
+            }
+        },
+        None => standard_bbox_key.clone(),
     };
     
     // Calculate tiles for the requested bounding box
@@ -633,14 +649,9 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         });
     }
     
-    // Store all tiles under the bbox_key for later retrieval
+    // Only store tiles under the standard bbox_key format for consistency
     console_log!("🔍 DEBUG: Storing {} vector tiles under bbox_key: {}", tile_results.len(), bbox_key);
     module_state_lock.store_vector_tiles(&bbox_key, &tile_results);
-    
-    // Also store tiles under standard bbox_key format for consistency across the application
-    let standard_bbox_key = format!("{}_{}_{}_{}", input.min_lng, input.min_lat, input.max_lng, input.max_lat);
-    console_log!("🔍 DEBUG: Also storing vector tiles under standard bbox_key: {}", standard_bbox_key);
-    module_state_lock.store_vector_tiles(&standard_bbox_key, &tile_results);
     
     // Return tile data that has been processed by Rust
     // We're still returning the VectorTileResult format for compatibility,
