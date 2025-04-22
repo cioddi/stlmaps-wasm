@@ -2064,6 +2064,7 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "csgrs",
+ "earcutr",
  "flate2",
  "geo 0.27.0",
  "geo-types",

@@ -431,11 +431,14 @@ fn parse_color(color_str: &str) -> Color {
     }
 }
 
-// Simplistic implementation of an extruded shape
+// Improved implementation of an extruded shape using earcutr for triangulation
 fn create_extruded_shape(shape_points: &[Vector2], height: f64, z_offset: f64) -> BufferGeometry {
+    use geo_types::{Coord, LineString, Polygon as GeoPolygon};
+    
     let point_count = shape_points.len();
     if point_count < 3 {
         // Need at least 3 points for a valid shape
+        console_log!("Not enough points to create a valid shape (minimum 3 required)");
         return BufferGeometry {
             vertices: Vec::new(),
             normals: None,
@@ -446,52 +449,111 @@ fn create_extruded_shape(shape_points: &[Vector2], height: f64, z_offset: f64) -
         };
     }
     
-    // Triangulate the top face (simple fan triangulation - works for convex shapes)
-    let mut vertices = Vec::new();
+    // Convert shape_points to geo_types coordinates
+    let mut exterior_coords: Vec<Coord<f64>> = Vec::with_capacity(point_count);
+    for point in shape_points {
+        exterior_coords.push(Coord { x: point.x, y: point.y });
+    }
+    
+    // Ensure the polygon is closed (first point equals last point)
+    if !exterior_coords.is_empty() && 
+       (exterior_coords[0].x != exterior_coords[point_count-1].x || 
+        exterior_coords[0].y != exterior_coords[point_count-1].y) {
+        exterior_coords.push(exterior_coords[0]); // Close the polygon
+    }
+    
+    // Create a geo-types polygon (without interior rings/holes for now)
+    let exterior = LineString::new(exterior_coords);
+    let geo_polygon = GeoPolygon::new(exterior, vec![]);
+    
+    // Prepare data for earcutr triangulation
+    // Flatten the coordinates for earcutr
+    let mut flat_coords: Vec<f64> = Vec::with_capacity(geo_polygon.exterior().0.len() * 2);
+    for coord in geo_polygon.exterior().0.iter() {
+        flat_coords.push(coord.x);
+        flat_coords.push(coord.y);
+    }
+    
+    // Define where each ring starts (only exterior ring for now)
+    let mut ring_starts: Vec<usize> = vec![0];
+    
+    console_log!("Triangulating polygon with {} points", flat_coords.len() / 2);
+    
+    // Use earcutr to triangulate the polygon
+    let indices_2d = match earcutr::earcut(&flat_coords, &ring_starts, 2) {
+        Ok(indices) => indices,
+        Err(err) => {
+            console_log!("Triangulation failed: {:?}", err);
+            return BufferGeometry {
+                vertices: Vec::new(),
+                normals: None,
+                colors: None,
+                indices: None,
+                uvs: None,
+                hasData: false,
+            };
+        }
+    };
+    
+    console_log!("Triangulation successful, generated {} triangles", indices_2d.len() / 3);
+    
+    // Generate the 3D vertices and indices
+    let mut vertices: Vec<f32> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     
+    // Number of unique vertices in the 2D polygon (exterior ring)
+    let unique_points = geo_polygon.exterior().0.len() - 1; // Subtract 1 because last point duplicates first
+    
     // Add bottom face vertices
-    for i in 0..point_count {
-        let p = shape_points[i];
-        vertices.push(p.x as f32);
-        vertices.push(p.y as f32);
+    for i in 0..unique_points {
+        let coord = &geo_polygon.exterior().0[i];
+        vertices.push(coord.x as f32);
+        vertices.push(coord.y as f32);
         vertices.push(z_offset as f32);
     }
     
     // Add top face vertices
-    for i in 0..point_count {
-        let p = shape_points[i];
-        vertices.push(p.x as f32);
-        vertices.push(p.y as f32);
+    for i in 0..unique_points {
+        let coord = &geo_polygon.exterior().0[i];
+        vertices.push(coord.x as f32);
+        vertices.push(coord.y as f32);
         vertices.push((z_offset + height) as f32);
     }
     
-    // Create triangles for top and bottom faces using triangle fan
-    for i in 1..(point_count - 1) {
-        // Bottom face (with corrected winding order for proper normals)
-        indices.push(0);
-        indices.push(i as u32);
-        indices.push(i as u32 + 1);
-        
-        // Top face (with corrected winding order for proper normals)
-        indices.push(point_count as u32);
-        indices.push(point_count as u32 + i as u32 + 1);
-        indices.push(point_count as u32 + i as u32);
+    // Add bottom face indices (as triangulated by earcutr)
+    for i in (0..indices_2d.len()).step_by(3) {
+        // Correct winding order for bottom face (viewed from outside)
+        indices.push(indices_2d[i] as u32);
+        indices.push(indices_2d[i+2] as u32);
+        indices.push(indices_2d[i+1] as u32);
     }
     
-    // Create side quads
-    for i in 0..point_count {
-        let next = (i + 1) % point_count;
+    // Add top face indices (reversed winding order compared to bottom)
+    for i in (0..indices_2d.len()).step_by(3) {
+        // Correct winding order for top face (viewed from outside)
+        indices.push((indices_2d[i] + unique_points) as u32);
+        indices.push((indices_2d[i+1] + unique_points) as u32);
+        indices.push((indices_2d[i+2] + unique_points) as u32);
+    }
+    
+    // Create side walls
+    for i in 0..unique_points {
+        let next = (i + 1) % unique_points;
         
-        // First triangle of the quad
-        indices.push(i as u32);
-        indices.push(i as u32 + point_count as u32);
-        indices.push(next as u32);
+        let bottom_current = i as u32;
+        let bottom_next = next as u32;
+        let top_current = (i + unique_points) as u32;
+        let top_next = (next + unique_points) as u32;
         
-        // Second triangle of the quad
-        indices.push(next as u32);
-        indices.push(i as u32 + point_count as u32);
-        indices.push(next as u32 + point_count as u32);
+        // First triangle of the quad (ensure correct winding order)
+        indices.push(bottom_current);
+        indices.push(bottom_next);
+        indices.push(top_next);
+        
+        // Second triangle of the quad (ensure correct winding order)
+        indices.push(bottom_current);
+        indices.push(top_next);
+        indices.push(top_current);
     }
     
     // Generate normals

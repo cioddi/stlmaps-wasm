@@ -28,6 +28,7 @@ geozero = { version = "0.10.0", features = ["geo-types", "with-mvt"], default-fe
 csgrs = "0.16.0"
 uuid = { version = "1.16.0", features = ["js"] }
 nalgebra = "0.32.3"
+earcutr = "0.4.2"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.37"
