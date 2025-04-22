@@ -16,7 +16,6 @@ wasm-bindgen-futures = "0.4.41"
 js-sys = "0.3.64"
 web-sys = { version = "0.3.64", features = ["console", "Window", "Document"] }
 geojson = "0.24.1"
-geo = "0.27.0"
 geo-types = "0.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -29,6 +28,10 @@ csgrs = "0.16.0"
 uuid = { version = "1.16.0", features = ["js"] }
 nalgebra = "0.32.3"
 earcutr = "0.4.2"
+
+# Update geo-booleanop to explicitly match the geo version
+geo-booleanop = { version = "0.3.2"}
+geo = { version = "0.27.0", features = ["use-serde"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.37"

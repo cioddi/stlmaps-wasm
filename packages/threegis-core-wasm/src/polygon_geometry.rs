@@ -3,22 +3,32 @@ use serde::{Serialize, Deserialize};
 use js_sys::{Array, Float32Array, Object};
 use web_sys::console;
 use std::collections::HashMap;
-use crate::console_log;
-use crate::module_state::ModuleState;
+
+// Simplified geo imports to fix compatibility issues
+use geo_types::{Coord, LineString, Polygon as GeoPolygon, Rect};
+use geo::algorithm::area::Area;
+use geo::algorithm::contains::Contains;
+use geo::algorithm::intersects::Intersects;
+use geo::algorithm::bounding_rect::BoundingRect;
 use csgrs::csg::CSG;
 use csgrs::polygon::Polygon as CsgPolygon;
 use csgrs::vertex::Vertex as CsgVertex;
 use csgrs::plane::Plane;
 use nalgebra::{Point3, Vector3 as NVector3};
 
+use crate::console_log;
+use crate::module_state::ModuleState;
+use crate::bbox_filter::polygon_intersects_bbox;
+
 // Constants ported from TypeScript
 const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
-const MIN_HEIGHT: f64 = 0.5;
+const MIN_HEIGHT: f64 = 0.01; // Avoid zero or negative height for robust geometry
 const MAX_HEIGHT: f64 = 500.0;
 const TERRAIN_SIZE: f64 = 200.0;
+const EPSILON: f64 = 1e-9; // Small value for float comparisons
 
 // Struct to represent a 2D point
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Vector2 {
     x: f64,
     y: f64,
@@ -431,197 +441,94 @@ fn parse_color(color_str: &str) -> Color {
     }
 }
 
-// Improved implementation of an extruded shape using earcutr for triangulation
-fn create_extruded_shape(shape_points: &[Vector2], height: f64, z_offset: f64) -> BufferGeometry {
-    use geo_types::{Coord, LineString, Polygon as GeoPolygon};
-    
-    let point_count = shape_points.len();
-    if point_count < 3 {
-        // Need at least 3 points for a valid shape
-        console_log!("Not enough points to create a valid shape (minimum 3 required)");
-        return BufferGeometry {
-            vertices: Vec::new(),
-            normals: None,
-            colors: None,
-            indices: None,
-            uvs: None,
-            hasData: false,
-        };
+// --- NEW: Polygon Cleaning Function ---
+// Removes duplicate consecutive points and ensures the polygon is closed.
+// Returns a list of UNIQUE vertices suitable for extrusion.
+fn clean_polygon_footprint(points: &[Vector2]) -> Vec<Vector2> {
+    if points.len() < 2 {
+        return Vec::new(); // Cannot form a polygon
     }
-    
-    // Convert shape_points to geo_types coordinates
-    let mut exterior_coords: Vec<Coord<f64>> = Vec::with_capacity(point_count);
-    for point in shape_points {
-        exterior_coords.push(Coord { x: point.x, y: point.y });
-    }
-    
-    // Ensure the polygon is closed (first point equals last point)
-    if !exterior_coords.is_empty() && 
-       (exterior_coords[0].x != exterior_coords[point_count-1].x || 
-        exterior_coords[0].y != exterior_coords[point_count-1].y) {
-        exterior_coords.push(exterior_coords[0]); // Close the polygon
-    }
-    
-    // Create a geo-types polygon (without interior rings/holes for now)
-    let exterior = LineString::new(exterior_coords);
-    let geo_polygon = GeoPolygon::new(exterior, vec![]);
-    
-    // Prepare data for earcutr triangulation
-    // Flatten the coordinates for earcutr
-    let mut flat_coords: Vec<f64> = Vec::with_capacity(geo_polygon.exterior().0.len() * 2);
-    for coord in geo_polygon.exterior().0.iter() {
-        flat_coords.push(coord.x);
-        flat_coords.push(coord.y);
-    }
-    
-    // Define where each ring starts (only exterior ring for now)
-    let mut ring_starts: Vec<usize> = vec![0];
-    
-    console_log!("Triangulating polygon with {} points", flat_coords.len() / 2);
-    
-    // Use earcutr to triangulate the polygon
-    let indices_2d = match earcutr::earcut(&flat_coords, &ring_starts, 2) {
-        Ok(indices) => indices,
-        Err(err) => {
-            console_log!("Triangulation failed: {:?}", err);
-            return BufferGeometry {
-                vertices: Vec::new(),
-                normals: None,
-                colors: None,
-                indices: None,
-                uvs: None,
-                hasData: false,
-            };
+
+    let mut cleaned: Vec<Vector2> = Vec::with_capacity(points.len());
+    cleaned.push(points[0]); // Start with the first point
+
+    // Remove consecutive duplicates
+    for i in 1..points.len() {
+        let current_point = points[i];
+        // Safe unwrap: cleaned always has at least one element here
+        let last_added_point = *cleaned.last().unwrap();
+
+        if (current_point.x - last_added_point.x).abs() > EPSILON ||
+           (current_point.y - last_added_point.y).abs() > EPSILON {
+            cleaned.push(current_point);
         }
-    };
-    
-    console_log!("Triangulation successful, generated {} triangles", indices_2d.len() / 3);
-    
-    // Generate the 3D vertices and indices
-    let mut vertices: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    
-    // Number of unique vertices in the 2D polygon (exterior ring)
-    let unique_points = geo_polygon.exterior().0.len() - 1; // Subtract 1 because last point duplicates first
-    
-    // Add bottom face vertices
-    for i in 0..unique_points {
-        let coord = &geo_polygon.exterior().0[i];
-        vertices.push(coord.x as f32);
-        vertices.push(coord.y as f32);
-        vertices.push(z_offset as f32);
     }
-    
-    // Add top face vertices
-    for i in 0..unique_points {
-        let coord = &geo_polygon.exterior().0[i];
-        vertices.push(coord.x as f32);
-        vertices.push(coord.y as f32);
-        vertices.push((z_offset + height) as f32);
+
+    // Check if the first and last points are duplicates *after* cleaning consecutive ones
+    if cleaned.len() > 1 {
+        let first_point = cleaned[0];
+        let last_point = *cleaned.last().unwrap();
+        if (first_point.x - last_point.x).abs() < EPSILON &&
+           (first_point.y - last_point.y).abs() < EPSILON {
+            cleaned.pop(); // Remove the last point, it's a duplicate of the first
+        }
     }
-    
-    // Add bottom face indices (as triangulated by earcutr)
-    for i in (0..indices_2d.len()).step_by(3) {
-        // Correct winding order for bottom face (viewed from outside)
-        indices.push(indices_2d[i] as u32);
-        indices.push(indices_2d[i+2] as u32);
-        indices.push(indices_2d[i+1] as u32);
+
+    // Final check: need at least 3 unique vertices for a polygon
+    if cleaned.len() < 3 {
+        console_log!("Cleaned: Polygon has less than 3 unique vertices after cleaning ({})", cleaned.len());
+        return Vec::new();
     }
-    
-    // Add top face indices (reversed winding order compared to bottom)
-    for i in (0..indices_2d.len()).step_by(3) {
-        // Correct winding order for top face (viewed from outside)
-        indices.push((indices_2d[i] + unique_points) as u32);
-        indices.push((indices_2d[i+1] + unique_points) as u32);
-        indices.push((indices_2d[i+2] + unique_points) as u32);
-    }
-    
-    // Create side walls
-    for i in 0..unique_points {
-        let next = (i + 1) % unique_points;
-        
-        let bottom_current = i as u32;
-        let bottom_next = next as u32;
-        let top_current = (i + unique_points) as u32;
-        let top_next = (next + unique_points) as u32;
-        
-        // First triangle of the quad (ensure correct winding order)
-        indices.push(bottom_current);
-        indices.push(bottom_next);
-        indices.push(top_next);
-        
-        // Second triangle of the quad (ensure correct winding order)
-        indices.push(bottom_current);
-        indices.push(top_next);
-        indices.push(top_current);
-    }
-    
-    // Generate normals
-    let normals = compute_vertex_normals(&vertices, Some(&indices));
-    
-    BufferGeometry {
-        vertices,
-        indices: Some(indices),
-        normals: Some(normals),
-        colors: None,  // Will be added later
-        uvs: None,     // Not used
-        hasData: true,
-    }
+
+    cleaned // Return the list of unique vertices
 }
 
-// Clip a 2D polygon to the bounding box
-fn clip_polygon_to_bbox(shape_points: &[Vector2], bbox: &[f64]) -> Vec<Vector2> {
-    if shape_points.len() < 3 {
-        return shape_points.to_vec();
+// --- REVISED: Clipping function using simple geometric operations ---
+fn clip_polygon_to_bbox_2d(
+    unique_shape_points: &[Vector2], // Input should be CLEANED unique vertices
+    mesh_bbox_coords: &[f64; 4], // [minX, minY, maxX, maxY] in MESH coordinates
+) -> Vec<Vector2> {
+    if unique_shape_points.len() < 3 {
+        return Vec::new(); // Cannot clip if not a polygon
     }
-    
-    // Convert bbox to mesh coordinates
-    let min_lng = bbox[0];
-    let min_lat = bbox[1];
-    let max_lng = bbox[2];
-    let max_lat = bbox[3];
-    
-    let [bbox_min_x, bbox_min_y] = transform_to_mesh_coordinates(min_lng, min_lat, bbox);
-    let [bbox_max_x, bbox_max_y] = transform_to_mesh_coordinates(max_lng, max_lat, bbox);
-    
+
     // Create a CSG square for the bbox
+    let bbox_min_x = mesh_bbox_coords[0];
+    let bbox_min_y = mesh_bbox_coords[1];
+    let bbox_max_x = mesh_bbox_coords[2];
+    let bbox_max_y = mesh_bbox_coords[3];
+    
+    let bbox_width = bbox_max_x - bbox_min_x;
+    let bbox_height = bbox_max_y - bbox_min_y;
+    let bbox_center_x = bbox_min_x + bbox_width * 0.5;
+    let bbox_center_y = bbox_min_y + bbox_height * 0.5;
+    
     let bbox_csg: CSG<()> = CSG::square(
-        (bbox_max_x - bbox_min_x) as f64, 
-        (bbox_max_y - bbox_min_y) as f64, 
+        bbox_width as f64, 
+        bbox_height as f64, 
         None
     ).translate(
-        (bbox_min_x + (bbox_max_x - bbox_min_x) / 2.0) as f64,
-        (bbox_min_y + (bbox_max_y - bbox_min_y) / 2.0) as f64,
+        bbox_center_x as f64,
+        bbox_center_y as f64,
         0.0
     );
     
-    // Create points for the input polygon - ensuring proper order
-    let points: Vec<[f64; 2]> = shape_points.iter()
+    // Create points for the input polygon
+    let points: Vec<[f64; 2]> = unique_shape_points.iter()
         .map(|p| [p.x, p.y])
         .collect();
     
-    // Debug log the points
-    console_log!("Polygon points count: {}", points.len());
-    
     // Create a CSG polygon from the input points
-    // Make sure the polygon is in the XY plane and explicitly set as 2D
     let poly_csg: CSG<()> = match CSG::polygon(&points, None) {
         csg if csg.polygons.is_empty() => {
             console_log!("Failed to create polygon from points");
-            return shape_points.to_vec(); // Return original if we can't create a CSG polygon
+            return unique_shape_points.to_vec(); // Return original if we can't create a CSG polygon
         },
         csg => csg,
     };
     
-    // Debug information
-    console_log!("Created CSG polygon with {} polygons", poly_csg.polygons.len());
-    console_log!("Bbox CSG has {} polygons", bbox_csg.polygons.len());
-    
     // Perform intersection to clip the polygon to the bbox
     let clipped_csg = poly_csg.intersection(&bbox_csg);
-    
-    // Debug information
-    console_log!("Intersection result has {} polygons", clipped_csg.polygons.len());
     
     // Extract the vertices from the clipped geometry
     let mut clipped_points = Vec::new();
@@ -632,7 +539,7 @@ fn clip_polygon_to_bbox(shape_points: &[Vector2], bbox: &[f64]) -> Vec<Vector2> 
         return Vec::new(); // Return empty vector if no geometry remains after clipping
     }
     
-    // Find the polygon with the largest area (likely the main piece)
+    // Find the polygon with the largest area
     let mut largest_poly_idx = 0;
     let mut largest_area = 0.0;
     
@@ -668,60 +575,169 @@ fn clip_polygon_to_bbox(shape_points: &[Vector2], bbox: &[f64]) -> Vec<Vector2> 
         });
     }
     
-    // Make sure vertices form a valid polygon (no duplicates, proper winding)
-    if clipped_points.len() >= 3 {
-        let mut deduplicated: Vec<Vector2> = Vec::new();
-        for point in clipped_points {
-            if deduplicated.is_empty() || 
-               ((point.x - deduplicated.last().unwrap().x).abs() > 1e-6 || 
-                (point.y - deduplicated.last().unwrap().y).abs() > 1e-6) {
-                deduplicated.push(point);
-            }
-        }
-        
-        // Make sure the polygon is closed (first point equals last point)
-        let len = deduplicated.len();
-        if len >= 3 {
-            // If first and last points are the same, that's good (closed polygon)
-            // If not, we need to close it
-            if (deduplicated[0].x - deduplicated[len-1].x).abs() > 1e-6 || 
-               (deduplicated[0].y - deduplicated[len-1].y).abs() > 1e-6 {
-                deduplicated.push(deduplicated[0]); // Close the polygon
-            }
-        }
-        
-        deduplicated
+    // Final cleaning to ensure valid polygon
+    let result = clean_polygon_footprint(&clipped_points);
+    if result.len() >= 3 {
+        result
     } else {
-        // If the clipping resulted in degenerate geometry, return the original
-        console_log!("Clipping resulted in degenerate geometry, using original");
-        shape_points.to_vec()
+        Vec::new() // Return empty if the result is invalid
+    }
+}
+
+// --- REVISED: Improved implementation of an extruded shape using earcutr ---
+fn create_extruded_shape(
+    unique_shape_points: &[Vector2], // Expects CLEANED, UNIQUE vertices
+    height: f64,
+    z_offset: f64
+) -> BufferGeometry {
+    // **Robustness Check 1: Valid Height**
+    if height < MIN_HEIGHT {
+        return BufferGeometry { vertices: Vec::new(), normals: None, colors: None, indices: None, uvs: None, hasData: false };
+    }
+
+    // **Robustness Check 2: Ensure enough unique points**
+    let unique_points_count = unique_shape_points.len();
+    if unique_points_count < 3 {
+        return BufferGeometry { vertices: Vec::new(), normals: None, colors: None, indices: None, uvs: None, hasData: false };
+    }
+
+    // 1. Prepare data for earcutr: Needs closed polygon coordinates flattened
+    // Create the closed coordinate list specifically for earcutr
+    let mut closed_coords: Vec<Coord<f64>> = unique_shape_points.iter()
+        .map(|p| Coord { x: p.x, y: p.y })
+        .collect();
+    closed_coords.push(closed_coords[0]); // Close it
+
+    let mut flat_coords: Vec<f64> = Vec::with_capacity(closed_coords.len() * 2);
+    for coord in &closed_coords {
+        flat_coords.push(coord.x);
+        flat_coords.push(coord.y);
+    }
+
+    // Define where each ring starts (only exterior ring for now)
+    let ring_starts: Vec<usize> = vec![0]; // Holes would need changes here
+
+    // **Robustness Check 3: Attempt triangulation with earcutr**
+    let indices_2d = match earcutr::earcut(&flat_coords, &ring_starts, 2) {
+        Ok(indices) => {
+            // Check if earcutr succeeded but returned no triangles (can happen for degenerate inputs)
+            if indices.is_empty() && unique_points_count >= 3 {
+                 console_log!("Warning: earcutr returned empty indices for {} unique vertices. Polygon might be degenerate (sliver, self-intersecting?). Skipping.", unique_points_count);
+                 return BufferGeometry { vertices: Vec::new(), normals: None, colors: None, indices: None, uvs: None, hasData: false };
+            }
+            indices
+        },
+        Err(err) => {
+            console_log!("Earcutr triangulation failed: {:?}. Skipping polygon.", err);
+            return BufferGeometry { vertices: Vec::new(), normals: None, colors: None, indices: None, uvs: None, hasData: false };
+        }
+    };
+
+    // If no triangles were generated (e.g., collinear points), exit early
+    if indices_2d.is_empty() {
+         return BufferGeometry { vertices: Vec::new(), normals: None, colors: None, indices: None, uvs: None, hasData: false };
+    }
+
+    // 2. Generate the 3D vertices
+    let mut vertices: Vec<f32> = Vec::with_capacity(unique_points_count * 2 * 3); // top + bottom
+    let mut indices: Vec<u32> = Vec::with_capacity(indices_2d.len() * 2 + unique_points_count * 6); // caps + sides
+
+    // Add bottom face vertices (using the unique points)
+    for point in unique_shape_points {
+        vertices.push(point.x as f32);
+        vertices.push(point.y as f32);
+        vertices.push(z_offset as f32);
+    }
+
+    // Add top face vertices (using the unique points)
+    let top_vertex_offset = unique_points_count as u32;
+    for point in unique_shape_points {
+        vertices.push(point.x as f32);
+        vertices.push(point.y as f32);
+        vertices.push((z_offset + height) as f32);
+    }
+
+    // 3. Generate indices
+
+    // Add bottom face indices (ensure Clockwise when viewed from outside/below)
+    // Earcutr outputs CCW triangles. For bottom face viewed from outside, we need CW.
+    for i in (0..indices_2d.len()).step_by(3) {
+        // Map earcutr indices (which refer to the flat_coords array positions)
+        // to our unique_shape_points indices (which are 0 to unique_points_count-1)
+        let i0 = indices_2d[i] as u32;
+        let i1 = indices_2d[i+1] as u32;
+        let i2 = indices_2d[i+2] as u32;
+
+        // Check if indices are within the valid range (paranoia check)
+        if i0 < top_vertex_offset && i1 < top_vertex_offset && i2 < top_vertex_offset {
+             indices.push(i0); // vertex 0
+             indices.push(i2); // vertex 2
+             indices.push(i1); // vertex 1 (CW order)
+        } else {
+            console_log!("Warning: Invalid index found during bottom face creation: {} {} {}", i0, i1, i2);
+        }
+    }
+
+    // Add top face indices (ensure Counter-Clockwise when viewed from outside/above)
+    // Use the same earcutr order, just offset indices to top vertices.
+    for i in (0..indices_2d.len()).step_by(3) {
+         let i0 = indices_2d[i] as u32;
+         let i1 = indices_2d[i+1] as u32;
+         let i2 = indices_2d[i+2] as u32;
+
+         if i0 < top_vertex_offset && i1 < top_vertex_offset && i2 < top_vertex_offset {
+             indices.push(i0 + top_vertex_offset); // vertex 0' (top)
+             indices.push(i1 + top_vertex_offset); // vertex 1' (top)
+             indices.push(i2 + top_vertex_offset); // vertex 2' (top) (CCW order)
+         } else {
+              console_log!("Warning: Invalid index found during top face creation: {} {} {}", i0, i1, i2);
+         }
+    }
+
+    // Create side walls (using unique_points_count)
+    for i in 0..unique_points_count {
+        let current = i as u32;
+        let next = ((i + 1) % unique_points_count) as u32; // Wrap around
+
+        let bottom_current = current;
+        let bottom_next = next;
+        let top_current = current + top_vertex_offset;
+        let top_next = next + top_vertex_offset;
+
+        // First triangle of the side quad (bottom_current, bottom_next, top_next) - CCW from outside
+        indices.push(bottom_current);
+        indices.push(bottom_next);
+        indices.push(top_next);
+
+        // Second triangle of the side quad (bottom_current, top_next, top_current) - CCW from outside
+        indices.push(bottom_current);
+        indices.push(top_next);
+        indices.push(top_current);
+    }
+
+    // 4. Generate normals (smooth normals)
+    let normals = compute_vertex_normals(&vertices, Some(&indices));
+
+    BufferGeometry {
+        vertices,
+        indices: Some(indices),
+        normals: Some(normals),
+        colors: None, // Will be added later
+        uvs: None,    // Not used
+        hasData: true,
     }
 }
 
 // The main function for creating polygon geometry
 #[wasm_bindgen]
 pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
-    console_log!("Starting create_polygon_geometry in Rust");
-    console_log!("Input JSON length: {} characters", input_json.len());
-    
-    // Log a preview of the input JSON (first 200 chars)
-    if input_json.len() > 200 {
-        console_log!("Input JSON preview: {}", &input_json[0..200]);
-    } else {
-        console_log!("Input JSON: {}", input_json);
-    }
+    console_log!("RUST: Starting create_polygon_geometry (Robust)");
     
     // Parse the input JSON
     let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
         Ok(parsed) => parsed,
         Err(e) => {
-            console_log!("JSON parse error: {}", e);
-            // Try to identify which specific field caused the error
-            if e.to_string().contains("sourceLayer") {
-                console_log!("The 'sourceLayer' field is missing or invalid in the vtDataSet");
-            } else if e.to_string().contains("vtDataSet") {
-                console_log!("The 'vtDataSet' field is missing or invalid");
-            }
+            console_log!("RUST: JSON parse error: {}", e);
             return Err(JsValue::from_str(&format!("Failed to parse input: {}", e)));
         }
     };
@@ -730,8 +746,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     let min_lat = input.bbox[1];
     let max_lng = input.bbox[2];
     let max_lat = input.bbox[3];
-    
-    console_log!("Parsed input successfully. Bbox: [{}, {}, {}, {}]", min_lng, min_lat, max_lng, max_lat);
+    let geo_bbox = input.bbox.clone(); // Keep original bbox for geo transformations
+
+    // Calculate mesh coordinate bounding box ONCE
+    let [mesh_min_x, mesh_min_y] = transform_to_mesh_coordinates(min_lng, min_lat, &geo_bbox);
+    let [mesh_max_x, mesh_max_y] = transform_to_mesh_coordinates(max_lng, max_lat, &geo_bbox);
+    let mesh_bbox: [f64; 4] = [mesh_min_x, mesh_min_y, mesh_max_x, mesh_max_y];
     
     console_log!(
         "Processing polygons for {} using bbox_key: {}",
@@ -756,14 +776,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         }
     };
     
-    // Create a clipping box for all geometries
-    let mut clip_box = Box3::new();
-    clip_box.set_from_center_and_size(
-        Vector3 { x: 0.0, y: 0.0, z: -10.0 },
-        Vector3 { x: TERRAIN_SIZE, y: TERRAIN_SIZE, z: TERRAIN_SIZE * 5.0 }
-    );
-    
-    // Calculate a dataset-wide terrain elevation offset by sampling multiple points
+    // Calculate dataset-wide terrain elevation offset by sampling multiple points
     let mut dataset_lowest_z = f64::INFINITY;
     let mut dataset_highest_z = f64::NEG_INFINITY;
     let sample_count = 10; // Number of points to sample per dataset
@@ -796,151 +809,142 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     // Process each polygon, but only if it intersects with the bbox
     let mut buffer_geometries: Vec<BufferGeometry> = Vec::new();
     
-    // Import the bbox filter module
-    use crate::bbox_filter::polygon_intersects_bbox;
-    
-    console_log!("Filtering polygons based on bbox intersection");
-    let filtered_count_before = polygons.len();
+    console_log!("Processing {} input polygons for layer {}", polygons.len(), input.vtDataSet.sourceLayer);
+    let mut processed_count = 0;
+    let mut skipped_count = 0;
     
     for (poly_index, poly) in polygons.iter().enumerate() {
-        // Filter out polygons that don't intersect with the bbox
-        if !polygon_intersects_bbox(&poly.geometry, &input.bbox) {
-            continue; // Skip this polygon as it's outside the bbox
-        }
+        let footprint_geo = &poly.geometry; // Vec<[lng, lat]>
         
-        // Get or calculate height
-        let mut height = input.vtDataSet.extrusionDepth
-            .or(poly.height)
-            .unwrap_or(dataset_highest_z - dataset_lowest_z + 0.1);
-        
-        // Apply minimum extrusion depth if specified
-        if let Some(min_extrusion_depth) = input.vtDataSet.minExtrusionDepth {
-            if height < min_extrusion_depth {
-                height = min_extrusion_depth;
-            }
-        }
-        
-        let footprint = &poly.geometry;
-        
-        if footprint.len() < 3 {
+        if footprint_geo.len() < 3 {
+            skipped_count += 1;
             continue;
         }
         
-        // Convert footprint to Vector2 points and ensure clockwise orientation
-        let mut path2d: Vec<Vector2> = footprint
-            .iter()
-            .map(|point| Vector2 { x: point[0], y: point[1] })
-            .collect();
-        
-        if !is_clockwise(&path2d) {
-            path2d.reverse();
-        }
-        
-        // Calculate terrain elevation for this specific polygon
+        // --- Convert to Mesh Coordinates & Calculate Polygon Elevation ---
+        let mut path2d_mesh: Vec<Vector2> = Vec::with_capacity(footprint_geo.len());
         let mut lowest_terrain_z = f64::INFINITY;
-        let mut highest_terrain_z = f64::NEG_INFINITY;
-        let mut mesh_coords: Vec<[f64; 2]> = Vec::new();
+        let mut polygon_contains_nan = false;
         
-        for vec2 in &path2d {
-            let lng = vec2.x;
-            let lat = vec2.y;
-            let terrain_z = sample_terrain_elevation_at_point(
-                lng,
-                lat,
-                &input.elevationGrid,
-                &input.gridSize,
-                &input.bbox,
-                input.minElevation,
-                input.maxElevation
-            );
-            lowest_terrain_z = lowest_terrain_z.min(terrain_z);
-            highest_terrain_z = highest_terrain_z.max(terrain_z);
-            mesh_coords.push(transform_to_mesh_coordinates(lng, lat, &input.bbox));
+        for point_geo in footprint_geo {
+            let lng = point_geo[0];
+            let lat = point_geo[1];
+            
+            // Basic check for invalid coordinates before processing
+            if lng.is_nan() || lat.is_nan() {
+                console_log!("RUST: Poly {}: Skipped - NaN coordinate found ({}, {})", poly_index, lng, lat);
+                polygon_contains_nan = true;
+                break;
+            }
+            
+            let [mesh_x, mesh_y] = transform_to_mesh_coordinates(lng, lat, &geo_bbox);
+            path2d_mesh.push(Vector2 { x: mesh_x, y: mesh_y });
+            
+            // Sample terrain only if needed (avoid if using dataset Z)
+            if !input.useSameZOffset {
+                let terrain_z = sample_terrain_elevation_at_point(
+                    lng, lat, &input.elevationGrid, &input.gridSize,
+                    &geo_bbox, input.minElevation, input.maxElevation
+                );
+                if terrain_z.is_nan() {
+                    console_log!("RUST: Poly {}: Skipped - NaN terrain elevation sampled at ({}, {})", poly_index, lng, lat);
+                    polygon_contains_nan = true;
+                    break;
+                }
+                lowest_terrain_z = lowest_terrain_z.min(terrain_z);
+            }
         }
         
-        // Use dataset-wide elevation if requested
-        if input.useSameZOffset {
-            lowest_terrain_z = dataset_lowest_z;
-            highest_terrain_z = dataset_highest_z;
+        if polygon_contains_nan {
+            skipped_count += 1;
+            continue;
         }
         
-        // Validate and adjust height
-        let mut validated_height = height.min(MAX_HEIGHT).max(MIN_HEIGHT);
+        // --- Clean the Mesh Polygon ---
+        let unique_mesh_points = clean_polygon_footprint(&path2d_mesh);
+        if unique_mesh_points.is_empty() {
+            skipped_count += 1;
+            continue;
+        }
         
-        // Apply adaptive scale factor if needed
+        // --- Clip the Cleaned Mesh Polygon ---
+        let clipped_mesh_points = clip_polygon_to_bbox_2d(&unique_mesh_points, &mesh_bbox);
+        if clipped_mesh_points.is_empty() {
+            skipped_count += 1;
+            continue;
+        }
+        
+        // --- Determine Height and Z Offset ---
+        let mut height = input.vtDataSet.extrusionDepth
+            .or(poly.height)
+            .unwrap_or(MIN_HEIGHT * 10.0); // Fallback height
+        
+        if let Some(min_extrusion_depth) = input.vtDataSet.minExtrusionDepth {
+            height = height.max(min_extrusion_depth);
+        }
+        
+        let mut validated_height = height.clamp(MIN_HEIGHT, MAX_HEIGHT); // Clamp between MIN/MAX
+        
         if input.vtDataSet.useAdaptiveScaleFactor.unwrap_or(false) {
             let adaptive_scale_factor = calculate_adaptive_scale_factor(
-                min_lng,
-                min_lat,
-                max_lng,
-                max_lat,
-                input.minElevation,
-                input.maxElevation
-            );
+                min_lng, min_lat, max_lng, max_lat, input.minElevation, input.maxElevation);
             validated_height *= adaptive_scale_factor;
         }
         
-        // Apply height scale factor if provided
-        if let Some(height_scale_factor) = input.vtDataSet.heightScaleFactor {
-            validated_height *= height_scale_factor;
+        if let Some(scale_factor) = input.vtDataSet.heightScaleFactor {
+            validated_height *= scale_factor;
         }
         
-        // Calculate z-offset (bottom) position
-        let z_offset = lowest_terrain_z + 
-            input.vtDataSet.zOffset.unwrap_or(0.0) - 
-            BUILDING_SUBMERGE_OFFSET;
+        // Ensure height didn't become invalid after scaling
+        validated_height = validated_height.max(MIN_HEIGHT);
         
-        // Convert mesh_coords to Vector2 for geometry creation
-        let shape_points: Vec<Vector2> = mesh_coords
-            .iter()
-            .map(|coord| Vector2 { x: coord[0], y: coord[1] })
-            .collect();
+        let z_offset = if input.useSameZOffset {
+            dataset_lowest_z // Use pre-calculated dataset minimum Z
+        } else {
+            lowest_terrain_z // Use polygon-specific minimum Z
+        } + input.vtDataSet.zOffset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
         
-        // Apply CSG clipping to the shape points using the bbox
-        let clipped_shape_points = clip_polygon_to_bbox(&shape_points, &input.bbox);
+        // --- Create Extruded Geometry ---
+        let mut geometry = create_extruded_shape(
+            &clipped_mesh_points, // Use the final clipped & cleaned points
+            validated_height,
+            z_offset
+        );
         
-        // Create the extruded geometry with the clipped points
-        let mut geometry = create_extruded_shape(&clipped_shape_points, validated_height, z_offset);
-        
-        // Add color attribute
-        let color = parse_color(&input.vtDataSet.color);
-        let mut colors = Vec::new();
-        
-        for _ in 0..(geometry.vertices.len() / 3) {
-            colors.push(color.r);
-            colors.push(color.g);
-            colors.push(color.b);
-        }
-        
-        geometry.colors = Some(colors);
-        
-        // Skip empty geometries
-        if geometry.vertices.len() > 0 {
+        if geometry.hasData {
+            // Add color attribute
+            let color = parse_color(&input.vtDataSet.color);
+            let mut colors = Vec::with_capacity(geometry.vertices.len()); // Same size as vertices
+            for _ in 0..(geometry.vertices.len() / 3) {
+                colors.push(color.r);
+                colors.push(color.g);
+                colors.push(color.b);
+            }
+            geometry.colors = Some(colors);
+            
             buffer_geometries.push(geometry);
+            processed_count += 1;
+        } else {
+            skipped_count += 1;
         }
     }
     
-    console_log!("Merging {} buffer geometries", buffer_geometries.len());
+    console_log!("RUST: Processed {} polygons successfully, skipped {}.", processed_count, skipped_count);
     
-    // If we have no geometries, return an empty one
+    // --- Merge Geometries ---
     if buffer_geometries.is_empty() {
-        let empty_geometry = BufferGeometry {
-            vertices: Vec::new(),
-            normals: None,
-            colors: None,
-            indices: None,
-            uvs: None,
-            hasData: false,
-        };
+        console_log!("RUST: No geometries generated.");
+        let empty_geometry = BufferGeometry { vertices: Vec::new(), normals: None, colors: None, indices: None, uvs: None, hasData: false };
         return Ok(serde_wasm_bindgen::to_value(&empty_geometry)?);
     }
     
-    // If we have only one geometry, return it directly
     if buffer_geometries.len() == 1 {
+        console_log!("RUST: Returning single geometry.");
         return Ok(serde_wasm_bindgen::to_value(&buffer_geometries[0])?);
     }
     
-    // Merge all geometries
+    // Merge all valid geometries
+    console_log!("RUST: Merging {} buffer geometries.", buffer_geometries.len());
     let mut merged_vertices = Vec::new();
     let mut merged_normals = Vec::new();
     let mut merged_colors = Vec::new();
@@ -948,55 +952,46 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     let mut vertex_offset = 0;
     
     for geometry in buffer_geometries {
-        // Add vertices
-        merged_vertices.extend_from_slice(&geometry.vertices);
-        
-        // Add normals if present
-        if let Some(normals) = geometry.normals {
-            merged_normals.extend_from_slice(&normals);
-        }
-        
-        // Add colors if present
-        if let Some(colors) = geometry.colors {
-            merged_colors.extend_from_slice(&colors);
-        }
-        
-        // Add indices with offset
-        if let Some(indices) = geometry.indices {
-            let offset_indices: Vec<u32> = indices.iter()
+        // Ensure all necessary buffers exist before extending
+        if geometry.hasData && geometry.indices.is_some() && geometry.normals.is_some() && geometry.colors.is_some() {
+            let current_vertex_count = (geometry.vertices.len() / 3) as u32;
+            merged_vertices.extend_from_slice(&geometry.vertices);
+            merged_normals.extend_from_slice(geometry.normals.as_ref().unwrap());
+            merged_colors.extend_from_slice(geometry.colors.as_ref().unwrap());
+            
+            let offset_indices: Vec<u32> = geometry.indices.unwrap().iter()
                 .map(|&idx| idx + vertex_offset)
                 .collect();
             merged_indices.extend_from_slice(&offset_indices);
+            
+            vertex_offset += current_vertex_count;
+        } else {
+            console_log!("RUST: Warning - Skipping geometry during merge due to missing buffers.");
         }
-        
-        // Update vertex offset for next geometry
-        vertex_offset += (geometry.vertices.len() / 3) as u32;
     }
     
-    // Create the final merged geometry
     let merged_geometry = BufferGeometry {
         vertices: merged_vertices,
-        normals: if !merged_normals.is_empty() { Some(merged_normals) } else { None },
-        colors: if !merged_colors.is_empty() { Some(merged_colors) } else { None },
-        indices: if !merged_indices.is_empty() { Some(merged_indices) } else { None },
+        normals: if merged_normals.is_empty() { None } else { Some(merged_normals) },
+        colors: if merged_colors.is_empty() { None } else { Some(merged_colors) },
+        indices: if merged_indices.is_empty() { None } else { Some(merged_indices) },
         uvs: None,
-        hasData: true,
+        hasData: vertex_offset > 0,
     };
     
     console_log!(
-        "Merged geometry created with {} vertices",
-        merged_geometry.vertices.len() / 3
+        "RUST: Merged geometry created with {} vertices, {} indices.",
+        merged_geometry.vertices.len() / 3,
+        merged_geometry.indices.as_ref().map_or(0, |v| v.len())
     );
     
-    // Attempt to serialize to JsValue with more detailed error handling
     match serde_wasm_bindgen::to_value(&merged_geometry) {
         Ok(js_value) => {
-            console_log!("Successfully serialized merged geometry to JsValue");
+            console_log!("RUST: Successfully serialized merged geometry to JsValue.");
             Ok(js_value)
         },
         Err(e) => {
-            console_log!("Failed to serialize merged geometry: {}", e);
-            // Return a more specific error message
+            console_log!("RUST: Failed to serialize merged geometry: {}", e);
             Err(JsValue::from_str(&format!("Failed to serialize merged geometry: {}", e)))
         }
     }
