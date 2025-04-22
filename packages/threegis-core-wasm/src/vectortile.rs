@@ -549,8 +549,30 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             // Fetch the tile if not cached
             let fetch_promise = fetch(&url)?;
             let fetch_result = JsFuture::from(fetch_promise).await?;
-            let data_array = Uint8Array::new(&fetch_result);
+            
+            // Debug: Check what type of data we're getting back from JS
+            console_log!("📦 WASM received fetch_result type: {:?}", js_sys::Object::get_prototype_of(&fetch_result).constructor().name());
+            
+            // Extract the raw data array - we need to access the "rawData" property
+            // since our JS helper function returns a TileFetchResponse object 
+            let raw_data_value = js_sys::Reflect::get(&fetch_result, &JsValue::from_str("rawData"))
+                .map_err(|e| {
+                    console_log!("❌ Failed to extract rawData from fetch result: {:?}", e);
+                    JsValue::from_str("Failed to extract rawData from fetch result")
+                })?;
+                
+            // Verify we actually got a valid Uint8Array from the rawData property
+            if raw_data_value.is_undefined() || raw_data_value.is_null() {
+                console_log!("❌ rawData property is undefined or null!");
+                return Err(JsValue::from_str("rawData property is undefined or null"));
+            }
+            
+            // Convert to Uint8Array and then to Rust Vec
+            let data_array = Uint8Array::new(&raw_data_value);
             let mut data_vec = data_array.to_vec();
+            
+            // Verify size after conversion
+            console_log!("📦 WASM data size after conversion: {} bytes", data_vec.len());
 
             // Check if the data is gzipped and decompress if necessary
             if data_vec.starts_with(&[0x1f, 0x8b]) { // Gzip magic number
