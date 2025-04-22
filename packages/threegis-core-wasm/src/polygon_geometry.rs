@@ -5,6 +5,11 @@ use web_sys::console;
 use std::collections::HashMap;
 use crate::console_log;
 use crate::module_state::ModuleState;
+use csgrs::csg::CSG;
+use csgrs::polygon::Polygon as CsgPolygon;
+use csgrs::vertex::Vertex as CsgVertex;
+use csgrs::plane::Plane;
+use nalgebra::{Point3, Vector3 as NVector3};
 
 // Constants ported from TypeScript
 const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
@@ -502,6 +507,118 @@ fn create_extruded_shape(shape_points: &[Vector2], height: f64, z_offset: f64) -
     }
 }
 
+// Clip a 2D polygon to the bounding box
+fn clip_polygon_to_bbox(shape_points: &[Vector2], bbox: &[f64]) -> Vec<Vector2> {
+    if shape_points.len() < 3 {
+        return shape_points.to_vec();
+    }
+    
+    // Convert bbox to mesh coordinates
+    let min_lng = bbox[0];
+    let min_lat = bbox[1];
+    let max_lng = bbox[2];
+    let max_lat = bbox[3];
+    
+    let [bbox_min_x, bbox_min_y] = transform_to_mesh_coordinates(min_lng, min_lat, bbox);
+    let [bbox_max_x, bbox_max_y] = transform_to_mesh_coordinates(max_lng, max_lat, bbox);
+    
+    // Create a CSG square for the bbox
+    let bbox_csg: CSG<()> = CSG::square(
+        (bbox_max_x - bbox_min_x) as f64, 
+        (bbox_max_y - bbox_min_y) as f64, 
+        None
+    ).translate(
+        (bbox_min_x + (bbox_max_x - bbox_min_x) / 2.0) as f64,
+        (bbox_min_y + (bbox_max_y - bbox_min_y) / 2.0) as f64,
+        0.0
+    );
+    
+    // Create points for the input polygon
+    let points: Vec<[f64; 2]> = shape_points.iter()
+        .map(|p| [p.x, p.y])
+        .collect();
+    
+    // Create a CSG polygon from the input points
+    let poly_csg = CSG::polygon(&points, None);
+    
+    // Perform intersection to clip the polygon to the bbox
+    let clipped_csg = poly_csg.intersection(&bbox_csg);
+    
+    // Extract the vertices from the clipped geometry
+    let mut clipped_points = Vec::new();
+    
+    // Handle possible case where clipping results in multiple polygons
+    if clipped_csg.polygons.is_empty() {
+        console_log!("Clipping resulted in empty geometry");
+        return Vec::new(); // Return empty vector if no geometry remains after clipping
+    }
+    
+    // Find the polygon with the largest area (likely the main piece)
+    let mut largest_poly_idx = 0;
+    let mut largest_area = 0.0;
+    
+    for (i, polygon) in clipped_csg.polygons.iter().enumerate() {
+        // Calculate approximate area using vertices
+        let mut area = 0.0;
+        let vertices = &polygon.vertices;
+        let n = vertices.len();
+        
+        if n < 3 {
+            continue; // Skip degenerate polygons
+        }
+        
+        for j in 0..n {
+            let k = (j + 1) % n;
+            area += vertices[j].pos.x * vertices[k].pos.y;
+            area -= vertices[j].pos.y * vertices[k].pos.x;
+        }
+        
+        area = (area / 2.0).abs();
+        
+        if area > largest_area {
+            largest_area = area;
+            largest_poly_idx = i;
+        }
+    }
+    
+    // Extract vertices from the largest polygon
+    for vertex in &clipped_csg.polygons[largest_poly_idx].vertices {
+        clipped_points.push(Vector2 {
+            x: vertex.pos.x,
+            y: vertex.pos.y,
+        });
+    }
+    
+    // Make sure vertices form a valid polygon (no duplicates, proper winding)
+    if clipped_points.len() >= 3 {
+        let mut deduplicated: Vec<Vector2> = Vec::new();
+        for point in clipped_points {
+            if deduplicated.is_empty() || 
+               ((point.x - deduplicated.last().unwrap().x).abs() > 1e-6 || 
+                (point.y - deduplicated.last().unwrap().y).abs() > 1e-6) {
+                deduplicated.push(point);
+            }
+        }
+        
+        // Make sure the polygon is closed (first point equals last point)
+        let len = deduplicated.len();
+        if len >= 3 {
+            // If first and last points are the same, that's good (closed polygon)
+            // If not, we need to close it
+            if (deduplicated[0].x - deduplicated[len-1].x).abs() > 1e-6 || 
+               (deduplicated[0].y - deduplicated[len-1].y).abs() > 1e-6 {
+                deduplicated.push(deduplicated[0]); // Close the polygon
+            }
+        }
+        
+        deduplicated
+    } else {
+        // If the clipping resulted in degenerate geometry, return the original
+        console_log!("Clipping resulted in degenerate geometry, using original");
+        shape_points.to_vec()
+    }
+}
+
 // The main function for creating polygon geometry
 #[wasm_bindgen]
 pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
@@ -559,13 +676,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
             input.polygons.clone()
         }
     };
-    
-    // Create a clipping box for all geometries
-    let mut clip_box = Box3::new();
-    clip_box.set_from_center_and_size(
-        Vector3 { x: 0.0, y: 0.0, z: -10.0 },
-        Vector3 { x: TERRAIN_SIZE, y: TERRAIN_SIZE, z: TERRAIN_SIZE * 5.0 }
-    );
     
     // Create a clipping box for all geometries
     let mut clip_box = Box3::new();
@@ -707,8 +817,11 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
             .map(|coord| Vector2 { x: coord[0], y: coord[1] })
             .collect();
         
-        // Create the extruded geometry
-        let mut geometry = create_extruded_shape(&shape_points, validated_height, z_offset);
+        // Apply CSG clipping to the shape points using the bbox
+        let clipped_shape_points = clip_polygon_to_bbox(&shape_points, &input.bbox);
+        
+        // Create the extruded geometry with the clipped points
+        let mut geometry = create_extruded_shape(&clipped_shape_points, validated_height, z_offset);
         
         // Add color attribute
         let color = parse_color(&input.vtDataSet.color);

@@ -25,6 +25,9 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 lazy_static = "1.4.0"
 mvt = "0.8.0"
 geozero = { version = "0.10.0", features = ["geo-types", "with-mvt"], default-features = false }
+csgrs = "0.16.0"
+uuid = { version = "1.16.0", features = ["js"] }
+nalgebra = "0.32.3"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.37"
