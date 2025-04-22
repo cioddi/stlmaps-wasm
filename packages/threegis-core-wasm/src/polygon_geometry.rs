@@ -463,15 +463,15 @@ fn create_extruded_shape(shape_points: &[Vector2], height: f64, z_offset: f64) -
     
     // Create triangles for top and bottom faces using triangle fan
     for i in 1..(point_count - 1) {
-        // Bottom face (need to reverse winding order)
+        // Bottom face (with corrected winding order for proper normals)
         indices.push(0);
-        indices.push(i as u32 + 1);
         indices.push(i as u32);
+        indices.push(i as u32 + 1);
         
-        // Top face
+        // Top face (with corrected winding order for proper normals)
         indices.push(point_count as u32);
-        indices.push(point_count as u32 + i as u32);
         indices.push(point_count as u32 + i as u32 + 1);
+        indices.push(point_count as u32 + i as u32);
     }
     
     // Create side quads
