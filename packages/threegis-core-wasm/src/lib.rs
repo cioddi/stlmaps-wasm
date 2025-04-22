@@ -22,7 +22,6 @@ mod terrain;
 mod vectortile;
 // Import our enhanced MVT parser
 mod mvt_parser;
-mod vectortile;
 // Import our geojson features module
 pub mod geojson_features;
 // Import our polygon geometry module
@@ -84,6 +83,7 @@ pub fn store_raster_tile(x: u32, y: u32, z: u32, source: &str, width: u32, heigh
         key: format!("{}/{}/{}", z, x, y),
         buffer: data.to_vec(),
         parsed_layers: None,
+        rust_parsed_mvt: None,
     };
     
     state.add_raster_tile(key_obj, tile_data);

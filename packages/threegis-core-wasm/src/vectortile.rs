@@ -22,7 +22,13 @@ pub struct TileRequest {
     pub z: u32,
 }
 
-// Input for vector tile fetching
+// Input for vector t                   
+ let geometry_type = match feature.type_ {
+                        GeomType::Point => "Point",
+                        GeomType::Linestring => "LineString",
+                        GeomType::Polygon => "Polygon",
+                        _ => continue, // Skip any other geometry types
+                    };tching
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VectortileProcessingInput {
     pub min_lng: f64,
@@ -694,7 +700,7 @@ fn enhanced_parse_mvt_data(tile_data: &[u8], tile: &TileRequest) -> Result<Parse
                     // Determine geometry type
                     let geom_type = match feature.type_ {
                         GeomType::Point => "Point",
-                        GeomType::LineString => "LineString",
+                        GeomType::Linestring => "LineString",
                         GeomType::Polygon => "Polygon",
                         GeomType::Unknown(_) => continue, // Skip unknown geometries
                     };

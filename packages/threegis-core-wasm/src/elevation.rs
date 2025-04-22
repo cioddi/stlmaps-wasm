@@ -130,6 +130,8 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
         key: format!("{}/{}/{}", z, x, y),
         buffer: pixel_data.to_vec(),
         parsed_layers: None,
+        rust_parsed_mvt: None,
+        parsed_layers: None,
     };
     
     // Update the cache

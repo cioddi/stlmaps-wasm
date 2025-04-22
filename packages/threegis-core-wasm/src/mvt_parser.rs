@@ -208,7 +208,7 @@ fn transform_geometry(
                 .collect();
             
             let interiors: Vec<_> = poly.interiors()
-                .map(|ring| {
+                .into_iter().map(|ring| {
                     let coords: Vec<_> = ring.coords()
                         .map(|c| {
                             let (lng, lat) = convert_tile_coords_to_lnglat(
@@ -263,7 +263,7 @@ fn transform_geometry(
                         .collect();
                     
                     let interiors: Vec<_> = poly.interiors()
-                        .map(|ring| {
+                        .into_iter().map(|ring| {
                             let coords: Vec<_> = ring.coords()
                                 .map(|c| {
                                     let (lng, lat) = convert_tile_coords_to_lnglat(

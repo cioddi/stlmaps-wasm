@@ -227,6 +227,7 @@ impl ModuleState {
                 key: format!("{}/{}/{}", tile_result.tile.z, tile_result.tile.x, tile_result.tile.y),
                 buffer: tile_result.data.clone(),
                 parsed_layers: None, // Will be parsed on demand
+                rust_parsed_mvt: Some(tile_result.data.clone()), // Store the raw MVT data for Rust parsing
             };
             
             // Add to our collection
