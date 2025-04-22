@@ -11,6 +11,13 @@ use js_sys::{Array, Uint8Array};
 #[allow(unused_imports)]
 use crate::console_log;
 
+// Import MVT parser types
+use crate::mvt_parser::ParsedMvt;
+use std::collections::VecDeque;
+
+// Cache size limit
+pub const CACHE_SIZE_LIMIT: usize = 100;
+
 // Define the tile data structure
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TileData {
@@ -23,7 +30,8 @@ pub struct TileData {
     pub timestamp: f64, // For cache invalidation
     pub key: String,    // For identification
     pub buffer: Vec<u8>, // Raw tile data
-    pub parsed_layers: Option<HashMap<String, Vec<crate::vectortile::Feature>>>, // Parsed vector tile layers
+    pub parsed_layers: Option<HashMap<String, Vec<crate::vectortile::Feature>>>, // Legacy parsed vector tile layers
+    pub rust_parsed_mvt: Option<Vec<u8>>, // Raw MVT data as parsed by Rust MVT parser
 }
 
 // Define a key for the tile cache
@@ -77,6 +85,12 @@ pub struct ModuleState {
     // Cache for vector tile data by bbox_key
     pub bbox_vector_tiles: HashMap<String, Vec<TileData>>,
     
+    // Cache for parsed MVT data
+    pub mvt_cache: HashMap<String, ParsedMvt>,
+    
+    // Cache keys in order of insertion for LRU cache implementation
+    pub mvt_cache_keys: VecDeque<String>,
+    
     // Configuration for cache limits
     pub max_raster_tiles: usize,
     pub max_vector_tiles: usize,
@@ -98,6 +112,8 @@ impl ModuleState {
             vector_tiles: HashMap::new(),
             elevation_grids: HashMap::new(),
             bbox_vector_tiles: HashMap::new(),
+            mvt_cache: HashMap::new(),
+            mvt_cache_keys: VecDeque::new(),
             max_raster_tiles: 100, // Default limits
             max_vector_tiles: 50,
             cache_hits: 0,

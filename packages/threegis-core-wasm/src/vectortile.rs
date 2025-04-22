@@ -6,6 +6,10 @@ use wasm_bindgen_futures::JsFuture;
 use std::collections::HashMap;
 use flate2::read::GzDecoder;
 use std::io::Read;
+use mvt::{Tile, GeomType};
+use geozero::mvt::tile;
+use geozero::mvt::decode;
+use geozero::{GeomProcessor, ToJson};
 
 use crate::module_state::{ModuleState, TileData, create_tile_key};
 use crate::{console_log, fetch};
@@ -517,9 +521,67 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 })?;
                 data_vec = decompressed_data;
             }
+            
+            // Parse the MVT data using our enhanced Rust MVT parser
+            let parsed_mvt = match enhanced_parse_mvt_data(&data_vec, &tile) {
+                Ok(parsed) => {
+                    console_log!("Successfully parsed MVT data with Rust parser for tile {}/{}/{}", 
+                        tile.z, tile.x, tile.y);
+                    // Log the number of layers found
+                    let layer_count = parsed.layers.len();
+                    let layer_names: Vec<String> = parsed.layers.keys().cloned().collect();
+                    console_log!("Found {} layers: {:?}", layer_count, layer_names);
+                    
+                    // Convert Rust-parsed features to the legacy format for compatibility
+                    let mut legacy_layers = HashMap::new();
+                    for (layer_name, layer) in &parsed.layers {
+                        let mut features = Vec::new();
+                        for mvt_feature in &layer.features {
+                            let geometry_type = mvt_feature.geometry_type.clone();
+                            let coordinates = match geometry_type.as_str() {
+                                "Point" => {
+                                    if !mvt_feature.geometry.is_empty() && !mvt_feature.geometry[0].is_empty() {
+                                        serde_json::to_value(mvt_feature.geometry[0][0].clone()).unwrap_or(serde_json::Value::Null)
+                                    } else {
+                                        serde_json::Value::Null
+                                    }
+                                },
+                                "LineString" => {
+                                    if !mvt_feature.geometry.is_empty() {
+                                        serde_json::to_value(mvt_feature.geometry[0].clone()).unwrap_or(serde_json::Value::Null)
+                                    } else {
+                                        serde_json::Value::Null
+                                    }
+                                },
+                                "Polygon" => {
+                                    serde_json::to_value(mvt_feature.geometry.clone()).unwrap_or(serde_json::Value::Null)
+                                },
+                                _ => serde_json::Value::Null
+                            };
+                            
+                            features.push(Feature {
+                                geometry: FeatureGeometry {
+                                    r#type: geometry_type,
+                                    coordinates
+                                },
+                                properties: serde_json::Value::Object(
+                                    serde_json::Map::from_iter(mvt_feature.properties.clone().into_iter())
+                                )
+                            });
+                        }
+                        legacy_layers.insert(layer_name.clone(), features);
+                    }
+                    
+                    Some((parsed, legacy_layers))
+                },
+                Err(e) => {
+                    console_log!("Failed to parse MVT data: {}", e);
+                    None
+                }
+            };
 
             // Create new tile data entry
-            let tile_data = TileData {
+            let mut tile_data = TileData {
                 width: 256, // Default tile size
                 height: 256,
                 x: tile.x,
@@ -529,9 +591,10 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 timestamp: Date::now(),
                 key: tile_key.clone(),
                 buffer: data_vec.clone(),
-                parsed_layers: None, // We'll parse this later when needed
+                parsed_layers: parsed_mvt.as_ref().map(|(_, legacy_layers)| legacy_layers.clone()), // Store legacy format for compatibility
+                rust_parsed_mvt: Some(data_vec.clone()), // Store the raw MVT data for Rust parsing
             };
-
+            
             // Cache the tile
             module_state_lock.set_tile_data(&tile_key, tile_data.clone());
             tile_data
@@ -553,6 +616,350 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     console_log!("🔍 DEBUG: Also storing vector tiles under standard bbox_key: {}", standard_bbox_key);
     module_state_lock.store_vector_tiles(&standard_bbox_key, &tile_results);
     
-    // Return success with the bbox_key
-    Ok(to_value(&bbox_key)?)
+    // Return tile data that has been processed by Rust
+    // We're still returning the VectorTileResult format for compatibility,
+    // but we're now parsing the MVT data in Rust instead of JavaScript
+    Ok(to_value(&tile_results)?)
+}
+
+// MVT-specific structures for Rust parsing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MvtLayer {
+    pub name: String,
+    pub features: Vec<MvtFeature>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MvtFeature {
+    pub id: Option<u64>,
+    pub properties: HashMap<String, serde_json::Value>,
+    pub geometry_type: String,
+    pub geometry: Vec<Vec<Vec<f64>>>, // Coordinates in [[[x, y],...],...]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsedMvtTile {
+    pub tile: TileRequest,
+    pub layers: HashMap<String, MvtLayer>,
+    pub raw_data: Vec<u8>,
+}
+
+// Function to detect if data is gzipped (checking for gzip magic number)
+fn is_gzipped(data: &[u8]) -> bool {
+    data.len() >= 2 && data[0] == 0x1F && data[1] == 0x8B
+}
+
+// Function to decompress gzipped data
+fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, String> {
+    if !is_gzipped(data) {
+        return Ok(data.to_vec());
+    }
+    
+    let mut decoder = GzDecoder::new(data);
+    let mut decompressed_data = Vec::new();
+    
+    decoder.read_to_end(&mut decompressed_data)
+        .map_err(|e| format!("Error decompressing gzip data: {}", e))?;
+    
+    Ok(decompressed_data)
+}
+
+// Enhanced function to parse MVT data with proper geometry decoding
+fn enhanced_parse_mvt_data(tile_data: &[u8], tile: &TileRequest) -> Result<ParsedMvtTile, String> {
+    // Decompress if the data is gzipped
+    let data = decompress_gzip(tile_data)?;
+    
+    // Create the result structure
+    let mut tile_result = ParsedMvtTile {
+        tile: tile.clone(),
+        layers: HashMap::new(),
+        raw_data: data.clone(),
+    };
+    
+    // Try to decode the MVT data using the mvt crate
+    match decode::decode_tile(&data) {
+        Ok(mvt_tile) => {
+            // Process each layer in the tile
+            for layer in mvt_tile.layers {
+                let mut mvt_layer = MvtLayer {
+                    name: layer.name.clone(),
+                    features: Vec::new(),
+                };
+                
+                // Get the layer extent (usually 4096)
+                let extent = layer.extent as u32;
+                
+                // Process each feature in the layer
+                for feature in layer.features {
+                    // Determine geometry type
+                    let geom_type = match feature.type_ {
+                        GeomType::Point => "Point",
+                        GeomType::LineString => "LineString",
+                        GeomType::Polygon => "Polygon",
+                        GeomType::Unknown(_) => continue, // Skip unknown geometries
+                    };
+                    
+                    // Convert MVT properties to standard JSON values
+                    let mut properties = HashMap::new();
+                    for (key, value) in feature.properties {
+                        // Convert the different types of MVT values to JSON values
+                        let json_value = match value {
+                            mvt::Value::String(s) => serde_json::Value::String(s),
+                            mvt::Value::Float(f) => serde_json::Value::Number(serde_json::Number::from_f64(f as f64).unwrap_or(serde_json::Number::from(0))),
+                            mvt::Value::Double(d) => serde_json::Value::Number(serde_json::Number::from_f64(d).unwrap_or(serde_json::Number::from(0))),
+                            mvt::Value::Int(i) => serde_json::Value::Number(serde_json::Number::from(i)),
+                            mvt::Value::UInt(u) => serde_json::Value::Number(serde_json::Number::from(u)),
+                            mvt::Value::SInt(s) => serde_json::Value::Number(serde_json::Number::from(s)),
+                            mvt::Value::Bool(b) => serde_json::Value::Bool(b),
+                            _ => serde_json::Value::Null,
+                        };
+                        properties.insert(key, json_value);
+                    }
+                    
+                    // Decode MVT geometry commands
+                    let decoded_geometry = decode_mvt_geometry(&feature.geometry, tile.z, extent, geom_type);
+                    
+                    let mvt_feature = MvtFeature {
+                        id: feature.id,
+                        properties,
+                        geometry_type: geom_type.to_string(),
+                        geometry: decoded_geometry,
+                    };
+                    
+                    mvt_layer.features.push(mvt_feature);
+                }
+                
+                tile_result.layers.insert(layer.name, mvt_layer);
+            }
+            
+            Ok(tile_result)
+        },
+        Err(e) => {
+            Err(format!("Error decoding MVT tile: {:?}", e))
+        }
+    }
+}
+
+// Decode MVT geometry commands to coordinate arrays
+fn decode_mvt_geometry(commands: &[u32], zoom: u32, extent: u32, geom_type: &str) -> Vec<Vec<Vec<f64>>> {
+    let mut result = Vec::new();
+    
+    match geom_type {
+        "Point" => {
+            // For points, we expect a single MoveTo command
+            if commands.len() >= 3 && (commands[0] & 0x7) == 1 {
+                let cmd_count = (commands[0] >> 3) as usize;
+                if cmd_count >= 1 && commands.len() >= 1 + 2 * cmd_count {
+                    let mut points = Vec::new();
+                    let mut cursor_x = 0;
+                    let mut cursor_y = 0;
+                    
+                    for i in 0..cmd_count {
+                        let idx = 1 + 2 * i;
+                        let param_x = commands[idx] as i32;
+                        let param_y = commands[idx + 1] as i32;
+                        
+                        // Decode zig-zag encoding
+                        let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
+                        let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
+                        
+                        cursor_x += dx;
+                        cursor_y += dy;
+                        
+                        // Convert to lng/lat
+                        let (lng, lat) = tile_to_lng_lat(
+                            cursor_x as f64, 
+                            cursor_y as f64, 
+                            zoom,
+                            extent
+                        );
+                        
+                        points.push(vec![lng, lat]);
+                    }
+                    
+                    if !points.is_empty() {
+                        result.push(points);
+                    }
+                }
+            }
+        },
+        "LineString" => {
+            // For LineString, we expect a MoveTo followed by LineTo commands
+            // This is a simplified implementation
+            let mut current_line = Vec::new();
+            let mut cursor_x = 0;
+            let mut cursor_y = 0;
+            let mut i = 0;
+            
+            while i < commands.len() {
+                let cmd_id = commands[i] & 0x7;
+                let cmd_count = (commands[i] >> 3) as usize;
+                i += 1;
+                
+                if cmd_id == 1 { // MoveTo
+                    // Start a new line if we have an existing one
+                    if !current_line.is_empty() {
+                        result.push(current_line);
+                        current_line = Vec::new();
+                    }
+                    
+                    // Process MoveTo point
+                    if i + 1 < commands.len() {
+                        let param_x = commands[i] as i32;
+                        let param_y = commands[i + 1] as i32;
+                        
+                        // Decode zig-zag encoding
+                        let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
+                        let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
+                        
+                        cursor_x += dx;
+                        cursor_y += dy;
+                        
+                        // Convert to lng/lat
+                        let (lng, lat) = tile_to_lng_lat(
+                            cursor_x as f64, 
+                            cursor_y as f64, 
+                            zoom,
+                            extent
+                        );
+                        
+                        current_line.push(vec![lng, lat]);
+                        i += 2;
+                    }
+                } else if cmd_id == 2 { // LineTo
+                    for _ in 0..cmd_count {
+                        if i + 1 < commands.len() {
+                            let param_x = commands[i] as i32;
+                            let param_y = commands[i + 1] as i32;
+                            
+                            // Decode zig-zag encoding
+                            let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
+                            let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
+                            
+                            cursor_x += dx;
+                            cursor_y += dy;
+                            
+                            // Convert to lng/lat
+                            let (lng, lat) = tile_to_lng_lat(
+                                cursor_x as f64, 
+                                cursor_y as f64, 
+                                zoom,
+                                extent
+                            );
+                            
+                            current_line.push(vec![lng, lat]);
+                            i += 2;
+                        }
+                    }
+                } else if cmd_id == 7 { // ClosePath
+                    // For ClosePath, we don't have parameters but we need to close the line
+                    // by adding the first point again
+                    if !current_line.is_empty() {
+                        current_line.push(current_line[0].clone());
+                    }
+                } else {
+                    // Unknown command, skip
+                    i += 2 * cmd_count;
+                }
+            }
+            
+            // Add the last line if we have one
+            if !current_line.is_empty() {
+                result.push(current_line);
+            }
+        },
+        "Polygon" => {
+            // Polygons are similar to LineStrings but with more complex rules
+            // This is a simplified implementation
+            let mut rings = Vec::new();
+            let mut current_ring = Vec::new();
+            let mut cursor_x = 0;
+            let mut cursor_y = 0;
+            let mut i = 0;
+            
+            while i < commands.len() {
+                let cmd_id = commands[i] & 0x7;
+                let cmd_count = (commands[i] >> 3) as usize;
+                i += 1;
+                
+                if cmd_id == 1 { // MoveTo
+                    // Start a new ring if we have an existing one
+                    if !current_ring.is_empty() {
+                        rings.push(current_ring);
+                        current_ring = Vec::new();
+                    }
+                    
+                    // Process MoveTo point
+                    if i + 1 < commands.len() {
+                        let param_x = commands[i] as i32;
+                        let param_y = commands[i + 1] as i32;
+                        
+                        // Decode zig-zag encoding
+                        let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
+                        let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
+                        
+                        cursor_x += dx;
+                        cursor_y += dy;
+                        
+                        // Convert to lng/lat
+                        let (lng, lat) = tile_to_lng_lat(
+                            cursor_x as f64, 
+                            cursor_y as f64, 
+                            zoom,
+                            extent
+                        );
+                        
+                        current_ring.push(vec![lng, lat]);
+                        i += 2;
+                    }
+                } else if cmd_id == 2 { // LineTo
+                    for _ in 0..cmd_count {
+                        if i + 1 < commands.len() {
+                            let param_x = commands[i] as i32;
+                            let param_y = commands[i + 1] as i32;
+                            
+                            // Decode zig-zag encoding
+                            let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
+                            let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
+                            
+                            cursor_x += dx;
+                            cursor_y += dy;
+                            
+                            // Convert to lng/lat
+                            let (lng, lat) = tile_to_lng_lat(
+                                cursor_x as f64, 
+                                cursor_y as f64, 
+                                zoom,
+                                extent
+                            );
+                            
+                            current_ring.push(vec![lng, lat]);
+                            i += 2;
+                        }
+                    }
+                } else if cmd_id == 7 { // ClosePath
+                    // For ClosePath in polygons, we add the first point again to close the ring
+                    if !current_ring.is_empty() {
+                        current_ring.push(current_ring[0].clone());
+                    }
+                } else {
+                    // Unknown command, skip
+                    i += 2 * cmd_count;
+                }
+            }
+            
+            // Add the last ring if we have one
+            if !current_ring.is_empty() {
+                rings.push(current_ring);
+            }
+            
+            // Add all rings to the result
+            for ring in rings {
+                result.push(ring);
+            }
+        },
+        _ => {}
+    }
+    
+    result
 }

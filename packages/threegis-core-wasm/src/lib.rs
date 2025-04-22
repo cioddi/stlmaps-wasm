@@ -20,6 +20,9 @@ mod cache_manager;
 mod terrain;
 // Import our vector tile processing module
 mod vectortile;
+// Import our enhanced MVT parser
+mod mvt_parser;
+mod vectortile;
 // Import our geojson features module
 pub mod geojson_features;
 // Import our polygon geometry module

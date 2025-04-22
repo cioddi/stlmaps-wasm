@@ -29,7 +29,8 @@ export {
   parseVectorTile,
   calculateTileCount,
   lngLatToTile,
-  getTilesForBbox
+  getTilesForBbox,
+  extractFeaturesFromLayer
 } from './sources/VectortileSource';
 
 // Re-export vector tile types
