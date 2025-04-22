@@ -293,5 +293,8 @@ pub fn free_cache_group(group_id: &str) -> Result<(), JsValue> {
 // Export the polygon geometry creation function
 #[wasm_bindgen]
 pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
-    polygon_geometry::create_polygon_geometry(input_json)
+    match polygon_geometry::create_polygon_geometry(input_json) {
+        Ok(json_string) => Ok(JsValue::from_str(&json_string)),
+        Err(err_string) => Err(JsValue::from_str(&err_string)),
+    }
 }

@@ -596,7 +596,7 @@ fn clip_polygon_to_bbox_2d(
     let bbox_center_y = bbox_min_y + bbox_height * 0.5;
     
     // Try to create a CSG square for the bbox - this should always succeed
-    let bbox_csg: CSG<f64> = CSG::square(
+    let bbox_csg = CSG::square(
         bbox_width as f64, 
         bbox_height as f64, 
         None
@@ -804,8 +804,7 @@ fn create_extruded_shape(
                 console_log!("Earcutr returned empty indices, using simple triangulation");
                 simple_triangulate_polygon(unique_shape_points)
             } else {
-                // Convert from usize to u32
-                indices.into_iter().map(|i| i as u32).collect()
+                indices
             }
         },
         Err(err) => {
@@ -892,31 +891,5 @@ fn create_extruded_shape(
         colors: None,
         uvs: None,
         hasData: true,
-    }
-}
-
-// Process the polygon geometry input and produce a buffer geometry output
-pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
-    // Parse the input JSON
-    let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
-        Ok(data) => data,
-        Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
-    };
-    
-    // Process the geometry and create buffer geometry
-    // This is a placeholder implementation - expand as needed
-    let buffer_geometry = BufferGeometry {
-        vertices: Vec::new(),
-        normals: None,
-        colors: None,
-        indices: None,
-        uvs: None,
-        hasData: false,
-    };
-    
-    // Serialize the output to JSON
-    match serde_json::to_string(&buffer_geometry) {
-        Ok(json) => Ok(json),
-        Err(e) => Err(format!("Failed to serialize output: {}", e)),
     }
 }
