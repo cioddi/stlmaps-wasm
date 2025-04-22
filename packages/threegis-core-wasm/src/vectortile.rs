@@ -564,6 +564,11 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 data_vec = decompressed_data;
             }
             
+            // Debug: Print first few bytes to check data format
+            let debug_bytes = if data_vec.len() > 20 { &data_vec[0..20] } else { &data_vec };
+            console_log!("🔍 DEBUG: First bytes of tile data (hex): {:02X?}", debug_bytes);
+            console_log!("🔍 DEBUG: Total tile data size: {} bytes", data_vec.len());
+            
             // Parse the MVT data using our enhanced Rust MVT parser
             let parsed_mvt = match enhanced_parse_mvt_data(&data_vec, &tile) {
                 Ok(parsed) => {
@@ -622,6 +627,17 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 }
             };
 
+            // Debug: Print detailed info about the data being stored
+            console_log!("🔍 WASM DEBUG: Raw data length received from JS: {} bytes", data_vec.len());
+            
+            // Create a hex dump of a small sample of the raw data
+            let hex_sample = if data_vec.len() > 32 {
+                format!("{:02X?}", &data_vec[0..32])
+            } else {
+                format!("{:02X?}", &data_vec)
+            };
+            console_log!("🔍 WASM DEBUG: Raw data sample (hex): {}", hex_sample);
+            
             // Create new tile data entry
             let tile_data = TileData {
                 width: 256, // Default tile size
@@ -703,8 +719,50 @@ fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, String> {
 
 // Enhanced function to parse MVT data with proper geometry decoding
 fn enhanced_parse_mvt_data(tile_data: &[u8], tile_request: &TileRequest) -> Result<ParsedMvtTile, String> {
+    // First, log the original data length before any processing
+    console_log!("🔍 RAW DATA: Original tile data length: {} bytes for tile {}/{}/{}", 
+        tile_data.len(), tile_request.z, tile_request.x, tile_request.y);
+    
+    // Print first 32 bytes of the raw data to verify what we're getting
+    let raw_preview = if tile_data.len() >= 32 {
+        format!("{:02X?}", &tile_data[0..32])
+    } else {
+        format!("{:02X?}", &tile_data)
+    };
+    console_log!("🔍 RAW DATA PREVIEW: First bytes: {}", raw_preview);
+    
+    // Check for common MVT/PBF patterns in the raw data
+    if tile_data.len() >= 4 {
+        console_log!("🔍 CHECKING MVT FORMAT: First few bytes in decimal: [{}, {}, {}, {}]",
+            tile_data[0], tile_data[1], tile_data[2], tile_data[3]);
+    }
+    
+    // Try to detect protobuf structure directly
+    if tile_data.len() > 10 {
+        console_log!("🔍 SCANNING FOR PROTOBUF FIELDS:");
+        for i in 0..10.min(tile_data.len()) {
+            let byte = tile_data[i];
+            let field_num = byte >> 3;
+            let wire_type = byte & 0x7;
+            
+            if field_num > 0 && field_num < 20 && wire_type <= 5 {
+                console_log!("  - Potential field at position {}: field_num={}, wire_type={}", i, field_num, wire_type);
+            }
+        }
+    }
+    
     // Decompress if the data is gzipped
     let data = decompress_gzip(tile_data)?;
+    
+    // Log if decompression changed the data size
+    if data.len() != tile_data.len() {
+        console_log!("🔍 DECOMPRESSION: Data was compressed. Original size: {} bytes, Decompressed size: {} bytes", 
+            tile_data.len(), data.len());
+    }
+    
+    // Debug: Log raw data details
+    console_log!("🔍 DEBUG: Starting MVT parsing for tile {}/{}/{} (data size: {} bytes)", 
+        tile_request.z, tile_request.x, tile_request.y, data.len());
     
     // Create the result structure
     let mut tile_result = ParsedMvtTile {
@@ -713,12 +771,57 @@ fn enhanced_parse_mvt_data(tile_data: &[u8], tile_request: &TileRequest) -> Resu
         raw_data: data.clone(), // Store decompressed data if needed later
     };
     
+    // Show first 32 bytes for debugging
+    let preview = if data.len() >= 32 {
+        format!("{:02X?}", &data[0..32])
+    } else {
+        format!("{:02X?}", &data)
+    };
+    console_log!("🔍 DEBUG: MVT data preview: {}", preview);
+    
     // Try to decode the MVT data using the Message trait implementation
     match Tile::decode(&*data) {
         Ok(mvt_tile) => {
+            console_log!("✅ Successfully decoded MVT data using Tile::decode");
+            console_log!("📊 MVT contains {} layers", mvt_tile.layers.len());
+            
+            // If no layers found, this could indicate a potential issue with the data format
+            if mvt_tile.layers.is_empty() {
+                console_log!("⚠️ WARNING: No layers found in the decoded MVT data. This might indicate:");
+                console_log!("   1. The tile is empty (valid but contains no data)");
+                console_log!("   2. Data format mismatch (not a standard MVT)");
+                console_log!("   3. Decoder issue with this particular tile format");
+                
+                // Let's try an alternate approach: attempt to detect the protobuf structure manually
+                // This is a basic check to see if the data at least looks like a protobuf message
+                if data.len() > 2 {
+                    console_log!("🔍 Performing basic protobuf structure check:");
+                    let mut offset = 0;
+                    while offset < data.len() - 1 {
+                        if offset >= 100 {
+                            console_log!("   Checked first 100 bytes, stopping manual inspection");
+                            break;
+                        }
+                        
+                        let tag_and_type = data[offset];
+                        let field_number = tag_and_type >> 3;
+                        let wire_type = tag_and_type & 0x7;
+                        
+                        if field_number > 0 && field_number < 20 && wire_type <= 5 {
+                            console_log!("   Found potential protobuf field: number={}, wire_type={} at offset={}", 
+                                field_number, wire_type, offset);
+                        }
+                        offset += 1;
+                    }
+                }
+            }
+            
             // Process each layer in the tile
             for layer in mvt_tile.layers {
-                 let mut mvt_layer = MvtLayer {
+                console_log!("  - Layer: '{}' with {} features, extent: {}", 
+                    layer.name, layer.features.len(), layer.extent.unwrap_or(4096));
+                
+                let mut mvt_layer = MvtLayer {
                     name: layer.name.clone(),
                     features: Vec::new(),
                 };
