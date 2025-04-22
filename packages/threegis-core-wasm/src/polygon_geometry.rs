@@ -604,10 +604,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         dataset_highest_z
     );
     
-    // Process each polygon
+    // Process each polygon, but only if it intersects with the bbox
     let mut buffer_geometries: Vec<BufferGeometry> = Vec::new();
     
+    // Import the bbox filter module
+    use crate::bbox_filter::polygon_intersects_bbox;
+    
+    console_log!("Filtering polygons based on bbox intersection");
+    let filtered_count_before = polygons.len();
+    
     for (poly_index, poly) in polygons.iter().enumerate() {
+        // Filter out polygons that don't intersect with the bbox
+        if !polygon_intersects_bbox(&poly.geometry, &input.bbox) {
+            continue; // Skip this polygon as it's outside the bbox
+        }
+        
         // Get or calculate height
         let mut height = input.vtDataSet.extrusionDepth
             .or(poly.height)

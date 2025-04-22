@@ -26,6 +26,8 @@ mod mvt_parser;
 pub mod geojson_features;
 // Import our polygon geometry module
 mod polygon_geometry;
+// Import our bbox filter module
+mod bbox_filter;
 
 use module_state::{ModuleState, TileData, create_tile_key};
 use models::{CacheStats, RustResponse};
