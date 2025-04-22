@@ -74,8 +74,10 @@ pub fn process_pixel_to_elevation(r: u8, g: u8, b: u8) -> f64 {
 // Fetch a raster tile using JavaScript fetch helper
 pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsValue> {
     // Construct the appropriate URL for elevation data
-    // Using Mapbox Terrain-RGB v2 format
-    let url = format!("https://api.mapbox.com/v4/mapbox.terrain-rgb/{}/{}/{}.pngraw?access_token=pk.eyJ1IjoidG9iaWFzb2thZmYiLCJhIjoiY2xtdHRhOW9vMDVvaDJqbzI3aDlxZGR6NyJ9.QVnAlQR7pJ5MGLyXyyNCYg", z, x, y);
+    // Using Mapbox Terrain-RGB v2 format (WebP format)
+    let url = format!("https://wms.wheregroup.com/dem_tileserver/raster_dem/{}/{}/{}.webp", z, x, y);
+    
+    console_log!("Fetching WebP elevation data from: {}", url);
     
     // Call the JavaScript helper to fetch the tile
     let promise_result = fetch(&url);

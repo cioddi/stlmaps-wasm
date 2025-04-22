@@ -493,7 +493,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         } else {
             // Construct the appropriate URL for vector tiles
             // Using Mapbox Vector Tile format
-            let url = format!("https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/{}/{}/{}.mvt?access_token=pk.eyJ1IjoidG9iaWFzb2thZmYiLCJhIjoiY2xtdHRhOW9vMDVvaDJqbzI3aDlxZGR6NyJ9.QVnAlQR7pJ5MGLyXyyNCYg", tile.z, tile.x, tile.y);
+            let url = format!("https://wms.wheregroup.com/tileserver/tile/world-0-14/{}/{}/{}.pbf", tile.z, tile.x, tile.y);
             
             // Fetch the tile if not cached
             let fetch_promise = fetch(&url)?;
