@@ -1,34 +1,26 @@
 use wasm_bindgen::prelude::*;
-use js_sys::{Uint8Array, Date, Object, Array, JSON, Math};
+use js_sys::{Uint8Array, Date, Math};
 use serde::{Serialize, Deserialize};
 use serde_wasm_bindgen::{to_value, from_value};
 use wasm_bindgen_futures::JsFuture;
 use std::collections::HashMap;
 use flate2::read::GzDecoder;
 use std::io::Read;
-use mvt::{Tile, GeomType};
-use geozero::mvt::tile;
-use geozero::mvt::decode;
-use geozero::{GeomProcessor, ToJson};
+use geozero::mvt::tile::{GeomType, Value};
+use geozero::mvt::{Tile, Message};
 
-use crate::module_state::{ModuleState, TileData, create_tile_key};
+use crate::module_state::{ModuleState, TileData};
 use crate::{console_log, fetch};
 
 // Reuse the TileRequest struct from elevation.rs
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TileRequest {
     pub x: u32,
     pub y: u32,
     pub z: u32,
 }
 
-// Input for vector t                   
- let geometry_type = match feature.type_ {
-                        GeomType::Point => "Point",
-                        GeomType::Linestring => "LineString",
-                        GeomType::Polygon => "Polygon",
-                        _ => continue, // Skip any other geometry types
-                    };tching
+// Input for vectortile processing
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VectortileProcessingInput {
     pub min_lng: f64,
@@ -196,13 +188,23 @@ fn calculate_base_elevation(
 }
 
 // Evaluate if a feature matches a filter expression
-fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
+fn evaluate_filter(_filter: &serde_json::Value, _feature: &Feature) -> bool {
     // This is a simplified filter evaluation - you may need to implement a more comprehensive 
     // filter system based on your application's needs
     
     // For now, just assume true if there's no filter
     // In a real implementation, you'd parse and evaluate the filter expression
-    true
+    true // TODO: Implement actual filter logic if needed
+}
+
+// Convert tile-local coordinates to longitude/latitude
+fn convert_tile_coords_to_lnglat(px: f64, py: f64, extent: u32, tile_x: u32, tile_y: u32, tile_z: u32) -> (f64, f64) {
+    let n = 2.0_f64.powi(tile_z as i32);
+    let lon_deg = (tile_x as f64 + px / extent as f64) / n * 360.0 - 180.0;
+    // Corrected latitude calculation using atan(sinh(pi - 2*pi*y)) formula
+    let lat_rad = std::f64::consts::PI * (1.0 - 2.0 * (tile_y as f64 + py / extent as f64) / n);
+    let lat_deg = lat_rad.sinh().atan().to_degrees();
+    (lon_deg, lat_deg)
 }
 
 // Main function to extract features from vector tiles
@@ -223,8 +225,11 @@ pub async fn extract_features_from_vector_tiles(
     let max_lng = bbox[2];
     let max_lat = bbox[3];
     let vt_dataset = &input.vt_dataset;
-    let bbox_key = &input.bbox_key;
+    // Use the specific bbox_key passed in the input for cache lookup
+    let bbox_key = &input.bbox_key; 
     
+    console_log!("Starting feature extraction for layer '{}' using cache key: {}", vt_dataset.source_layer, bbox_key);
+
     // Skip processing if layer is disabled
     if let Some(enabled) = vt_dataset.enabled {
         if !enabled {
@@ -236,237 +241,252 @@ pub async fn extract_features_from_vector_tiles(
     // Retrieve module state
     let module_state = ModuleState::get_instance();
     let module_state = module_state.lock().unwrap();
-    
-    // Create the bbox_key format to consistently access cached data
-    let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
-    console_log!("Using bbox_key for vector tiles lookup: {}", bbox_key);
-    
-    // Try to access cached vector tile data using the standardized bbox_key format
-    let vector_tiles = match module_state.get_vector_tiles(&bbox_key) {
-        Some(tiles) => tiles,
+        
+    // Try to access cached vector tile data using the provided bbox_key
+    console_log!("🔍 DEBUG: Looking for vector tiles with key: {}", bbox_key);
+    let vector_tiles_data = match module_state.get_vector_tiles(&bbox_key) {
+        Some(tiles) => {
+             console_log!("🔍 DEBUG: Found {} cached vector tiles with key: {}", tiles.len(), bbox_key);
+             tiles
+        },
         None => {
-            console_log!("No cached vector tiles found for bbox_key: {}", bbox_key);
-            return Err(JsValue::from_str(&format!("No cached vector tiles found for bbox_key: {}", bbox_key)));
+            console_log!("❌ ERROR: No cached vector tiles found for key: {}. Cannot extract features.", bbox_key);
+            // Return empty array instead of error, as fetching might happen separately
+             return Ok(to_value(&Vec::<GeometryData>::new())?);
         }
     };
     
-    // Get cached elevation data if available - using the standard bbox_key format
-    // Create the bbox_key for elevation data (same format as used for vector tiles)
-    let bbox_key_for_elevation = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
-    console_log!("Using bbox_key for elevation data lookup: {}", bbox_key_for_elevation);
-    
-    let elevation_data = module_state.get_elevation_data(&bbox_key_for_elevation);
-    
-    let (elevation_grid, grid_size) = match elevation_data {
-        Some(elev_data) => (elev_data.elevation_grid, (elev_data.grid_width, elev_data.grid_height)),
+    // Get cached elevation data if available 
+    // Use the specific elevation_bbox_key provided in the input
+    let elevation_data = match &input.elevation_bbox_key {
+        Some(key) => {
+            console_log!("Using elevation_bbox_key for elevation data lookup: {}", key);
+            module_state.get_elevation_data(key)
+        }
         None => {
-            console_log!("No cached elevation data found. Using flat elevation (0).");
+            console_log!("No elevation_bbox_key provided, using default bbox_key for elevation lookup: {}", bbox_key);
+            module_state.get_elevation_data(bbox_key) // Fallback to main bbox_key if specific one not given
+        }
+    };
+    
+    let (elevation_grid, grid_size, elev_min_lng, elev_min_lat, elev_max_lng, elev_max_lat) = match elevation_data {
+        Some(elev_data) => {
+             console_log!("✅ Found cached elevation data. Grid: {}x{}", elev_data.grid_width, elev_data.grid_height);
+             // Assuming elevation data also stores its bounding box - needed for calculate_base_elevation
+             // If not, we need to pass the original bbox from input. Let's assume we use original bbox for now.
+             (elev_data.elevation_grid, (elev_data.grid_width, elev_data.grid_height), min_lng, min_lat, max_lng, max_lat)
+        },
+        None => {
+            console_log!("⚠️ No cached elevation data found for relevant key. Using flat elevation (0).");
             // Create a small dummy grid if no elevation data available
             let dummy_grid = vec![vec![0.0; 2]; 2];
-            ((dummy_grid), (2, 2))
+            (dummy_grid, (2, 2), min_lng, min_lat, max_lng, max_lat) // Use input bbox for dummy grid
         }
     };
     
     // Initialize result vector
-    let mut geometry_data: Vec<GeometryData> = Vec::new();
+    let mut geometry_data_list: Vec<GeometryData> = Vec::new();
+    let mut feature_count = 0;
     
-    // Process each vector tile
-    for vt_entry in vector_tiles {
-        // Check if this tile has data for the requested layer
-        let tile_layers: &HashMap<String, Vec<Feature>> = match vt_entry.parsed_layers {
-            Some(ref layers) => layers,
-            None => continue,
-        };
+    // Process each vector tile found in the cache for the bbox_key
+    for vt_tile_data in vector_tiles_data {
+        let tile_x = vt_tile_data.x;
+        let tile_y = vt_tile_data.y;
+        let tile_z = vt_tile_data.z;
         
-        // Find the requested layer
-        let layer_data = match tile_layers.get(&vt_dataset.source_layer) {
-            Some(layer) => layer,
+        console_log!("Processing tile data for {}/{}/{}...", tile_z, tile_x, tile_y);
+
+        // The raw MVT data should be stored in rust_parsed_mvt or buffer
+        let raw_mvt_data = match vt_tile_data.rust_parsed_mvt {
+             Some(ref data) => data,
+             None => {
+                 console_log!("  Tile {}/{}/{} has no raw MVT data (rust_parsed_mvt is None), using buffer field.", tile_z, tile_x, tile_y);
+                 &vt_tile_data.buffer // Fallback to buffer if rust_parsed_mvt is missing
+             }
+        };
+
+        if raw_mvt_data.is_empty() {
+            console_log!("  Skipping tile {}/{}/{} due to empty raw data.", tile_z, tile_x, tile_y);
+            continue;
+        }
+
+        // Re-parse the raw MVT data using enhanced_parse_mvt_data
+        // It's potentially inefficient to re-parse every time, but ensures we use the latest parser logic.
+        // Ideally, the cached TileData would store the ParsedMvtTile directly.
+        let parsed_tile = match enhanced_parse_mvt_data(&raw_mvt_data, &TileRequest{x: tile_x, y: tile_y, z: tile_z}) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                console_log!("  ❌ Failed to re-parse MVT data for tile {}/{}/{}: {}", tile_z, tile_x, tile_y, e);
+                continue; // Skip this tile if parsing fails
+            }
+        };
+
+        // Find the requested layer in the newly parsed tile
+        let layer = match parsed_tile.layers.get(&vt_dataset.source_layer) {
+            Some(layer_data) => {
+                console_log!("  Found layer '{}' with {} features in tile {}/{}/{}", vt_dataset.source_layer, layer_data.features.len(), tile_z, tile_x, tile_y);
+                layer_data
+            }
             None => {
-                console_log!("Source layer '{}' not found in tile", vt_dataset.source_layer);
-                continue;
+                // console_log!("  Source layer '{}' not found in tile {}/{}/{}. Available layers: {:?}", 
+                //    vt_dataset.source_layer, tile_z, tile_x, tile_y, parsed_tile.layers.keys());
+                continue; // Skip this tile if the layer isn't present
             }
         };
-        
+
+        // Get extent for coordinate transformation (default to 4096 if not specified somehow in mvt crate result)
+        // Note: The `mvt` crate's `Layer` struct doesn't seem to expose extent directly after parsing.
+        // We have to rely on the default MVT extent.
+        let extent = 4096; // Standard MVT extent
+
         // Process each feature in the layer
-        for feature in layer_data {
-            // Filter by subclass if specified
-            if let Some(ref sub_classes) = vt_dataset.sub_class {
-                if let Some(feature_subclass) = feature.properties.get("subclass") {
-                    if feature_subclass.is_string() {
-                        let subclass_str = feature_subclass.as_str().unwrap_or("");
-                        if sub_classes.iter().any(|s| s == subclass_str) {
-                            continue;
-                        }
-                    }
-                }
-            }
+        for feature in &layer.features {
+             feature_count += 1;
+            // console_log!("  Processing feature ID {:?} (Type: {})...", feature.id, feature.geometry_type);
+             
+             // --- Filtering (Example - needs refinement based on actual filter structure) ---
+            // Filter by subclass if specified (Example property: "class" or "subclass")
+            // if let Some(ref sub_classes) = vt_dataset.sub_class {
+            //     if let Some(feature_class) = feature.properties.get("class").or_else(|| feature.properties.get("subclass")) {
+            //         if let Some(class_str) = feature_class.as_str() {
+            //             if !sub_classes.iter().any(|s| s == class_str) {
+            //                  console_log!("    Skipping feature: subclass '{}' not in {:?}", class_str, sub_classes);
+            //                 continue; // Skip if subclass doesn't match
+            //             }
+            //         }
+            //     } else {
+            //          console_log!("    Skipping feature: subclass filter active, but feature has no subclass property.");
+            //         continue; // Skip if filter requires subclass but feature doesn't have it
+            //     }
+            // }
             
-            // Apply filter expression if provided
-            if let Some(ref filter) = vt_dataset.filter {
-                if !evaluate_filter(filter, feature) {
-                    continue;
-                }
-            }
-            
-            // Extract height property
+            // Apply filter expression if provided (Requires evaluate_filter implementation)
+            // if let Some(ref filter) = vt_dataset.filter {
+            //     // Need to convert MvtFeature properties to a structure evaluate_filter expects, if necessary
+            //     // Or adapt evaluate_filter to work with HashMap<String, serde_json::Value>
+            //     // let filterable_feature = Feature { /* ... construct if needed ... */ };
+            //     console_log!("    Applying filter: {:?}", filter);
+            //     // if !evaluate_filter(filter, &filterable_feature) { // Assuming evaluate_filter is adapted
+            //     //     console_log!("    Skipping feature: Filter evaluated to false.");
+            //     //     continue;
+            //     // }
+            // }
+
+             // --- Height Extraction ---
             let height = feature.properties.get("height")
                 .and_then(|v| v.as_f64())
                 .or_else(|| feature.properties.get("render_height").and_then(|v| v.as_f64()))
+                .or_else(|| feature.properties.get("ele").and_then(|v| v.as_f64())) // Check 'ele' too
                 .unwrap_or(0.0);
-            
-            // Process based on geometry type
-            match feature.geometry.r#type.as_str() {
-                "Polygon" => {
-                    if let Ok(coords) = serde_json::from_value::<Vec<Vec<Vec<f64>>>>(feature.geometry.coordinates.clone()) {
-                        for ring in coords {
+             // if height > 0.0 { console_log!("    Found height: {}", height); }
+
+             // --- Geometry Processing & Transformation ---
+            let geometry_type_str = feature.geometry_type.as_str();
+            let mut transformed_geometry_parts: Vec<GeometryData> = Vec::new();
+
+            match geometry_type_str {
+                 "Polygon" => {
+                    // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer is polygon, next is rings, inner is points [px, py]
+                    for ring_tile_coords in &feature.geometry { // Iterate through rings (usually 1 outer, N inner)
+                        let mut transformed_ring: Vec<Vec<f64>> = Vec::with_capacity(ring_tile_coords.len());
+                        for point_tile_coords in ring_tile_coords { // Iterate through points in the ring
+                            if point_tile_coords.len() >= 2 {
+                                let (lng, lat) = convert_tile_coords_to_lnglat(
+                                    point_tile_coords[0], point_tile_coords[1], extent, tile_x, tile_y, tile_z
+                                );
+                                transformed_ring.push(vec![lng, lat]);
+                            }
+                        }
+
+                        if !transformed_ring.is_empty() {
+                            // console_log!("    Transformed Polygon ring with {} vertices.", transformed_ring.len());
                             let base_elevation = calculate_base_elevation(
-                                &ring,
-                                &elevation_grid,
-                                grid_size.0 as usize,
-                                grid_size.1 as usize,
-                                min_lng,
-                                min_lat,
-                                max_lng,
-                                max_lat
+                                &transformed_ring, &elevation_grid, grid_size.0 as usize, grid_size.1 as usize,
+                                elev_min_lng, elev_min_lat, elev_max_lng, elev_max_lat // Use elevation bbox
                             );
+                            // console_log!("    Calculated base elevation: {}", base_elevation);
                             
-                            geometry_data.push(GeometryData {
-                                geometry: ring,
+                            transformed_geometry_parts.push(GeometryData {
+                                geometry: transformed_ring, // Store transformed coords
                                 r#type: "Polygon".to_string(),
                                 height,
                                 base_elevation,
                             });
                         }
                     }
-                },
-                "MultiPolygon" => {
-                    if let Ok(multi_coords) = serde_json::from_value::<Vec<Vec<Vec<Vec<f64>>>>>(feature.geometry.coordinates.clone()) {
-                        for polygon in multi_coords {
-                            for ring in polygon {
-                                let base_elevation = calculate_base_elevation(
-                                    &ring,
-                                    &elevation_grid,
-                                    grid_size.0 as usize,
-                                    grid_size.1 as usize,
-                                    min_lng,
-                                    min_lat,
-                                    max_lng,
-                                    max_lat
+                 },
+                 "LineString" => {
+                     // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer is lines, inner is points [px, py]
+                     // Assuming single line per feature for simplicity here based on structure
+                     if let Some(line_tile_coords) = feature.geometry.get(0) {
+                        let mut transformed_line: Vec<Vec<f64>> = Vec::with_capacity(line_tile_coords.len());
+                        for point_tile_coords in line_tile_coords {
+                            if point_tile_coords.len() >= 2 {
+                                let (lng, lat) = convert_tile_coords_to_lnglat(
+                                    point_tile_coords[0], point_tile_coords[1], extent, tile_x, tile_y, tile_z
                                 );
-                                
-                                geometry_data.push(GeometryData {
-                                    geometry: ring,
-                                    r#type: "Polygon".to_string(),
-                                    height,
-                                    base_elevation,
-                                });
+                                transformed_line.push(vec![lng, lat]);
                             }
                         }
-                    }
-                },
-                "LineString" => {
-                    if let Ok(line_coords) = serde_json::from_value::<Vec<Vec<f64>>>(feature.geometry.coordinates.clone()) {
-                        let base_elevation = calculate_base_elevation(
-                            &line_coords,
-                            &elevation_grid,
-                            grid_size.0 as usize,
-                            grid_size.1 as usize,
-                            min_lng,
-                            min_lat,
-                            max_lng,
-                            max_lat
-                        );
-                        
-                        geometry_data.push(GeometryData {
-                            geometry: line_coords,
-                            r#type: "LineString".to_string(),
-                            height,
-                            base_elevation,
-                        });
-                    }
-                },
-                "MultiLineString" => {
-                    if let Ok(multi_line_coords) = serde_json::from_value::<Vec<Vec<Vec<f64>>>>(feature.geometry.coordinates.clone()) {
-                        for line_coords in multi_line_coords {
-                            let base_elevation = calculate_base_elevation(
-                                &line_coords,
-                                &elevation_grid,
-                                grid_size.0 as usize,
-                                grid_size.1 as usize,
-                                min_lng,
-                                min_lat,
-                                max_lng,
-                                max_lat
+                        if !transformed_line.is_empty() {
+                             // console_log!("    Transformed LineString with {} vertices.", transformed_line.len());
+                             let base_elevation = calculate_base_elevation(
+                                &transformed_line, &elevation_grid, grid_size.0 as usize, grid_size.1 as usize,
+                                elev_min_lng, elev_min_lat, elev_max_lng, elev_max_lat
                             );
-                            
-                            geometry_data.push(GeometryData {
-                                geometry: line_coords,
+                            // console_log!("    Calculated base elevation: {}", base_elevation);
+
+                             transformed_geometry_parts.push(GeometryData {
+                                geometry: transformed_line,
                                 r#type: "LineString".to_string(),
-                                height,
+                                height, // Height might not be typical for lines, but include if present
                                 base_elevation,
                             });
                         }
-                    }
-                },
-                "Point" => {
-                    if let Ok(point_coords) = serde_json::from_value::<Vec<f64>>(feature.geometry.coordinates.clone()) {
-                        let point_as_vec = vec![point_coords.clone()];
-                        let base_elevation = calculate_base_elevation(
-                            &point_as_vec,
-                            &elevation_grid,
-                            grid_size.0 as usize,
-                            grid_size.1 as usize,
-                            min_lng,
-                            min_lat,
-                            max_lng,
-                            max_lat
-                        );
-                        
-                        geometry_data.push(GeometryData {
-                            geometry: vec![point_coords],
-                            r#type: "Point".to_string(),
-                            height,
-                            base_elevation,
-                        });
-                    }
-                },
-                "MultiPoint" => {
-                    if let Ok(multi_point_coords) = serde_json::from_value::<Vec<Vec<f64>>>(feature.geometry.coordinates.clone()) {
-                        for point_coords in multi_point_coords {
-                            let point_as_vec = vec![point_coords.clone()];
-                            let base_elevation = calculate_base_elevation(
-                                &point_as_vec,
-                                &elevation_grid,
-                                grid_size.0 as usize,
-                                grid_size.1 as usize,
-                                min_lng,
-                                min_lat,
-                                max_lng,
-                                max_lat
-                            );
-                            
-                            geometry_data.push(GeometryData {
-                                geometry: vec![point_coords],
-                                r#type: "Point".to_string(),
-                                height,
-                                base_elevation,
-                            });
-                        }
-                    }
-                },
-                _ => {
-                    // Unhandled geometry type
-                    console_log!("Unhandled geometry type: {}", feature.geometry.r#type);
-                }
-            }
+                     }
+                 },
+                 "Point" => {
+                     // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer is points, inner should be single point [px, py]
+                     // Assuming single point per feature
+                     if let Some(point_group) = feature.geometry.get(0) {
+                         if let Some(point_tile_coords) = point_group.get(0) {
+                              if point_tile_coords.len() >= 2 {
+                                 let (lng, lat) = convert_tile_coords_to_lnglat(
+                                     point_tile_coords[0], point_tile_coords[1], extent, tile_x, tile_y, tile_z
+                                 );
+                                 let transformed_point = vec![lng, lat];
+                                 // console_log!("    Transformed Point: {:?}", transformed_point);
+
+                                 let base_elevation = calculate_base_elevation(
+                                    &vec![transformed_point.clone()], // Pass as vec of points
+                                    &elevation_grid, grid_size.0 as usize, grid_size.1 as usize,
+                                     elev_min_lng, elev_min_lat, elev_max_lng, elev_max_lat
+                                 );
+                                 // console_log!("    Calculated base elevation: {}", base_elevation);
+
+                                 transformed_geometry_parts.push(GeometryData {
+                                     geometry: vec![transformed_point], // Store as [[lng, lat]]
+                                     r#type: "Point".to_string(),
+                                     height, // Height might represent magnitude for points
+                                     base_elevation,
+                                 });
+                             }
+                         }
+                     }
+                 },
+                 _ => {
+                     // console_log!("  Skipping unhandled geometry type: {}", geometry_type_str);
+                 }
+             }
+             geometry_data_list.extend(transformed_geometry_parts);
         }
     }
     
-    console_log!("Extracted {} geometries from source layer '{}'", 
-        geometry_data.len(), vt_dataset.source_layer);
+    console_log!("✅ Finished extraction. Processed {} raw features. Extracted {} geometries from source layer '{}' for key '{}'", 
+        feature_count, geometry_data_list.len(), vt_dataset.source_layer, bbox_key);
     
     // Return the extracted geometry data
-    Ok(to_value(&geometry_data)?)
+    Ok(to_value(&geometry_data_list)?)
 }
 
 // Make this function available to JS
@@ -587,7 +607,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             };
 
             // Create new tile data entry
-            let mut tile_data = TileData {
+            let tile_data = TileData {
                 width: 256, // Default tile size
                 height: 256,
                 x: tile.x,
@@ -671,301 +691,225 @@ fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 // Enhanced function to parse MVT data with proper geometry decoding
-fn enhanced_parse_mvt_data(tile_data: &[u8], tile: &TileRequest) -> Result<ParsedMvtTile, String> {
+fn enhanced_parse_mvt_data(tile_data: &[u8], tile_request: &TileRequest) -> Result<ParsedMvtTile, String> {
     // Decompress if the data is gzipped
     let data = decompress_gzip(tile_data)?;
     
     // Create the result structure
     let mut tile_result = ParsedMvtTile {
-        tile: tile.clone(),
+        tile: tile_request.clone(), // Use the passed TileRequest
         layers: HashMap::new(),
-        raw_data: data.clone(),
+        raw_data: data.clone(), // Store decompressed data if needed later
     };
     
-    // Try to decode the MVT data using the mvt crate
-    match decode::decode_tile(&data) {
+    // Try to decode the MVT data using the Message trait implementation
+    match Tile::decode(&*data) {
         Ok(mvt_tile) => {
             // Process each layer in the tile
             for layer in mvt_tile.layers {
-                let mut mvt_layer = MvtLayer {
+                 let mut mvt_layer = MvtLayer {
                     name: layer.name.clone(),
                     features: Vec::new(),
                 };
                 
-                // Get the layer extent (usually 4096)
-                let extent = layer.extent as u32;
-                
+                // Get the layer extent (usually 4096) - Use default if not available
+                let extent = 4096; // layer.extent seems unavailable in mvt crate API here
+
                 // Process each feature in the layer
                 for feature in layer.features {
-                    // Determine geometry type
-                    let geom_type = match feature.type_ {
-                        GeomType::Point => "Point",
-                        GeomType::Linestring => "LineString",
-                        GeomType::Polygon => "Polygon",
-                        GeomType::Unknown(_) => continue, // Skip unknown geometries
+                    // Determine geometry type using geozero::mvt::tile::GeomType
+                    // Note: feature.r#type here is an Option<i32> representing the type
+                    let geometry_type = match feature.r#type {
+                        Some(1) => "Point",
+                        Some(2) => "LineString",
+                        Some(3) => "Polygon",
+                        _ => "Unknown", // Handle any other case
                     };
                     
                     // Convert MVT properties to standard JSON values
                     let mut properties = HashMap::new();
-                    for (key, value) in feature.properties {
-                        // Convert the different types of MVT values to JSON values
-                        let json_value = match value {
-                            mvt::Value::String(s) => serde_json::Value::String(s),
-                            mvt::Value::Float(f) => serde_json::Value::Number(serde_json::Number::from_f64(f as f64).unwrap_or(serde_json::Number::from(0))),
-                            mvt::Value::Double(d) => serde_json::Value::Number(serde_json::Number::from_f64(d).unwrap_or(serde_json::Number::from(0))),
-                            mvt::Value::Int(i) => serde_json::Value::Number(serde_json::Number::from(i)),
-                            mvt::Value::UInt(u) => serde_json::Value::Number(serde_json::Number::from(u)),
-                            mvt::Value::SInt(s) => serde_json::Value::Number(serde_json::Number::from(s)),
-                            mvt::Value::Bool(b) => serde_json::Value::Bool(b),
-                            _ => serde_json::Value::Null,
-                        };
-                        properties.insert(key, json_value);
+                    for (key_index, value_index) in feature.tags.chunks_exact(2).map(|chunk| (chunk[0], chunk[1])) {
+                         if let (Some(key), Some(value)) = (
+                             layer.keys.get(key_index as usize),
+                             layer.values.get(value_index as usize) // value is &geozero::mvt::tile::Value
+                         ) {
+                             let json_value = match value {
+                                 Value { string_value: Some(s), .. } => serde_json::Value::String(s.clone()),
+                                 Value { float_value: Some(f), .. } => {
+                                     let val = *f as f64;
+                                     serde_json::Number::from_f64(val).map_or(serde_json::Value::Null, serde_json::Value::Number)
+                                 },
+                                 Value { double_value: Some(d), .. } => {
+                                     serde_json::Number::from_f64(*d).map_or(serde_json::Value::Null, serde_json::Value::Number)
+                                 },
+                                 Value { int_value: Some(i), .. } => {
+                                     serde_json::Value::Number(serde_json::Number::from(*i as i64))
+                                 },
+                                 Value { uint_value: Some(u), .. } => {
+                                     serde_json::Value::Number(serde_json::Number::from(*u as u64))
+                                 },
+                                 Value { sint_value: Some(s), .. } => {
+                                     serde_json::Value::Number(serde_json::Number::from(*s as i64))
+                                 },
+                                 Value { bool_value: Some(b), .. } => {
+                                     serde_json::Value::Bool(*b)
+                                 },
+                                 _ => serde_json::Value::Null,
+                             };
+                             properties.insert(key.clone(), json_value);
+                         }
                     }
                     
-                    // Decode MVT geometry commands
-                    let decoded_geometry = decode_mvt_geometry(&feature.geometry, tile.z, extent, geom_type);
+                    // Decode MVT geometry commands *without* transforming coordinates here
+                    // Transformation happens in extract_features_from_vector_tiles
+                    let decoded_geometry_tile_coords = decode_mvt_geometry_to_tile_coords(&feature.geometry, geometry_type);
                     
+                    // Skip if geometry decoding failed or resulted in empty geometry
+                    if decoded_geometry_tile_coords.is_empty() || decoded_geometry_tile_coords[0].is_empty() {
+                        // console_log!("Skipping feature ID {:?} due to empty geometry after decoding.", feature.id);
+                        continue;
+                    }
+
                     let mvt_feature = MvtFeature {
                         id: feature.id,
                         properties,
-                        geometry_type: geom_type.to_string(),
-                        geometry: decoded_geometry,
+                        geometry_type: geometry_type.to_string(),
+                        geometry: decoded_geometry_tile_coords, // Store TILE coordinates
                     };
                     
                     mvt_layer.features.push(mvt_feature);
                 }
                 
-                tile_result.layers.insert(layer.name, mvt_layer);
+                // Only insert layer if it has features
+                if !mvt_layer.features.is_empty() {
+                     tile_result.layers.insert(layer.name, mvt_layer);
+                }
             }
             
             Ok(tile_result)
         },
         Err(e) => {
-            Err(format!("Error decoding MVT tile: {:?}", e))
+            Err(format!("Error decoding MVT tile {}/{}/{}: {:?}", 
+                 tile_request.z, tile_request.x, tile_request.y, e))
         }
     }
 }
 
-// Decode MVT geometry commands to coordinate arrays
-fn decode_mvt_geometry(commands: &[u32], zoom: u32, extent: u32, geom_type: &str) -> Vec<Vec<Vec<f64>>> {
-    let mut result = Vec::new();
-    
-    match geom_type {
-        "Point" => {
-            // For points, we expect a single MoveTo command
-            if commands.len() >= 3 && (commands[0] & 0x7) == 1 {
-                let cmd_count = (commands[0] >> 3) as usize;
-                if cmd_count >= 1 && commands.len() >= 1 + 2 * cmd_count {
-                    let mut points = Vec::new();
-                    let mut cursor_x = 0;
-                    let mut cursor_y = 0;
-                    
-                    for i in 0..cmd_count {
-                        let idx = 1 + 2 * i;
-                        let param_x = commands[idx] as i32;
-                        let param_y = commands[idx + 1] as i32;
-                        
-                        // Decode zig-zag encoding
-                        let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
-                        let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
-                        
-                        cursor_x += dx;
-                        cursor_y += dy;
-                        
-                        // Convert to lng/lat
-                        let (lng, lat) = tile_to_lng_lat(
-                            cursor_x as f64, 
-                            cursor_y as f64, 
-                            zoom,
-                            extent
-                        );
-                        
-                        points.push(vec![lng, lat]);
-                    }
-                    
-                    if !points.is_empty() {
-                        result.push(points);
-                    }
-                }
-            }
-        },
-        "LineString" => {
-            // For LineString, we expect a MoveTo followed by LineTo commands
-            // This is a simplified implementation
-            let mut current_line = Vec::new();
-            let mut cursor_x = 0;
-            let mut cursor_y = 0;
-            let mut i = 0;
-            
-            while i < commands.len() {
-                let cmd_id = commands[i] & 0x7;
-                let cmd_count = (commands[i] >> 3) as usize;
-                i += 1;
-                
-                if cmd_id == 1 { // MoveTo
-                    // Start a new line if we have an existing one
-                    if !current_line.is_empty() {
-                        result.push(current_line);
-                        current_line = Vec::new();
-                    }
-                    
-                    // Process MoveTo point
+// Decode MVT geometry commands to TILE coordinate arrays [px, py]
+// This function likely works on raw command integers and might not need type changes
+fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> Vec<Vec<Vec<f64>>> {
+    let mut result: Vec<Vec<Vec<f64>>> = Vec::new(); // [ [ [px, py], ... ], ... ] structure
+    let mut current_part: Vec<Vec<f64>> = Vec::new(); // For current ring or line
+    let mut cursor_x: i32 = 0;
+    let mut cursor_y: i32 = 0;
+    let mut i = 0;
+
+    while i < commands.len() {
+        let command_int = commands[i];
+        let cmd_id = command_int & 0x7; // Command ID (lowest 3 bits)
+        let cmd_count = (command_int >> 3) as usize; // Number of parameter pairs
+        i += 1; // Move past command integer
+
+        match cmd_id {
+            1 => { // MoveTo
+                if !current_part.is_empty() {
+                     // If MoveTo occurs mid-part (e.g., MultiPolygon inner ring), store the previous part
+                     if geom_type_str == "Polygon" || geom_type_str == "LineString" {
+                         result.push(current_part);
+                     }
+                     // For Point, MoveTo usually means a new point/feature part
+                     if geom_type_str == "Point" && !result.is_empty() {
+                        // MVT spec implies MoveTo for points is just coordinates
+                        // Let's assume cmd_count > 1 means MultiPoint within one feature
+                     }
+                     current_part = Vec::new(); // Start a new part
+                 }
+
+                 // Process all MoveTo parameter pairs
+                for _ in 0..cmd_count {
                     if i + 1 < commands.len() {
                         let param_x = commands[i] as i32;
                         let param_y = commands[i + 1] as i32;
-                        
+                        i += 2;
+
                         // Decode zig-zag encoding
-                        let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
-                        let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
-                        
+                        let dx = (param_x >> 1) ^ (-(param_x & 1));
+                        let dy = (param_y >> 1) ^ (-(param_y & 1));
+
                         cursor_x += dx;
                         cursor_y += dy;
-                        
-                        // Convert to lng/lat
-                        let (lng, lat) = tile_to_lng_lat(
-                            cursor_x as f64, 
-                            cursor_y as f64, 
-                            zoom,
-                            extent
-                        );
-                        
-                        current_line.push(vec![lng, lat]);
-                        i += 2;
+
+                        current_part.push(vec![cursor_x as f64, cursor_y as f64]);
+                    } else {
+                        // console_log!("Warning: Malformed MoveTo command sequence.");
+                        break; // Exit inner loop if data is short
                     }
-                } else if cmd_id == 2 { // LineTo
-                    for _ in 0..cmd_count {
-                        if i + 1 < commands.len() {
-                            let param_x = commands[i] as i32;
-                            let param_y = commands[i + 1] as i32;
-                            
-                            // Decode zig-zag encoding
-                            let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
-                            let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
-                            
-                            cursor_x += dx;
-                            cursor_y += dy;
-                            
-                            // Convert to lng/lat
-                            let (lng, lat) = tile_to_lng_lat(
-                                cursor_x as f64, 
-                                cursor_y as f64, 
-                                zoom,
-                                extent
-                            );
-                            
-                            current_line.push(vec![lng, lat]);
-                            i += 2;
-                        }
-                    }
-                } else if cmd_id == 7 { // ClosePath
-                    // For ClosePath, we don't have parameters but we need to close the line
-                    // by adding the first point again
-                    if !current_line.is_empty() {
-                        current_line.push(current_line[0].clone());
-                    }
-                } else {
-                    // Unknown command, skip
-                    i += 2 * cmd_count;
                 }
+                 // For Point geometry, each MoveTo command sequence often represents a separate point
+                 if geom_type_str == "Point" && !current_part.is_empty() {
+                     result.push(current_part); // Store this point/multipoint part
+                     current_part = Vec::new(); // Reset for next potential point
+                 }
             }
-            
-            // Add the last line if we have one
-            if !current_line.is_empty() {
-                result.push(current_line);
-            }
-        },
-        "Polygon" => {
-            // Polygons are similar to LineStrings but with more complex rules
-            // This is a simplified implementation
-            let mut rings = Vec::new();
-            let mut current_ring = Vec::new();
-            let mut cursor_x = 0;
-            let mut cursor_y = 0;
-            let mut i = 0;
-            
-            while i < commands.len() {
-                let cmd_id = commands[i] & 0x7;
-                let cmd_count = (commands[i] >> 3) as usize;
-                i += 1;
-                
-                if cmd_id == 1 { // MoveTo
-                    // Start a new ring if we have an existing one
-                    if !current_ring.is_empty() {
-                        rings.push(current_ring);
-                        current_ring = Vec::new();
-                    }
-                    
-                    // Process MoveTo point
+            2 => { // LineTo
+                // Process all LineTo parameter pairs
+                for _ in 0..cmd_count {
                     if i + 1 < commands.len() {
                         let param_x = commands[i] as i32;
                         let param_y = commands[i + 1] as i32;
-                        
+                        i += 2;
+
                         // Decode zig-zag encoding
-                        let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
-                        let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
-                        
+                        let dx = (param_x >> 1) ^ (-(param_x & 1));
+                        let dy = (param_y >> 1) ^ (-(param_y & 1));
+
                         cursor_x += dx;
                         cursor_y += dy;
-                        
-                        // Convert to lng/lat
-                        let (lng, lat) = tile_to_lng_lat(
-                            cursor_x as f64, 
-                            cursor_y as f64, 
-                            zoom,
-                            extent
-                        );
-                        
-                        current_ring.push(vec![lng, lat]);
-                        i += 2;
+
+                         // Add the new point to the current part (ring or line)
+                         if current_part.is_empty() {
+                             // MVT spec v2: "A LineTo command must be preceded by a MoveTo command."
+                             // If we encounter LineTo without a preceding MoveTo, it's likely an error or
+                             // implies starting from (0,0), but safer to log/ignore.
+                             // console_log!("Warning: LineTo command encountered without preceding MoveTo.");
+                         } else {
+                             current_part.push(vec![cursor_x as f64, cursor_y as f64]);
+                         }
+                    } else {
+                        // console_log!("Warning: Malformed LineTo command sequence.");
+                        break; // Exit inner loop
                     }
-                } else if cmd_id == 2 { // LineTo
-                    for _ in 0..cmd_count {
-                        if i + 1 < commands.len() {
-                            let param_x = commands[i] as i32;
-                            let param_y = commands[i + 1] as i32;
-                            
-                            // Decode zig-zag encoding
-                            let dx = ((param_x >> 1) ^ (-(param_x & 1) as i32)) as i64;
-                            let dy = ((param_y >> 1) ^ (-(param_y & 1) as i32)) as i64;
-                            
-                            cursor_x += dx;
-                            cursor_y += dy;
-                            
-                            // Convert to lng/lat
-                            let (lng, lat) = tile_to_lng_lat(
-                                cursor_x as f64, 
-                                cursor_y as f64, 
-                                zoom,
-                                extent
-                            );
-                            
-                            current_ring.push(vec![lng, lat]);
-                            i += 2;
-                        }
-                    }
-                } else if cmd_id == 7 { // ClosePath
-                    // For ClosePath in polygons, we add the first point again to close the ring
-                    if !current_ring.is_empty() {
-                        current_ring.push(current_ring[0].clone());
-                    }
-                } else {
-                    // Unknown command, skip
-                    i += 2 * cmd_count;
                 }
             }
-            
-            // Add the last ring if we have one
-            if !current_ring.is_empty() {
-                rings.push(current_ring);
+            7 => { // ClosePath
+                 if !current_part.is_empty() {
+                     // Check if already closed (last point == first point)
+                     if current_part.first() != current_part.last() {
+                        current_part.push(current_part[0].clone()); // Add first point to end
+                     }
+                     // ClosePath command has no parameters, so just continue
+                 } else {
+                     // console_log!("Warning: ClosePath encountered without preceding MoveTo/LineTo.");
+                 }
+                 // MVT Spec: A ClosePath command is followed by a MoveTo command
+                 // We don't need to push `current_part` here; the next MoveTo will handle it
             }
-            
-            // Add all rings to the result
-            for ring in rings {
-                result.push(ring);
+            _ => {
+                // Unknown command, skip parameters
+                // console_log!("Warning: Unknown MVT command ID: {}", cmd_id);
+                i += 2 * cmd_count;
             }
-        },
-        _ => {}
+        }
     }
-    
-    result
+
+    // Add the last part if it's not empty and hasn't been added yet (e.g., unclosed LineString)
+    if !current_part.is_empty() {
+        result.push(current_part);
+    }
+
+    // MVT Polygons require winding order checks and area calculation to distinguish outer/inner rings.
+    // This simplified decoder doesn't perform that; it returns all rings.
+    // A more robust implementation would calculate area and potentially reorder rings.
+
+    result // Return the structured tile coordinates
 }

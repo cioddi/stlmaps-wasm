@@ -7,7 +7,7 @@ use serde_wasm_bindgen::to_value;
 use crate::module_state::{ModuleState, TileKey, TileData, create_tile_key};
 use crate::{console_log, fetch};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TileRequest {
     pub x: u32,
     pub y: u32,
@@ -131,7 +131,6 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
         buffer: pixel_data.to_vec(),
         parsed_layers: None,
         rust_parsed_mvt: None,
-        parsed_layers: None,
     };
     
     // Update the cache
@@ -257,7 +256,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
 			let lat = min_lat + (max_lat - min_lat) * (gy as f64) / ((grid_height - 1) as f64);
 			for gx in 0..grid_width {
 				let lng = min_lng + (max_lng - min_lng) * (gx as f64) / ((grid_width - 1) as f64);
-				// Skip grid points outside the tile’s bounds
+				// Skip grid points outside the tile's bounds
 				if lng < tile_min_lng || lng > tile_max_lng || lat < tile_min_lat || lat > tile_max_lat {
 					continue;
 				}
