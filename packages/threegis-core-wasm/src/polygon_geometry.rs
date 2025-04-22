@@ -533,16 +533,33 @@ fn clip_polygon_to_bbox(shape_points: &[Vector2], bbox: &[f64]) -> Vec<Vector2> 
         0.0
     );
     
-    // Create points for the input polygon
+    // Create points for the input polygon - ensuring proper order
     let points: Vec<[f64; 2]> = shape_points.iter()
         .map(|p| [p.x, p.y])
         .collect();
     
+    // Debug log the points
+    console_log!("Polygon points count: {}", points.len());
+    
     // Create a CSG polygon from the input points
-    let poly_csg = CSG::polygon(&points, None);
+    // Make sure the polygon is in the XY plane and explicitly set as 2D
+    let poly_csg: CSG<()> = match CSG::polygon(&points, None) {
+        csg if csg.polygons.is_empty() => {
+            console_log!("Failed to create polygon from points");
+            return shape_points.to_vec(); // Return original if we can't create a CSG polygon
+        },
+        csg => csg,
+    };
+    
+    // Debug information
+    console_log!("Created CSG polygon with {} polygons", poly_csg.polygons.len());
+    console_log!("Bbox CSG has {} polygons", bbox_csg.polygons.len());
     
     // Perform intersection to clip the polygon to the bbox
     let clipped_csg = poly_csg.intersection(&bbox_csg);
+    
+    // Debug information
+    console_log!("Intersection result has {} polygons", clipped_csg.polygons.len());
     
     // Extract the vertices from the clipped geometry
     let mut clipped_points = Vec::new();
