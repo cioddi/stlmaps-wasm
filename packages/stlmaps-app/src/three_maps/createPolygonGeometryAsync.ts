@@ -36,7 +36,7 @@ export async function createPolygonGeometryAsync({
 }): Promise<THREE.BufferGeometry> {
   try {
     // Run the geometry creation in a worker
-    const serializedGeometry = await WorkerService.runWorkerTask(
+    const parsedGeometry = await WorkerService.runWorkerTask(
       WORKER_NAME,
       PolygonWorker,
       {
@@ -52,7 +52,6 @@ export async function createPolygonGeometryAsync({
       }
     );
 
-    const parsedGeometry = JSON.parse(serializedGeometry);
     // Create a new buffer geometry from the serialized data
     if (!parsedGeometry || !parsedGeometry.vertices) {
       console.error("Worker returned invalid geometry data");

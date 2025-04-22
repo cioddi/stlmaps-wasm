@@ -99,7 +99,9 @@ pub struct GridSize {
 // Struct to match VtDataSet from TypeScript
 #[derive(Debug, Clone, Deserialize)]
 pub struct VtDataSet {
+    #[serde(default)]
     pub sourceLayer: String,
+    #[serde(default = "default_color")]
     pub color: String,
     pub extrusionDepth: Option<f64>,
     pub minExtrusionDepth: Option<f64>,
@@ -107,6 +109,11 @@ pub struct VtDataSet {
     pub useAdaptiveScaleFactor: Option<bool>,
     pub zOffset: Option<f64>,
     pub alignVerticesToTerrain: Option<bool>,
+}
+
+// Default color function for VtDataSet
+fn default_color() -> String {
+    "#4B85AA".to_string() // Default blue color for water
 }
 
 // Input for the polygon geometry processing function
@@ -499,15 +506,36 @@ fn create_extruded_shape(shape_points: &[Vector2], height: f64, z_offset: f64) -
 #[wasm_bindgen]
 pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     console_log!("Starting create_polygon_geometry in Rust");
+    console_log!("Input JSON length: {} characters", input_json.len());
+    
+    // Log a preview of the input JSON (first 200 chars)
+    if input_json.len() > 200 {
+        console_log!("Input JSON preview: {}", &input_json[0..200]);
+    } else {
+        console_log!("Input JSON: {}", input_json);
+    }
     
     // Parse the input JSON
-    let input: PolygonGeometryInput = serde_json::from_str(input_json)
-        .map_err(|e| JsValue::from_str(&format!("Failed to parse input: {}", e)))?;
+    let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            console_log!("JSON parse error: {}", e);
+            // Try to identify which specific field caused the error
+            if e.to_string().contains("sourceLayer") {
+                console_log!("The 'sourceLayer' field is missing or invalid in the vtDataSet");
+            } else if e.to_string().contains("vtDataSet") {
+                console_log!("The 'vtDataSet' field is missing or invalid");
+            }
+            return Err(JsValue::from_str(&format!("Failed to parse input: {}", e)));
+        }
+    };
     
     let min_lng = input.bbox[0];
     let min_lat = input.bbox[1];
     let max_lng = input.bbox[2];
     let max_lat = input.bbox[3];
+    
+    console_log!("Parsed input successfully. Bbox: [{}, {}, {}, {}]", min_lng, min_lat, max_lng, max_lat);
     
     console_log!(
         "Processing polygons for {} using bbox_key: {}",
@@ -757,5 +785,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         merged_geometry.vertices.len() / 3
     );
     
-    Ok(serde_wasm_bindgen::to_value(&merged_geometry)?)
+    // Attempt to serialize to JsValue with more detailed error handling
+    match serde_wasm_bindgen::to_value(&merged_geometry) {
+        Ok(js_value) => {
+            console_log!("Successfully serialized merged geometry to JsValue");
+            Ok(js_value)
+        },
+        Err(e) => {
+            console_log!("Failed to serialize merged geometry: {}", e);
+            // Return a more specific error message
+            Err(JsValue::from_str(&format!("Failed to serialize merged geometry: {}", e)))
+        }
+    }
 }

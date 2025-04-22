@@ -72,6 +72,17 @@ interface VtDataSet {
   bufferSize?: number;
 }
 
+// Helper function to convert JS VtDataSet to Rust-compatible format
+function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
+  return {
+    source_layer: jsVtDataSet.sourceLayer,
+    sub_class: jsVtDataSet.subClass ? [jsVtDataSet.subClass] : undefined,
+    enabled: jsVtDataSet.enabled,
+    buffer_size: jsVtDataSet.bufferSize,
+    // Exclude fields that Rust doesn't expect like geometry, color
+  };
+}
+
 export const GenerateMeshButton = function () {
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
     null
@@ -509,13 +520,7 @@ export const GenerateMeshButton = function () {
         // Fetch data for this layer using our new Rust/WASM implementation
         let layerData = await getWasmModule().extract_features_from_vector_tiles({
           bbox: [minLng, minLat, maxLng, maxLat],
-          vt_dataset: {
-            source_layer: currentLayer.sourceLayer,
-            sub_class: currentLayer.subClass,
-            filter: currentLayer.filter,
-            enabled: currentLayer.enabled,
-            buffer_size: currentLayer.bufferSize
-          },
+          vt_dataset: convertToRustVtDataSet(currentLayer),
           bbox_key: currentBboxHash,
           elevation_bbox_key: currentBboxHash // assuming elevation data is stored under the same ID
         });
@@ -543,6 +548,7 @@ export const GenerateMeshButton = function () {
           // Use the Rust implementation to create polygon geometry
           // This will reuse the cached features from extract_features_from_vector_tiles
           console.log(`Creating polygon geometry for ${currentLayer.sourceLayer} using Rust implementation`);
+          let layerGeometryPromise = Promise.resolve(new THREE.BufferGeometry());
           
           try {
             // Prepare the input for the Rust function
@@ -554,7 +560,7 @@ export const GenerateMeshButton = function () {
               gridSize,
               minElevation: processedMinElevation,
               maxElevation: processedMaxElevation,
-              vtDataSet: currentLayer,
+              vtDataSet: convertToRustVtDataSet(currentLayer), // Convert to format compatible with Rust
               useSameZOffset: true,
               bbox_key: currentBboxHash, // Pass the bbox key to access cached features
             };
@@ -562,8 +568,7 @@ export const GenerateMeshButton = function () {
             const serializedInput = JSON.stringify(polygonGeometryInput);
             
             // Call the Rust implementation directly
-            const serializedResult = await getWasmModule().process_polygon_geometry(serializedInput);
-            const geometryData = JSON.parse(serializedResult);
+            const geometryData = await getWasmModule().process_polygon_geometry(serializedInput);
             
             // Convert the result to a Three.js buffer geometry
             const geometry = new THREE.BufferGeometry();
@@ -603,23 +608,10 @@ export const GenerateMeshButton = function () {
             console.log(`Successfully created ${currentLayer.sourceLayer} geometry with Rust: ${geometry.attributes.position?.count || 0} vertices`);
             
             // Use the created geometry as the promise result
-            const layerGeometryPromise = Promise.resolve(geometry);
+            layerGeometryPromise = Promise.resolve(geometry);
           } catch (error) {
             console.error(`Error creating ${currentLayer.sourceLayer} geometry with Rust:`, error);
             
-            // Fall back to the JavaScript implementation if the Rust version fails
-            console.log(`Falling back to JavaScript implementation for ${currentLayer.sourceLayer}`);
-            const layerGeometryPromise = createPolygonGeometryAsync({
-              polygons: layerData as GeometryData[],
-              terrainBaseHeight: terrainSettings.baseHeight,
-              bbox: [minLng, minLat, maxLng, maxLat],
-              elevationGrid: processedElevationGrid,
-              gridSize,
-              minElevation: processedMinElevation,
-              maxElevation: processedMaxElevation,
-              vtDataSet: currentLayer,
-              useSameZOffset: true,
-            });
           }
 
           // Store the promise for later resolution
