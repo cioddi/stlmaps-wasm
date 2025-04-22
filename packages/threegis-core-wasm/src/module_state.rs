@@ -1,4 +1,3 @@
-// filepath: /home/tobi/project/stlmaps/packages/threegis-core-wasm/src/module_state.rs
 use std::collections::HashMap;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
@@ -75,6 +74,9 @@ pub struct ModuleState {
     // Cache for processed data like elevation grids
     pub elevation_grids: HashMap<String, Vec<Vec<f64>>>,
     
+    // Cache for vector tile data by bbox_key
+    pub bbox_vector_tiles: HashMap<String, Vec<TileData>>,
+    
     // Configuration for cache limits
     pub max_raster_tiles: usize,
     pub max_vector_tiles: usize,
@@ -95,6 +97,7 @@ impl ModuleState {
             raster_tiles: HashMap::new(),
             vector_tiles: HashMap::new(),
             elevation_grids: HashMap::new(),
+            bbox_vector_tiles: HashMap::new(),
             max_raster_tiles: 100, // Default limits
             max_vector_tiles: 50,
             cache_hits: 0,
@@ -186,18 +189,74 @@ impl ModuleState {
         console_log!("Storing tile with key: {}", key);
     }
     
-    // Store vector tiles for a process ID
-    pub fn store_vector_tiles(&mut self, process_id: &str, tiles: &Vec<crate::vectortile::VectorTileResult>) {
-        // In a real implementation, this would store the tiles in a HashMap keyed by the process_id
-        console_log!("Storing {} vector tiles for process_id: {}", tiles.len(), process_id);
+    // Store vector tiles for a process ID or bbox_key
+    pub fn store_vector_tiles(&mut self, key: &str, tiles: &Vec<crate::vectortile::VectorTileResult>) {
+        // Log detailed information about what we're trying to store
+        console_log!("🔍 DEBUG: store_vector_tiles called with key: {}", key);
+        console_log!("🔍 DEBUG: Storing {} vector tiles", tiles.len());
+        
+        // Actually store the tiles this time
+        let mut tile_data_vec = Vec::new();
+        
+        for tile_result in tiles {
+            // Create TileData for each tile
+            let tile_data = TileData {
+                width: 256, // Default tile size for vector tiles
+                height: 256,
+                x: tile_result.tile.x,
+                y: tile_result.tile.y,
+                z: tile_result.tile.z,
+                data: tile_result.data.clone(),
+                timestamp: js_sys::Date::now(),
+                key: format!("{}/{}/{}", tile_result.tile.z, tile_result.tile.x, tile_result.tile.y),
+                buffer: tile_result.data.clone(),
+                parsed_layers: None, // Will be parsed on demand
+            };
+            
+            // Add to our collection
+            tile_data_vec.push(tile_data);
+        }
+        
+        // Store in the HashMap using the provided key
+        if !tile_data_vec.is_empty() {
+            console_log!("🔍 DEBUG: Actually storing {} vector tiles with key: {}", 
+                        tile_data_vec.len(), key);
+            self.bbox_vector_tiles.insert(key.to_string(), tile_data_vec);
+        }
+        
+        // In a real implementation, we would also parse the vector tiles and extract layers
+        console_log!("🔍 DEBUG: Vector tiles stored successfully with key: {}", key);
     }
     
-    // Get vector tiles for a process ID
-    pub fn get_vector_tiles(&self, process_id: &str) -> Option<Vec<TileData>> {
-        // In a real implementation, this would retrieve the tiles from a HashMap
-        console_log!("Looking for vector tiles with process_id: {}", process_id);
-        // Return an empty Vec for testing
-        Some(Vec::new())
+    // Get vector tiles for a process ID or bbox_key
+    pub fn get_vector_tiles(&self, id: &str) -> Option<Vec<TileData>> {
+        // Parse the id - if it's a bbox key (contains underscores), use it directly
+        // If it's a process_id, use it to lookup the associated bbox_key
+        let lookup_key = if id.contains('_') {
+            // This is already a bbox_key in the format min_lng_min_lat_max_lng_max_lat
+            id.to_string()
+        } else {
+            // This is a process_id, need to map it to a bbox_key
+            // In a real implementation, you would have a HashMap that maps process_ids to bbox_keys
+            // For now, we'll just use the process_id directly and log the issue
+            console_log!("Warning: Using process_id directly instead of bbox_key: {}", id);
+            id.to_string()
+        };
+        
+        console_log!("🔍 DEBUG: Looking for vector tiles with key: {}", lookup_key);
+        
+        // Actually retrieve the tile data from our cache
+        match self.bbox_vector_tiles.get(&lookup_key) {
+            Some(tiles) => {
+                console_log!("🔍 DEBUG: Found {} cached vector tiles with key: {}", 
+                            tiles.len(), lookup_key);
+                Some(tiles.clone())
+            },
+            None => {
+                console_log!("🔍 DEBUG: No cached vector tiles found with key: {}", lookup_key);
+                None
+            }
+        }
     }
     
     // Get elevation data for a process ID
@@ -215,6 +274,54 @@ impl ModuleState {
             max_elevation: 0.0,
             timestamp: 0.0,
         })
+    }
+    
+    // Get cached geometry data for a specific layer and process ID
+    pub fn get_cached_geometry_data(&self, process_id: &str, source_layer: &str) -> Option<Vec<crate::polygon_geometry::GeometryData>> {
+        // Get data using the proper process_id/bbox_key format used throughout the app
+        console_log!("Looking for cached geometry data for layer: {} with process_id: {}", source_layer, process_id);
+        
+        // Try to get vector tiles for this process_id - using the same format as extract_features_from_vector_tiles
+        if let Some(vector_tiles) = self.get_vector_tiles(process_id) {
+            // Extract features from the vector tiles for the specified source layer
+            let mut features = Vec::new();
+            
+            for tile in vector_tiles {
+                // Check if this tile has parsed layers
+                if let Some(ref parsed_layers) = tile.parsed_layers {
+                    // Check if this tile has the requested source layer
+                    if let Some(layer_features) = parsed_layers.get(source_layer) {
+                        // Convert vectortile::Feature to polygon_geometry::GeometryData
+                        for feature in layer_features {
+                            // Extract height property
+                            let height = feature.properties.get("height")
+                                .and_then(|v| v.as_f64())
+                                .or_else(|| feature.properties.get("render_height").and_then(|v| v.as_f64()))
+                                .unwrap_or(0.0);
+                            
+                            // Process based on geometry type
+                            if let Ok(coords) = serde_json::from_value::<Vec<Vec<f64>>>(feature.geometry.coordinates.clone()) {
+                                // This is a simplified conversion - in a real implementation, 
+                                // you'd handle different geometry types appropriately
+                                features.push(crate::polygon_geometry::GeometryData {
+                                    geometry: coords,
+                                    height: Some(height),
+                                    layer: Some(source_layer.to_string()),
+                                    tags: None,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if !features.is_empty() {
+                console_log!("Found {} cached features for layer: {}", features.len(), source_layer);
+                return Some(features);
+            }
+        }
+        
+        None
     }
     
     // Add a cached object (for general-purpose caching)

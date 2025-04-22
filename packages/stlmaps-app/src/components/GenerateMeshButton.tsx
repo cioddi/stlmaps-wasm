@@ -540,18 +540,87 @@ export const GenerateMeshButton = function () {
           // Check for cancellation before creating polygon geometry
           cancellationToken.throwIfCancelled();
 
-          // Create polygon geometry asynchronously using web worker
-          const layerGeometryPromise = createPolygonGeometryAsync({
-            polygons: layerData as GeometryData[],
-            terrainBaseHeight: terrainSettings.baseHeight,
-            bbox: [minLng, minLat, maxLng, maxLat],
-            elevationGrid: processedElevationGrid,
-            gridSize,
-            minElevation: processedMinElevation,
-            maxElevation: processedMaxElevation,
-            vtDataSet: currentLayer,
-            useSameZOffset: true,
-          });
+          // Use the Rust implementation to create polygon geometry
+          // This will reuse the cached features from extract_features_from_vector_tiles
+          console.log(`Creating polygon geometry for ${currentLayer.sourceLayer} using Rust implementation`);
+          
+          try {
+            // Prepare the input for the Rust function
+            const polygonGeometryInput = {
+              polygons: layerData as GeometryData[], // Fallback data in case cache fails
+              terrainBaseHeight: terrainSettings.baseHeight,
+              bbox: [minLng, minLat, maxLng, maxLat],
+              elevationGrid: processedElevationGrid,
+              gridSize,
+              minElevation: processedMinElevation,
+              maxElevation: processedMaxElevation,
+              vtDataSet: currentLayer,
+              useSameZOffset: true,
+              process_id: currentBboxHash, // Pass the process ID to access cached features
+            };
+
+            const serializedInput = JSON.stringify(polygonGeometryInput);
+            
+            // Call the Rust implementation directly
+            const serializedResult = await getWasmModule().process_polygon_geometry(serializedInput);
+            const geometryData = JSON.parse(serializedResult);
+            
+            // Convert the result to a Three.js buffer geometry
+            const geometry = new THREE.BufferGeometry();
+            
+            // Add position attribute (vertices)
+            if (geometryData.vertices && geometryData.vertices.length > 0) {
+              geometry.setAttribute(
+                "position", 
+                new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
+              );
+            }
+            
+            // Add normal attribute if available
+            if (geometryData.normals && geometryData.normals.length > 0) {
+              geometry.setAttribute(
+                "normal",
+                new THREE.BufferAttribute(new Float32Array(geometryData.normals), 3)
+              );
+            } else {
+              // Compute normals if not provided
+              geometry.computeVertexNormals();
+            }
+            
+            // Add color attribute if available
+            if (geometryData.colors && geometryData.colors.length > 0) {
+              geometry.setAttribute(
+                "color",
+                new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
+              );
+            }
+            
+            // Add index attribute if available
+            if (geometryData.indices && geometryData.indices.length > 0) {
+              geometry.setIndex(Array.from(geometryData.indices));
+            }
+            
+            console.log(`Successfully created ${currentLayer.sourceLayer} geometry with Rust: ${geometry.attributes.position?.count || 0} vertices`);
+            
+            // Use the created geometry as the promise result
+            const layerGeometryPromise = Promise.resolve(geometry);
+          } catch (error) {
+            console.error(`Error creating ${currentLayer.sourceLayer} geometry with Rust:`, error);
+            
+            // Fall back to the JavaScript implementation if the Rust version fails
+            console.log(`Falling back to JavaScript implementation for ${currentLayer.sourceLayer}`);
+            const layerGeometryPromise = createPolygonGeometryAsync({
+              polygons: layerData as GeometryData[],
+              terrainBaseHeight: terrainSettings.baseHeight,
+              bbox: [minLng, minLat, maxLng, maxLat],
+              elevationGrid: processedElevationGrid,
+              gridSize,
+              minElevation: processedMinElevation,
+              maxElevation: processedMaxElevation,
+              vtDataSet: currentLayer,
+              useSameZOffset: true,
+            });
+          }
 
           // Store the promise for later resolution
           geometryPromises.push({

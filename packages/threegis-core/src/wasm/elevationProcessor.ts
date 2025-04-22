@@ -49,84 +49,17 @@ export interface ProcessElevationInput {
   tiles: Tile[];
 }
 
-// This object contains helper functions that will be called from the WASM code
-// The functions are registered globally to be accessible from the WASM module
+import { initWasmFetchHelpers } from './wasmFetchUtils';
+
+// This object contains helper functions specific to elevation processing
+// that will be called from the WASM code
 export const initWasmJsHelpers = () => {
-  // Create global namespace for our helper functions
+  // Initialize the fetch helpers first
+  initWasmFetchHelpers();
+  
+  // Add elevation-specific helpers
   (window as any).wasmJsHelpers = {
-    // Function to fetch data from a URL - the name must match what's used in Rust (fetch)
-    fetch: async (url: string): Promise<TileData> => {
-      console.log(`JS Helper: Fetching from ${url}`);
-      
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch data: ${response.status}`);
-        }
-        
-        // Get the image as blob
-        const blob = await response.blob();
-        
-        // Decode the WebP image to get actual pixel data
-        const imageBitmap = await createImageBitmap(blob);
-        
-        // Create a canvas to extract the pixel data
-        const canvas = document.createElement('canvas');
-        canvas.width = imageBitmap.width;
-        canvas.height = imageBitmap.height;
-        
-        // Draw the image on the canvas
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Could not get canvas context');
-        ctx.drawImage(imageBitmap, 0, 0);
-        
-        // Get the decoded pixel data
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const pixelData = new Uint8Array(imageData.data);
-        
-        console.log(`Decoded pixel data, dimensions ${canvas.width}x${canvas.height}, length: ${pixelData.length} bytes`);
-        
-        // Sample RGB values from center pixel for debugging
-        const centerIdx = ((canvas.height/2) * canvas.width + canvas.width/2) * 4;
-        console.log(`Sample RGB at center: R:${pixelData[centerIdx]}, G:${pixelData[centerIdx+1]}, B:${pixelData[centerIdx+2]}`);
-        
-        // Extract x, y, z from URL if possible
-        const urlParts = url.split('/');
-        let x = 0, y = 0, z = 0;
-        
-        // Try to extract tile coordinates from URL
-        if (urlParts.length >= 3) {
-          const possibleZ = parseInt(urlParts[urlParts.length - 3], 10);
-          const possibleX = parseInt(urlParts[urlParts.length - 2], 10);
-          const possibleY = parseInt(urlParts[urlParts.length - 1], 10);
-          
-          if (!isNaN(possibleZ)) z = possibleZ;
-          if (!isNaN(possibleX)) x = possibleX;
-          if (!isNaN(possibleY)) {
-            // The Y coordinate might have a file extension
-            const yStr = urlParts[urlParts.length - 1];
-            const dotIndex = yStr.indexOf('.');
-            if (dotIndex > 0) {
-              y = parseInt(yStr.substring(0, dotIndex), 10);
-            } else {
-              y = possibleY;
-            }
-          }
-        }
-        
-        return {
-          width: canvas.width,
-          height: canvas.height,
-          x,
-          y,
-          z,
-          pixelData
-        };
-      } catch (error) {
-        console.error(`Error downloading from ${url}:`, error);
-        throw error;
-      }
-    },
+    ...(window as any).wasmJsHelpers,
     
     // Function to process image data from a blob
     processImageData: async (data: Uint8Array): Promise<ImageData> => {
@@ -143,7 +76,7 @@ export const initWasmJsHelpers = () => {
     }
   };
   
-  console.log('WebAssembly JS helpers initialized');
+  console.log('WebAssembly elevation helpers initialized');
 };
 
 /**

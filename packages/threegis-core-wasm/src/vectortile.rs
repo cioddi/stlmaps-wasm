@@ -1,10 +1,11 @@
-// filepath: /home/tobi/project/stlmaps/packages/threegis-core-wasm/src/vectortile.rs
 use wasm_bindgen::prelude::*;
 use js_sys::{Uint8Array, Date, Object, Array, JSON, Math};
 use serde::{Serialize, Deserialize};
 use serde_wasm_bindgen::{to_value, from_value};
 use wasm_bindgen_futures::JsFuture;
 use std::collections::HashMap;
+use flate2::read::GzDecoder;
+use std::io::Read;
 
 use crate::module_state::{ModuleState, TileData, create_tile_key};
 use crate::{console_log, fetch};
@@ -226,21 +227,25 @@ pub async fn extract_features_from_vector_tiles(
     let module_state = ModuleState::get_instance();
     let module_state = module_state.lock().unwrap();
     
-    // Try to access cached vector tile data
-    let vector_tiles = match module_state.get_vector_tiles(process_id) {
+    // Create the bbox_key format to consistently access cached data
+    let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
+    console_log!("Using bbox_key for vector tiles lookup: {}", bbox_key);
+    
+    // Try to access cached vector tile data using the standardized bbox_key format
+    let vector_tiles = match module_state.get_vector_tiles(&bbox_key) {
         Some(tiles) => tiles,
         None => {
-            console_log!("No cached vector tiles found for process_id: {}", process_id);
-            return Err(JsValue::from_str(&format!("No cached vector tiles found for process_id: {}", process_id)));
+            console_log!("No cached vector tiles found for bbox_key: {}", bbox_key);
+            return Err(JsValue::from_str(&format!("No cached vector tiles found for bbox_key: {}", bbox_key)));
         }
     };
     
-    // Get cached elevation data if available
-    let elevation_data = if let Some(elevation_id) = &input.elevation_process_id {
-        module_state.get_elevation_data(elevation_id)
-    } else {
-        module_state.get_elevation_data(process_id)
-    };
+    // Get cached elevation data if available - using the standard bbox_key format
+    // Create the bbox_key for elevation data (same format as used for vector tiles)
+    let bbox_key_for_elevation = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
+    console_log!("Using bbox_key for elevation data lookup: {}", bbox_key_for_elevation);
+    
+    let elevation_data = module_state.get_elevation_data(&bbox_key_for_elevation);
     
     let (elevation_grid, grid_size) = match elevation_data {
         Some(elev_data) => (elev_data.elevation_grid, (elev_data.grid_width, elev_data.grid_height)),
@@ -499,8 +504,20 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             let fetch_promise = fetch(&url)?;
             let fetch_result = JsFuture::from(fetch_promise).await?;
             let data_array = Uint8Array::new(&fetch_result);
-            let data_vec = data_array.to_vec();
-            
+            let mut data_vec = data_array.to_vec();
+
+            // Check if the data is gzipped and decompress if necessary
+            if data_vec.starts_with(&[0x1f, 0x8b]) { // Gzip magic number
+                console_log!("Detected gzipped tile, decompressing...");
+                let mut decoder = GzDecoder::new(&data_vec[..]);
+                let mut decompressed_data = Vec::new();
+                decoder.read_to_end(&mut decompressed_data).map_err(|e| {
+                    console_log!("Failed to decompress gzipped tile: {}", e);
+                    JsValue::from_str("Decompression error")
+                })?;
+                data_vec = decompressed_data;
+            }
+
             // Create new tile data entry
             let tile_data = TileData {
                 width: 256, // Default tile size
@@ -514,7 +531,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 buffer: data_vec.clone(),
                 parsed_layers: None, // We'll parse this later when needed
             };
-            
+
             // Cache the tile
             module_state_lock.set_tile_data(&tile_key, tile_data.clone());
             tile_data
@@ -528,7 +545,13 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     }
     
     // Store all tiles under the process_id for later retrieval
+    console_log!("🔍 DEBUG: Storing {} vector tiles under process_id: {}", tile_results.len(), process_id);
     module_state_lock.store_vector_tiles(&process_id, &tile_results);
+    
+    // Also store tiles under bbox_key format for consistency across the application
+    let bbox_key = format!("{}_{}_{}_{}", input.min_lng, input.min_lat, input.max_lng, input.max_lat);
+    console_log!("🔍 DEBUG: Also storing vector tiles under bbox_key: {}", bbox_key);
+    module_state_lock.store_vector_tiles(&bbox_key, &tile_results);
     
     // Return success with the process_id
     Ok(to_value(&process_id)?)

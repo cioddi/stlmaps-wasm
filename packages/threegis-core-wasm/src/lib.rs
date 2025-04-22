@@ -22,6 +22,8 @@ mod terrain;
 mod vectortile;
 // Import our geojson features module
 pub mod geojson_features;
+// Import our polygon geometry module
+mod polygon_geometry;
 
 use module_state::{ModuleState, TileData, create_tile_key};
 use models::{CacheStats, RustResponse};
@@ -281,4 +283,10 @@ pub fn register_cache_group(group_id: &str) -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn free_cache_group(group_id: &str) -> Result<(), JsValue> {
     crate::cache_manager::free_group_js(group_id)
+}
+
+// Export the polygon geometry creation function
+#[wasm_bindgen]
+pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
+    polygon_geometry::create_polygon_geometry(input_json)
 }
