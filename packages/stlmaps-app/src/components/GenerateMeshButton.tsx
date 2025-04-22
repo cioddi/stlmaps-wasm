@@ -1,6 +1,3 @@
-import React from "react";
-import { Button } from "@mui/material";
-import { generatePolygonGeometry } from "../three_maps/createPolygonGeometry"; // adjust path as needed
 import { useState, useEffect } from "react";
 import {
   GeometryData,
@@ -9,6 +6,7 @@ import {
 import * as THREE from "three";
 //@ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
+import { createPolygonGeometryAsync } from "../three_maps/createPolygonGeometryAsync";
 import { bufferLineString } from "../three_maps/bufferLineString";
 import useLayerStore from "../stores/useLayerStore";
 import {
@@ -19,14 +17,13 @@ import {
 import { WorkerService } from "../workers/WorkerService";
 import { tokenManager } from "../utils/CancellationToken";
 // Import WASM functionality
-import {
-  useWasm,
-  useElevationProcessor,
+import { 
+  useWasm, 
+  useElevationProcessor, 
   getWasmModule,
   fetchVtData,
   calculateTileCount,
-  getTilesForBbox,
-  extractFeaturesFromLayer,
+  getTilesForBbox
 } from "@threegis/core";
 
 // Define interfaces for our data structures
@@ -75,7 +72,7 @@ interface VtDataSet {
   bufferSize?: number;
 }
 
-const GenerateMeshButton: React.FC = () => {
+export const GenerateMeshButton = function () {
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
     null
   );
@@ -510,19 +507,18 @@ const GenerateMeshButton: React.FC = () => {
         cancellationToken.throwIfCancelled();
 
         // Fetch data for this layer using our new Rust/WASM implementation
-        let layerData =
-          await getWasmModule().extract_features_from_vector_tiles({
-            bbox: [minLng, minLat, maxLng, maxLat],
-            vt_dataset: {
-              source_layer: currentLayer.sourceLayer,
-              sub_class: currentLayer.subClass,
-              filter: currentLayer.filter,
-              enabled: currentLayer.enabled,
-              buffer_size: currentLayer.bufferSize,
-            },
-            bbox_key: currentBboxHash,
-            elevation_bbox_key: currentBboxHash, // assuming elevation data is stored under the same ID
-          });
+        let layerData = await getWasmModule().extract_features_from_vector_tiles({
+          bbox: [minLng, minLat, maxLng, maxLat],
+          vt_dataset: {
+            source_layer: currentLayer.sourceLayer,
+            sub_class: currentLayer.subClass,
+            filter: currentLayer.filter,
+            enabled: currentLayer.enabled,
+            buffer_size: currentLayer.bufferSize
+          },
+          bbox_key: currentBboxHash,
+          elevation_bbox_key: currentBboxHash // assuming elevation data is stored under the same ID
+        });
 
         console.log(
           `Received ${layerData?.length || 0} ${currentLayer.sourceLayer} features`
@@ -546,10 +542,8 @@ const GenerateMeshButton: React.FC = () => {
 
           // Use the Rust implementation to create polygon geometry
           // This will reuse the cached features from extract_features_from_vector_tiles
-          console.log(
-            `Creating polygon geometry for ${currentLayer.sourceLayer} using Rust implementation`
-          );
-
+          console.log(`Creating polygon geometry for ${currentLayer.sourceLayer} using Rust implementation`);
+          
           try {
             // Prepare the input for the Rust function
             const polygonGeometryInput = {
@@ -566,72 +560,55 @@ const GenerateMeshButton: React.FC = () => {
             };
 
             const serializedInput = JSON.stringify(polygonGeometryInput);
-
+            
             // Call the Rust implementation directly
-            const serializedResult =
-              await getWasmModule().process_polygon_geometry(serializedInput);
+            const serializedResult = await getWasmModule().process_polygon_geometry(serializedInput);
             const geometryData = JSON.parse(serializedResult);
-
+            
             // Convert the result to a Three.js buffer geometry
             const geometry = new THREE.BufferGeometry();
-
+            
             // Add position attribute (vertices)
             if (geometryData.vertices && geometryData.vertices.length > 0) {
               geometry.setAttribute(
-                "position",
-                new THREE.BufferAttribute(
-                  new Float32Array(geometryData.vertices),
-                  3
-                )
+                "position", 
+                new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
               );
             }
-
+            
             // Add normal attribute if available
             if (geometryData.normals && geometryData.normals.length > 0) {
               geometry.setAttribute(
                 "normal",
-                new THREE.BufferAttribute(
-                  new Float32Array(geometryData.normals),
-                  3
-                )
+                new THREE.BufferAttribute(new Float32Array(geometryData.normals), 3)
               );
             } else {
               // Compute normals if not provided
               geometry.computeVertexNormals();
             }
-
+            
             // Add color attribute if available
             if (geometryData.colors && geometryData.colors.length > 0) {
               geometry.setAttribute(
                 "color",
-                new THREE.BufferAttribute(
-                  new Float32Array(geometryData.colors),
-                  3
-                )
+                new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
               );
             }
-
+            
             // Add index attribute if available
             if (geometryData.indices && geometryData.indices.length > 0) {
               geometry.setIndex(Array.from(geometryData.indices));
             }
-
-            console.log(
-              `Successfully created ${currentLayer.sourceLayer} geometry with Rust: ${geometry.attributes.position?.count || 0} vertices`
-            );
-
+            
+            console.log(`Successfully created ${currentLayer.sourceLayer} geometry with Rust: ${geometry.attributes.position?.count || 0} vertices`);
+            
             // Use the created geometry as the promise result
             const layerGeometryPromise = Promise.resolve(geometry);
           } catch (error) {
-            console.error(
-              `Error creating ${currentLayer.sourceLayer} geometry with Rust:`,
-              error
-            );
-
+            console.error(`Error creating ${currentLayer.sourceLayer} geometry with Rust:`, error);
+            
             // Fall back to the JavaScript implementation if the Rust version fails
-            console.log(
-              `Falling back to JavaScript implementation for ${currentLayer.sourceLayer}`
-            );
+            console.log(`Falling back to JavaScript implementation for ${currentLayer.sourceLayer}`);
             const layerGeometryPromise = createPolygonGeometryAsync({
               polygons: layerData as GeometryData[],
               terrainBaseHeight: terrainSettings.baseHeight,
@@ -820,28 +797,5 @@ const GenerateMeshButton: React.FC = () => {
     };
   }, [bbox, vtLayers, terrainSettings]); // Only trigger on bbox changes, not on store state changes
 
-  const handleGenerateMesh = async () => {
-    try {
-      // Trigger caching of features using WASM
-      await extractFeaturesFromLayer(
-        "tileKey_placeholder",
-        "layerName_placeholder"
-      );
-      // Retrieve the generated mesh geometry from cache
-      const geometry = await generatePolygonGeometry("tileKey_placeholder");
-      // ...existing logic to use 'geometry' for mesh generation...
-    } catch (error) {
-      console.error("Error generating mesh:", error);
-    }
-  };
-
-  return (
-    <>
-      <Button variant="contained" onClick={handleGenerateMesh}>
-        Generate Mesh
-      </Button>
-    </>
-  );
+  return <></>;
 };
-
-export default GenerateMeshButton;
