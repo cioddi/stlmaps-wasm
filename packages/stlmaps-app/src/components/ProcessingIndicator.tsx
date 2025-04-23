@@ -173,7 +173,7 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
         pointerEvents: 'none'
       }}
     >
-      <TechLines backgroundImage="linear-gradient(90deg, #42a5f5, #64ffda, #42a5f5)" />
+      <TechLines sx={{backgroundImage:"linear-gradient(90deg, #42a5f5, #64ffda, #42a5f5)"}} />
       <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 1 }}>
         <IconContainer>
           <CodeIcon color="primary" fontSize={"small"} />

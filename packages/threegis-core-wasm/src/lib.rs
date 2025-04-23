@@ -294,7 +294,24 @@ pub fn free_cache_group(group_id: &str) -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     match polygon_geometry::create_polygon_geometry(input_json) {
-        Ok(json_string) => Ok(JsValue::from_str(&json_string)),
+        Ok(json_string) => {
+            // Debug log the size of the string we're sending back
+            let bytes = json_string.as_bytes().len();
+            console_log!("Sending back {} bytes of geometry data", bytes);
+            
+            // For very large results, parse the string to check vertex count
+            if bytes > 100000 {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_string) {
+                    if let Some(vertices) = parsed.get("vertices") {
+                        if let Some(arr) = vertices.as_array() {
+                            console_log!("Verified {} vertices in geometry", arr.len() / 3);
+                        }
+                    }
+                }
+            }
+            
+            Ok(JsValue::from_str(&json_string))
+        },
         Err(err_string) => Err(JsValue::from_str(&err_string)),
     }
 }

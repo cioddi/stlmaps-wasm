@@ -155,6 +155,7 @@ pub struct BufferGeometry {
     pub colors: Option<Vec<f32>>,
     pub indices: Option<Vec<u32>>,
     pub uvs: Option<Vec<f32>>,
+    #[serde(rename = "hasData")]
     pub hasData: bool,
 }
 
@@ -787,11 +788,38 @@ fn create_extruded_shape(
     
     let unique_points_count = unique_shape_points.len();
     
-    // Prepare for triangulation
+    // Preprocess points for triangulation - scale to avoid precision issues
+    // This helps earcutr handle coordinates with very small differences
+    let mut min_x = std::f64::MAX;
+    let mut min_y = std::f64::MAX;
+    let mut max_x = std::f64::MIN;
+    let mut max_y = std::f64::MIN;
+    
+    // Find the bounding box
+    for point in unique_shape_points {
+        min_x = min_x.min(point.x);
+        min_y = min_y.min(point.y);
+        max_x = max_x.max(point.x);
+        max_y = max_y.max(point.y);
+    }
+    
+    let width = max_x - min_x;
+    let height_bbox = max_y - min_y;
+    
+    // Prepare scaled coordinates for triangulation
     let mut flat_coords: Vec<f64> = Vec::with_capacity(unique_points_count * 2);
     for point in unique_shape_points {
-        flat_coords.push(point.x);
-        flat_coords.push(point.y);
+        // Normalize to 0-1 range then scale to 0-1000 for better precision
+        if width > EPSILON && height_bbox > EPSILON {
+            let scaled_x = ((point.x - min_x) / width) * 1000.0;
+            let scaled_y = ((point.y - min_y) / height_bbox) * 1000.0;
+            flat_coords.push(scaled_x);
+            flat_coords.push(scaled_y);
+        } else {
+            // If the polygon is too small or flat, use original coordinates
+            flat_coords.push(point.x);
+            flat_coords.push(point.y);
+        }
     }
     
     let ring_starts = vec![0];
@@ -811,6 +839,42 @@ fn create_extruded_shape(
         Err(err) => {
             // If earcutr fails with an error, use fallback
             console_log!("Earcutr failed with error: {:?}, using simple triangulation", err);
+            
+            // Let's check what might be wrong with the input data
+            if flat_coords.is_empty() {
+                console_log!("Flat coordinates array is empty");
+            } else if flat_coords.len() % 2 != 0 {
+                console_log!("Flat coordinates array has odd length: {}", flat_coords.len());
+            } else if flat_coords.len() < 6 { // Need at least 3 points (6 coordinates) for a triangle
+                console_log!("Not enough points for triangulation: {} points", flat_coords.len() / 2);
+            } else {
+                // Check for any NaN or infinite values
+                let has_invalid = flat_coords.iter().any(|&val| val.is_nan() || val.is_infinite());
+                if has_invalid {
+                    console_log!("Flat coordinates contain NaN or infinite values");
+                }
+                
+                // Check for duplicate points
+                let mut has_duplicates = false;
+                for i in 0..(flat_coords.len() / 2 - 1) {
+                    let ix = i * 2;
+                    let iy = ix + 1;
+                    for j in (i + 1)..(flat_coords.len() / 2) {
+                        let jx = j * 2;
+                        let jy = jx + 1;
+                        if (flat_coords[ix] - flat_coords[jx]).abs() < EPSILON && 
+                           (flat_coords[iy] - flat_coords[jy]).abs() < EPSILON {
+                            console_log!("Found duplicate points at indices {} and {}", i, j);
+                            has_duplicates = true;
+                            break;
+                        }
+                    }
+                    if has_duplicates {
+                        break;
+                    }
+                }
+            }
+            
             simple_triangulate_polygon(unique_shape_points)
         }
     };
@@ -903,19 +967,135 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
     };
     
-    // Process the geometry and create buffer geometry
-    // This is a placeholder implementation - expand as needed
-    let buffer_geometry = BufferGeometry {
-        vertices: Vec::new(),
-        normals: None,
+    console_log!("Processing polygon geometry with {} polygons", input.polygons.len());
+    
+    if input.polygons.is_empty() {
+        console_log!("No polygons to process");
+        return Ok(serde_json::to_string(&BufferGeometry {
+            vertices: Vec::new(),
+            normals: None,
+            colors: None,
+            indices: None,
+            uvs: None,
+            hasData: false,
+        }).unwrap());
+    }
+    
+    // Convert all polygons to Vector2 format
+    let mut all_geometries: Vec<BufferGeometry> = Vec::new();
+    
+    for (i, polygon_data) in input.polygons.iter().enumerate() {
+        if i % 1000 == 0 && i > 0 {
+            console_log!("Processed {} out of {} polygons", i, input.polygons.len());
+        }
+        
+        // Extract and validate polygon points
+        let points: Vec<Vector2> = polygon_data.geometry.iter()
+            .filter_map(|point| {
+                if point.len() >= 2 {
+                    Some(Vector2 { x: point[0], y: point[1] })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        if points.len() < 3 {
+            continue; // Skip invalid polygons
+        }
+        
+        // Get height for extrusion
+        let height = polygon_data.height.unwrap_or(10.0);
+        if height <= 0.0 {
+            continue; // Skip flat polygons
+        }
+        
+        // Apply mesh coordinates transform
+        let mesh_points: Vec<Vector2> = points.iter()
+            .map(|p| {
+                let [mx, my] = transform_to_mesh_coordinates(p.x, p.y, &input.bbox);
+                Vector2 { x: mx, y: my }
+            })
+            .collect();
+        
+        // Clean and validate the polygon
+        let cleaned_points = clean_polygon_footprint(&mesh_points);
+        if cleaned_points.is_empty() {
+            continue; // Skip invalid polygon after cleaning
+        }
+        
+        // Create 3D extruded shape
+        let z_offset = input.vtDataSet.zOffset.unwrap_or(0.0);
+        let geometry = create_extruded_shape(&cleaned_points, height, z_offset);
+        
+        if geometry.hasData {
+            all_geometries.push(geometry);
+        }
+    }
+    
+    console_log!("Created {} valid 3D geometries", all_geometries.len());
+    
+    // Merge all geometries into one if we have any
+    if all_geometries.is_empty() {
+        console_log!("No valid geometries were created");
+        return Ok(serde_json::to_string(&BufferGeometry {
+            vertices: Vec::new(),
+            normals: None,
+            colors: None,
+            indices: None,
+            uvs: None,
+            hasData: false,
+        }).unwrap());
+    }
+    
+    // If there's just one geometry, return it directly
+    if all_geometries.len() == 1 {
+        let result = all_geometries.remove(0);
+        console_log!("Returning a single geometry with {} vertices", result.vertices.len() / 3);
+        return Ok(serde_json::to_string(&result).unwrap());
+    }
+    
+    // Merge multiple geometries
+    let mut merged_vertices: Vec<f32> = Vec::new();
+    let mut merged_normals: Vec<f32> = Vec::new();
+    let mut merged_indices: Vec<u32> = Vec::new();
+    
+    let mut vertex_offset: u32 = 0;
+    
+    for geometry in all_geometries {
+        // Add vertices
+        merged_vertices.extend_from_slice(&geometry.vertices);
+        
+        // Add normals if present
+        if let Some(normals) = &geometry.normals {
+            merged_normals.extend_from_slice(normals);
+        }
+        
+        // Add indices with offset if present
+        if let Some(indices) = &geometry.indices {
+            for &index in indices {
+                merged_indices.push(index + vertex_offset);
+            }
+        }
+        
+        // Update vertex offset for next geometry
+        vertex_offset += (geometry.vertices.len() / 3) as u32;
+    }
+    
+    // Create the merged buffer geometry
+    let merged_geometry = BufferGeometry {
+        vertices: merged_vertices,
+        normals: if merged_normals.is_empty() { None } else { Some(merged_normals) },
+        indices: if merged_indices.is_empty() { None } else { Some(merged_indices) },
         colors: None,
-        indices: None,
         uvs: None,
-        hasData: false,
+        hasData: true,
     };
     
+    console_log!("Returning merged geometry with {} vertices", merged_geometry.vertices.len() / 3);
+    
     // Serialize the output to JSON
-    match serde_json::to_string(&buffer_geometry) {
+    match serde_json::to_string(&merged_geometry) {
         Ok(json) => Ok(json),
         Err(e) => Err(format!("Failed to serialize output: {}", e)),
     }
