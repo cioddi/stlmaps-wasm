@@ -29,8 +29,8 @@ A web application for generating 3D terrain and building models from map data. T
 ```bash
 git clone <repository-url>
 cd stlmaps
-yarn
-yarn dev
+npm i
+npm run dev
 ```
 
 1. **Architecture Overview**:
