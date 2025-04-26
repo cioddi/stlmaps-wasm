@@ -5,15 +5,12 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 // We need JsValue for caching objects
-use js_sys::{Array, Uint8Array};
+use js_sys::Uint8Array;
+use crate::vectortile::ParsedMvtTile;
 
 // Import the console_log macro
 #[allow(unused_imports)]
 use crate::console_log;
-
-// Import MVT parser types
-use crate::mvt_parser::ParsedMvt;
-use std::collections::VecDeque;
 
 // Cache size limit
 pub const CACHE_SIZE_LIMIT: usize = 100;
@@ -85,11 +82,8 @@ pub struct ModuleState {
     // Cache for vector tile data by bbox_key
     pub bbox_vector_tiles: HashMap<String, Vec<TileData>>,
     
-    // Cache for parsed MVT data
-    pub mvt_cache: HashMap<String, ParsedMvt>,
     // Cache for parsed vector tiles (ParsedMvtTile) keyed by "z/x/y"
-    pub mvt_parsed_tiles: HashMap<String, crate::vectortile::ParsedMvtTile>,
-    pub mvt_cache_keys: VecDeque<String>,
+    pub mvt_parsed_tiles: HashMap<String, ParsedMvtTile>,
     
     // Configuration for cache limits
     pub max_raster_tiles: usize,
@@ -112,9 +106,7 @@ impl ModuleState {
             vector_tiles: HashMap::new(),
             elevation_grids: HashMap::new(),
             bbox_vector_tiles: HashMap::new(),
-            mvt_cache: HashMap::new(),
             mvt_parsed_tiles: HashMap::new(),
-            mvt_cache_keys: VecDeque::new(),
             max_raster_tiles: 100, // Default limits
             max_vector_tiles: 50,
             cache_hits: 0,
@@ -206,73 +198,58 @@ impl ModuleState {
         console_log!("Storing tile with key: {}", key);
     }
     
-    // Store vector tiles for a process ID or bbox_key
-    pub fn store_vector_tiles(&mut self, key: &str, tiles: &Vec<crate::vectortile::VectorTileResult>) {
-        // Log detailed information about what we're trying to store
-        console_log!("🔍 DEBUG: store_vector_tiles called with key: {}", key);
-        console_log!("🔍 DEBUG: Storing {} vector tiles", tiles.len());
-        
-        // Actually store the tiles this time
-        let mut tile_data_vec = Vec::new();
-        
-        for tile_result in tiles {
-            // Create TileData for each tile
-            let tile_data = TileData {
-                width: 256, // Default tile size for vector tiles
-                height: 256,
-                x: tile_result.tile.x,
-                y: tile_result.tile.y,
-                z: tile_result.tile.z,
-                data: tile_result.data.clone(),
-                timestamp: js_sys::Date::now(),
-                key: format!("{}/{}/{}", tile_result.tile.z, tile_result.tile.x, tile_result.tile.y),
-                buffer: tile_result.data.clone(),
-                parsed_layers: None, // Will be parsed on demand
-                rust_parsed_mvt: Some(tile_result.data.clone()), // Store the raw MVT data for Rust parsing
-            };
-            
-            // Add to our collection
-            tile_data_vec.push(tile_data);
-        }
-        
-        // Store in the HashMap using the provided key
-        if !tile_data_vec.is_empty() {
-            console_log!("🔍 DEBUG: Actually storing {} vector tiles with key: {}", 
-                        tile_data_vec.len(), key);
-            self.bbox_vector_tiles.insert(key.to_string(), tile_data_vec);
-        }
-        
-        // In a real implementation, we would also parse the vector tiles and extract layers
-        console_log!("🔍 DEBUG: Vector tiles stored successfully with key: {}", key);
-    }
-    
-    // Get vector tiles for a process ID or bbox_key
-    pub fn get_vector_tiles(&self, id: &str) -> Option<Vec<TileData>> {
-        // Parse the id - if it's a bbox key (contains underscores), use it directly
-        // If it's not in standard format, convert it to the standard format
-        let lookup_key = if id.contains('_') {
-            // This is already a bbox_key in the format min_lng_min_lat_max_lng_max_lat
-            id.to_string()
+    // Get a cached parsed vector tile by cache key
+    pub fn get_parsed_mvt_tile(&self, key: &str) -> Option<ParsedMvtTile> {
+        console_log!("🔍 CACHE: Checking parsed tile cache for key: {}", key);
+        if let Some(tile) = self.mvt_parsed_tiles.get(key) {
+            console_log!("✅ CACHE HIT: Parsed tile cache for key: {}", key);
+            Some(tile.clone())
         } else {
-            // This is not in the standard format, need to convert it
-            // For now, we'll just use the id directly and log the issue
-            console_log!("Warning: Using non-standard key instead of standard bbox_key format: {}", id);
-            id.to_string()
-        };
-        
-        console_log!("🔍 DEBUG: Looking for vector tiles with key: {}", lookup_key);
-        
-        // Actually retrieve the tile data from our cache
-        match self.bbox_vector_tiles.get(&lookup_key) {
-            Some(tiles) => {
-                console_log!("🔍 DEBUG: Found {} cached vector tiles with key: {}", 
-                            tiles.len(), lookup_key);
-                Some(tiles.clone())
-            },
-            None => {
-                console_log!("🔍 DEBUG: No cached vector tiles found with key: {}", lookup_key);
-                None
-            }
+            console_log!("❌ CACHE MISS: Parsed tile cache for key: {}", key);
+            None
+        }
+    }
+
+    // Store a parsed vector tile in cache by cache key
+    pub fn set_parsed_mvt_tile(&mut self, key: &str, tile: ParsedMvtTile) {
+        console_log!("🔒 CACHE STORE: Storing parsed tile for key: {}", key);
+        self.mvt_parsed_tiles.insert(key.to_string(), tile);
+    }
+
+    // Store fetched vector tiles under bbox_key
+    pub fn store_vector_tiles(&mut self, bbox_key: &str, results: &[crate::vectortile::VectorTileResult]) {
+        console_log!("🔒 CACHE STORE: Storing {} tiles under key {}", results.len(), bbox_key);
+        let mut tile_list = Vec::with_capacity(results.len());
+        for r in results {
+            let key = format!("{}/{}/{}", r.tile.z, r.tile.x, r.tile.y);
+            let data_vec = r.data.clone();
+            let tile_data = TileData {
+                width: 256,
+                height: 256,
+                x: r.tile.x,
+                y: r.tile.y,
+                z: r.tile.z,
+                data: data_vec.clone(),
+                timestamp: js_sys::Date::now(),
+                key: key.clone(),
+                buffer: data_vec.clone(),
+                parsed_layers: None,
+                rust_parsed_mvt: Some(data_vec.clone()),
+            };
+            tile_list.push(tile_data);
+        }
+        self.bbox_vector_tiles.insert(bbox_key.to_string(), tile_list);
+    }
+
+    // Retrieve cached vector tiles by bbox_key
+    pub fn get_vector_tiles(&self, bbox_key: &str) -> Option<&Vec<TileData>> {
+        console_log!("🔍 CACHE: Looking for vector tiles under key {}", bbox_key);
+        if let Some(tiles) = self.bbox_vector_tiles.get(bbox_key) {
+            console_log!("✅ CACHE HIT: Found {} tiles under key {}", tiles.len(), bbox_key);
+            Some(tiles)
+        } else {
+            console_log!("❌ CACHE MISS: No tiles under key {}", bbox_key);
+            None
         }
     }
     

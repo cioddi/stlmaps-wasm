@@ -295,6 +295,8 @@ pub async fn extract_features_from_vector_tiles(
     let mut feature_count = 0;
     
     // Process each vector tile found in the cache for the bbox_key
+    // To avoid E0502, collect parsed tiles to cache after iteration
+    let mut parsed_tiles_to_cache: Vec<(String, ParsedMvtTile)> = Vec::new();
     for vt_tile_data in vector_tiles_data {
         let tile_x = vt_tile_data.x;
         let tile_y = vt_tile_data.y;
@@ -318,14 +320,16 @@ pub async fn extract_features_from_vector_tiles(
 
         // Use cached parsed MVT tile if available, otherwise parse and cache it
         let cache_key = format!("{}/{}/{}", tile_z, tile_x, tile_y);
+        console_log!("🔍 Checking parsed tile cache with key: {}", cache_key);
         let parsed_tile = if let Some(cached) = module_state.get_parsed_mvt_tile(&cache_key) {
             console_log!("  ♻️ Using cached parsed tile for {}", cache_key);
             cached
         } else {
+            console_log!("  ❌ no parsed mvt tile found for {}", cache_key);
             match enhanced_parse_mvt_data(&raw_mvt_data, &TileRequest { x: tile_x, y: tile_y, z: tile_z }) {
                 Ok(parsed) => {
-                    // Cache parsed result for future use
-                    module_state.set_parsed_mvt_tile(&cache_key, parsed.clone());
+                    // Defer caching until after iteration
+                    parsed_tiles_to_cache.push((cache_key.clone(), parsed.clone()));
                     parsed
                 }
                 Err(e) => {
@@ -613,6 +617,8 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             // Parse the MVT data using our enhanced Rust MVT parser
             let parsed_mvt = match enhanced_parse_mvt_data(&data_vec, &tile) {
                 Ok(parsed) => {
+                    // Cache the parsed MVTTile for later feature extraction
+                    module_state_lock.set_parsed_mvt_tile(&tile_key, parsed.clone());
                     console_log!("Successfully parsed MVT data with Rust parser for tile {}/{}/{}", 
                         tile.z, tile.x, tile.y);
                     // Log the number of layers found

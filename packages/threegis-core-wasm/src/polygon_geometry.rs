@@ -1,21 +1,5 @@
-use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
-use js_sys::{Array, Float32Array, Object};
-use web_sys::console;
-use std::collections::HashMap;
-
-// Simplified geo imports to fix compatibility issues
-use geo_types::{Coord, LineString, Polygon as GeoPolygon, Rect};
-use geo::algorithm::area::Area;
-use geo::algorithm::contains::Contains;
-use geo::algorithm::intersects::Intersects;
-use geo::algorithm::bounding_rect::BoundingRect;
 use csgrs::csg::CSG;
-use csgrs::polygon::Polygon as CsgPolygon;
-use csgrs::vertex::Vertex as CsgVertex;
-use csgrs::plane::Plane;
-use nalgebra::{Point3, Vector3 as NVector3};
-
 use crate::console_log;
 use crate::module_state::ModuleState;
 use crate::bbox_filter::polygon_intersects_bbox;
@@ -613,12 +597,9 @@ fn clip_polygon_to_bbox_2d(
         ccw_points.reverse();
     }
     
-    // Create the CSG polygon from the cleaned points
-    let points: Vec<[f64; 2]> = ccw_points.iter()
-        .map(|p| [p.x, p.y])
-        .collect();
-    
-    let poly_csg = match CSG::polygon(&points, None) {
+    // Create the CSG polygon from the cleaned points (2D XY only)
+    let points2d: Vec<[f64; 2]> = ccw_points.iter().map(|p| [p.x, p.y]).collect();
+    let poly_csg = match CSG::polygon(&points2d[..], None) {
         csg if csg.polygons.is_empty() => {
             console_log!("Failed to create CSG polygon - trying simple clipping");
             // Fall back to simple clipping
@@ -639,45 +620,33 @@ fn clip_polygon_to_bbox_2d(
     // Find the polygon with the largest area
     let mut largest_poly_idx = 0;
     let mut largest_area = 0.0;
-    
+    let mut areas = Vec::new();
     for (i, polygon) in clipped_csg.polygons.iter().enumerate() {
         let vertices = &polygon.vertices;
         if vertices.len() < 3 {
             continue; // Skip degenerate polygons
         }
-        
         // Calculate area
         let mut area = 0.0;
         for j in 0..vertices.len() {
-            let k = (j + 1) % vertices.len();
-            area += vertices[j].pos.x * vertices[k].pos.y;
-            area -= vertices[j].pos.y * vertices[k].pos.x;
+            let v0 = &vertices[j].pos.coords;
+            let v1 = &vertices[(j + 1) % vertices.len()].pos.coords;
+            area += (v0.x * v1.y) - (v1.x * v0.y);
         }
-        area = (area / 2.0).abs();
-        
+        area = (area / 2.0_f64).abs();
         if area > largest_area {
             largest_area = area;
             largest_poly_idx = i;
         }
+        areas.push(area);
     }
-    
-    // No valid polygon found
-    if largest_area <= 0.0 {
-        console_log!("No valid polygon found after CSG intersection");
-        return Vec::new();
-    }
-    
-    // Extract vertices from the largest polygon
-    let mut clipped_points = Vec::new();
-    for vertex in &clipped_csg.polygons[largest_poly_idx].vertices {
-        clipped_points.push(Vector2 {
-            x: vertex.pos.x,
-            y: vertex.pos.y,
-        });
-    }
-    
-    // Ensure we have a valid polygon
-    clean_polygon_footprint(&clipped_points)
+    // Return the largest polygon as Vec<Vector2>
+    let largest_poly = &clipped_csg.polygons[largest_poly_idx];
+    let result: Vec<Vector2> = largest_poly.vertices.iter().map(|v| {
+        let c = &v.pos.coords;
+        Vector2 { x: c.x, y: c.y }
+    }).collect();
+    return result;
 }
 
 // Simple clipping fallback when CSG fails
