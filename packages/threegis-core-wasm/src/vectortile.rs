@@ -484,7 +484,18 @@ pub async fn extract_features_from_vector_tiles(
                      // console_log!("  Skipping unhandled geometry type: {}", geometry_type_str);
                  }
              }
-             geometry_data_list.extend(transformed_geometry_parts);
+             // Filter out any geometries whose points are outside the requested bbox
+            let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
+                .into_iter()
+                .filter(|geom| {
+                    geom.geometry.iter().all(|coord| {
+                        let lon = coord[0];
+                        let lat = coord[1];
+                        lon >= min_lng && lon <= max_lng && lat >= min_lat && lat <= max_lat
+                    })
+                })
+                .collect();
+            geometry_data_list.extend(filtered_parts);
         }
     }
     

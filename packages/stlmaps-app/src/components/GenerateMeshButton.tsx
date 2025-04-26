@@ -568,8 +568,16 @@ export const GenerateMeshButton = function () {
             const serializedInput = JSON.stringify(polygonGeometryInput);
             
             // Call the Rust implementation directly
-            const geometryData = await getWasmModule().process_polygon_geometry(serializedInput);
-            
+            const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
+            const geometryData = JSON.parse(geometryJson) as {
+              vertices: number[];
+              normals: number[] | null;
+              colors: number[] | null;
+              indices: number[] | null;
+              uvs: number[] | null;
+              hasData: boolean;
+            };
+
             // Convert the result to a Three.js buffer geometry
             const geometry = new THREE.BufferGeometry();
             
