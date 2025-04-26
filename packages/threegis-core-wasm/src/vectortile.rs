@@ -244,9 +244,9 @@ pub async fn extract_features_from_vector_tiles(
         }
     }
     
-    // Retrieve module state
-    let module_state = ModuleState::get_instance();
-    let module_state = module_state.lock().unwrap();
+    // Retrieve module state (mutable for parsed tile cache)
+    let module_state_mutex = ModuleState::get_instance();
+    let mut module_state = module_state_mutex.lock().unwrap();
         
     // Try to access cached vector tile data using the provided bbox_key
     console_log!("🔍 DEBUG: Looking for vector tiles with key: {}", bbox_key);
@@ -316,14 +316,22 @@ pub async fn extract_features_from_vector_tiles(
             continue;
         }
 
-        // Re-parse the raw MVT data using enhanced_parse_mvt_data
-        // It's potentially inefficient to re-parse every time, but ensures we use the latest parser logic.
-        // Ideally, the cached TileData would store the ParsedMvtTile directly.
-        let parsed_tile = match enhanced_parse_mvt_data(&raw_mvt_data, &TileRequest{x: tile_x, y: tile_y, z: tile_z}) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                console_log!("  ❌ Failed to re-parse MVT data for tile {}/{}/{}: {}", tile_z, tile_x, tile_y, e);
-                continue; // Skip this tile if parsing fails
+        // Use cached parsed MVT tile if available, otherwise parse and cache it
+        let cache_key = format!("{}/{}/{}", tile_z, tile_x, tile_y);
+        let parsed_tile = if let Some(cached) = module_state.get_parsed_mvt_tile(&cache_key) {
+            console_log!("  ♻️ Using cached parsed tile for {}", cache_key);
+            cached
+        } else {
+            match enhanced_parse_mvt_data(&raw_mvt_data, &TileRequest { x: tile_x, y: tile_y, z: tile_z }) {
+                Ok(parsed) => {
+                    // Cache parsed result for future use
+                    module_state.set_parsed_mvt_tile(&cache_key, parsed.clone());
+                    parsed
+                }
+                Err(e) => {
+                    console_log!("  ❌ Failed to parse MVT data for tile {}/{}/{}: {}", tile_z, tile_x, tile_y, e);
+                    continue; // Skip this tile if parsing fails
+                }
             }
         };
 

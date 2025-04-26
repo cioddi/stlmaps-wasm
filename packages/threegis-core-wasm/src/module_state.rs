@@ -87,8 +87,8 @@ pub struct ModuleState {
     
     // Cache for parsed MVT data
     pub mvt_cache: HashMap<String, ParsedMvt>,
-    
-    // Cache keys in order of insertion for LRU cache implementation
+    // Cache for parsed vector tiles (ParsedMvtTile) keyed by "z/x/y"
+    pub mvt_parsed_tiles: HashMap<String, crate::vectortile::ParsedMvtTile>,
     pub mvt_cache_keys: VecDeque<String>,
     
     // Configuration for cache limits
@@ -113,6 +113,7 @@ impl ModuleState {
             elevation_grids: HashMap::new(),
             bbox_vector_tiles: HashMap::new(),
             mvt_cache: HashMap::new(),
+            mvt_parsed_tiles: HashMap::new(),
             mvt_cache_keys: VecDeque::new(),
             max_raster_tiles: 100, // Default limits
             max_vector_tiles: 50,
