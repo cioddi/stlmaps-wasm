@@ -8,6 +8,7 @@ export const vtGeometries: VtDataSet[] = [
         extrusionDepth: 1, // Thin extrusion for water
         zOffset: -0.5,
         enabled: true,
+        csgClipping: false,
     },
     {
         sourceLayer: "landcover",
@@ -17,6 +18,7 @@ export const vtGeometries: VtDataSet[] = [
         bufferSize: 2,
         enabled: true,
         alignVerticesToTerrain: false,
+        csgClipping: false,
     },
     {
         sourceLayer: "park",
@@ -26,6 +28,7 @@ export const vtGeometries: VtDataSet[] = [
         bufferSize: 2,
         enabled: true,
         alignVerticesToTerrain: false,
+        csgClipping: false,
     },
     {
         sourceLayer: "landuse",
@@ -41,7 +44,8 @@ export const vtGeometries: VtDataSet[] = [
             "class",
             "commercial",
             "residential",
-        ]
+        ],
+        csgClipping: false,
     },
     {
         sourceLayer: "transportation",
@@ -55,7 +59,8 @@ export const vtGeometries: VtDataSet[] = [
         filter: [
             "all",
             ["in", "class", "motorway", "trunk", "primary", "secondary", "tertiary", "residential", "service", "minor", "track"],
-        ]
+        ],
+        csgClipping: false,
     },
     {
         sourceLayer: "building",
@@ -64,5 +69,6 @@ export const vtGeometries: VtDataSet[] = [
         useAdaptiveScaleFactor: true,
         heightScaleFactor: 0.8,
         enabled: true,
+        csgClipping: false,
     },
 ];

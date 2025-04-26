@@ -108,6 +108,7 @@ pub struct VtDataSet {
     pub useAdaptiveScaleFactor: Option<bool>,
     pub zOffset: Option<f64>,
     pub alignVerticesToTerrain: Option<bool>,
+    pub csgClipping: Option<bool>,
 }
 
 // Default color function for VtDataSet
@@ -129,6 +130,8 @@ pub struct PolygonGeometryInput {
     #[serde(default)]
     pub useSameZOffset: bool,
     pub bbox_key: String,
+    // Optionally override CSG clipping for this request
+    pub csgClipping: Option<bool>,
 }
 
 // Output struct for the polygon geometry
@@ -992,10 +995,30 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         if cleaned_points.is_empty() {
             continue; // Skip invalid polygon after cleaning
         }
-        
+
+        // Determine if CSG clipping should be used
+        let use_csg = input.csgClipping
+            .or(input.vtDataSet.csgClipping)
+            .unwrap_or(true);
+
+        let clipped_points = if use_csg {
+            clip_polygon_to_bbox_2d(&cleaned_points, &[
+                mesh_points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
+                mesh_points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
+                mesh_points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
+                mesh_points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+            ])
+        } else {
+            // No clipping at all, use cleaned polygon directly
+            cleaned_points.clone()
+        };
+        if clipped_points.len() < 3 {
+            continue;
+        }
+
         // Create 3D extruded shape
         let z_offset = input.vtDataSet.zOffset.unwrap_or(0.0);
-        let geometry = create_extruded_shape(&cleaned_points, height, z_offset);
+        let geometry = create_extruded_shape(&clipped_points, height, z_offset);
         
         if geometry.hasData {
             all_geometries.push(geometry);

@@ -100,6 +100,7 @@ const LayerList: React.FC<LayerListProps> = () => {
     setLayerHeightScaleFactor,
     setTerrainSettings,
     setBuildingSettings,
+    setLayerCsgClipping,
   } = useLayerStore();
 
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({
@@ -462,6 +463,22 @@ const LayerList: React.FC<LayerListProps> = () => {
                       />
                     }
                     label="Align Vertices to Terrain"
+                  />
+                </Box>
+
+                {/* CSG Clipping Checkbox */}
+                <Box sx={{ mt: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={layer.csgClipping === true}
+                        onChange={() => {
+                          setLayerCsgClipping(index, !(layer.csgClipping === true));
+                        }}
+                        size="small"
+                      />
+                    }
+                    label="Enable CSG Clipping (advanced polygon clipping)"
                   />
                 </Box>
               </Box>

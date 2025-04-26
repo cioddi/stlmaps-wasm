@@ -70,6 +70,7 @@ interface LayerState {
   toggleLayerUseAdaptiveScaleFactor: (index: number) => void;
   toggleLayerAlignVerticesToTerrain: (index: number) => void;
   setLayerHeightScaleFactor: (index: number, value: number) => void;
+  setLayerCsgClipping: (index: number, value: boolean) => void;
 
   // Actions for bbox
   setBbox: (bbox: GeoJSON.Feature | undefined) => void;
@@ -251,6 +252,12 @@ const useLayerStore = create<LayerState>((set) => ({
       ...updatedLayers[index],
       heightScaleFactor: value
     };
+    return { vtLayers: updatedLayers };
+  }),
+
+  setLayerCsgClipping: (index: number, value: boolean) => set((state) => {
+    const updatedLayers = [...state.vtLayers];
+    updatedLayers[index] = { ...updatedLayers[index], csgClipping: value };
     return { vtLayers: updatedLayers };
   }),
 
