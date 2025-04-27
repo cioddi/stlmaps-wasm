@@ -258,16 +258,20 @@ fn calculate_adaptive_scale_factor(
     let standard_area = 100.0;
     let standard_elev_range = 1000.0;
     
-    // Calculate area-based scaling factor
-    let area_factor = (area_km2 / standard_area).sqrt();
+    // Calculate area-based scaling factor with reduced impact
+    // Square root reduces the influence of area growth
+    let area_factor = (area_km2 / standard_area).sqrt().sqrt(); // Apply sqrt twice to further dampen effect
     
-    // Calculate elevation-based scaling factor
-    let elev_factor = standard_elev_range / elev_range_m;
+    // Calculate elevation-based scaling factor with reduced impact
+    let elev_factor = (standard_elev_range / elev_range_m).sqrt(); // Square root to reduce effect
     
-    // Combine factors, with limits to prevent extreme values
-    let combined_factor = (area_factor * elev_factor).clamp(0.1, 10.0);
+    // Combine factors, with tighter limits to prevent extreme values
+    // Use a lower maximum bound for more reasonable heights
+    let combined_factor = (area_factor * elev_factor).clamp(0.1, 3.0);
     
-    combined_factor
+    // Apply a dampening factor to make the initial view more reasonable
+    let dampening = 0.5; // 50% reduction overall
+    dampening + (combined_factor * (1.0 - dampening))
 }
 
 // Compute vertex normals for a mesh
@@ -759,9 +763,10 @@ fn create_extruded_shape(
     }
     
     let unique_points_count = unique_shape_points.len();
+    console_log!("Triangulating polygon with {} points", unique_points_count);
     
-    // Preprocess points for triangulation - scale to avoid precision issues
-    // This helps earcutr handle coordinates with very small differences
+    // Preprocess points for triangulation - using a more stable scaling approach
+    // This helps earcutr handle coordinates with very different magnitudes
     let mut min_x = std::f64::MAX;
     let mut min_y = std::f64::MAX;
     let mut max_x = std::f64::MIN;
@@ -775,80 +780,119 @@ fn create_extruded_shape(
         max_y = max_y.max(point.y);
     }
     
+    // Calculate width and height of bounding box
     let width = max_x - min_x;
     let height_bbox = max_y - min_y;
     
+    // Use fixed scale factor to avoid numeric instability
+    let scale_factor = if width > EPSILON && height_bbox > EPSILON {
+        // Find appropriate scale factor - aim for coordinates around 1000
+        1000.0 / width.max(height_bbox)
+    } else {
+        // For very small polygons, use high scaling
+        1000.0
+    };
+    
+    console_log!("Polygon bbox: x:[{:.3}, {:.3}], y:[{:.3}, {:.3}], scale: {:.3}", 
+                 min_x, max_x, min_y, max_y, scale_factor);
+    
+    // Check for potential precision issues
+    let max_coord_magnitude = unique_shape_points.iter()
+        .map(|p| p.x.abs().max(p.y.abs()))
+        .fold(0.0, f64::max);
+    
+    if max_coord_magnitude > 1e6 {
+        console_log!("Warning: Very large coordinate values (max: {:.3e}) may cause precision issues", max_coord_magnitude);
+    }
+    
     // Prepare scaled coordinates for triangulation
     let mut flat_coords: Vec<f64> = Vec::with_capacity(unique_points_count * 2);
+    let center_x = (min_x + max_x) / 2.0;
+    let center_y = (min_y + max_y) / 2.0;
+    
     for point in unique_shape_points {
-        // Normalize to 0-1 range then scale to 0-1000 for better precision
-        if width > EPSILON && height_bbox > EPSILON {
-            let scaled_x = ((point.x - min_x) / width) * 1000.0;
-            let scaled_y = ((point.y - min_y) / height_bbox) * 1000.0;
-            flat_coords.push(scaled_x);
-            flat_coords.push(scaled_y);
-        } else {
-            // If the polygon is too small or flat, use original coordinates
-            flat_coords.push(point.x);
-            flat_coords.push(point.y);
-        }
+        // Center and scale coordinates for better numeric stability
+        let scaled_x = (point.x - center_x) * scale_factor;
+        let scaled_y = (point.y - center_y) * scale_factor;
+        flat_coords.push(scaled_x);
+        flat_coords.push(scaled_y);
     }
     
     let ring_starts = vec![0];
     
-    // Attempt earcut triangulation with fallback
-    let indices_2d = match earcutr::earcut(&flat_coords, &ring_starts, 2) {
-        Ok(indices) => {
-            if indices.is_empty() {
-                // If earcutr returns empty indices, use fallback
-                console_log!("Earcutr returned empty indices, using simple triangulation");
-                simple_triangulate_polygon(unique_shape_points)
-            } else {
-                // Convert from usize to u32
-                indices.into_iter().map(|i| i as u32).collect()
+    // Pre-validate the input data for earcutr
+    let mut has_error = false;
+    let mut error_message = String::new();
+    
+    // Check for duplicate points or very close points
+    let mut consecutive_close_points = 0;
+    for i in 0..(flat_coords.len() / 2) {
+        let ix = i * 2;
+        let iy = ix + 1;
+        let jx = ((i + 1) % (flat_coords.len() / 2)) * 2;
+        let jy = jx + 1;
+        
+        let dx = flat_coords[ix] - flat_coords[jx];
+        let dy = flat_coords[iy] - flat_coords[jy];
+        
+        if dx.abs() < 1e-10 && dy.abs() < 1e-10 {
+            consecutive_close_points += 1;
+            // Only log a few examples to avoid excessive logging
+            if consecutive_close_points <= 3 {
+                console_log!("Very close consecutive points detected at index {}: ({}, {}) and ({}, {})",
+                          i, flat_coords[ix], flat_coords[iy], flat_coords[jx], flat_coords[jy]);
             }
-        },
-        Err(err) => {
-            // If earcutr fails with an error, use fallback
-            console_log!("Earcutr failed with error: {:?}, using simple triangulation", err);
-            
-            // Let's check what might be wrong with the input data
-            if flat_coords.is_empty() {
-                console_log!("Flat coordinates array is empty");
-            } else if flat_coords.len() % 2 != 0 {
-                console_log!("Flat coordinates array has odd length: {}", flat_coords.len());
-            } else if flat_coords.len() < 6 { // Need at least 3 points (6 coordinates) for a triangle
-                console_log!("Not enough points for triangulation: {} points", flat_coords.len() / 2);
-            } else {
-                // Check for any NaN or infinite values
-                let has_invalid = flat_coords.iter().any(|&val| val.is_nan() || val.is_infinite());
-                if has_invalid {
-                    console_log!("Flat coordinates contain NaN or infinite values");
+        }
+    }
+    
+    if consecutive_close_points > 0 {
+        console_log!("Found {} pairs of very close consecutive points", consecutive_close_points);
+    }
+    
+    // Check for NaN/infinite values
+    let invalid_values = flat_coords.iter()
+        .filter(|&&val| val.is_nan() || val.is_infinite())
+        .count();
+    
+    if invalid_values > 0 {
+        has_error = true;
+        error_message = format!("Input contains {} NaN/infinite values", invalid_values);
+    }
+    
+    // Attempt earcut triangulation with fallback
+    let indices_2d = if !has_error {
+        match earcutr::earcut(&flat_coords, &ring_starts, 2) {
+            Ok(indices) => {
+                if indices.is_empty() {
+                    // If earcutr returns empty indices, use fallback
+                    console_log!("Earcutr returned empty indices, using simple triangulation");
+                    simple_triangulate_polygon(unique_shape_points)
+                } else {
+                    // Log success
+                    console_log!("Earcutr triangulation succeeded with {} triangles", indices.len() / 3);
+                    // Convert from usize to u32
+                    indices.into_iter().map(|i| i as u32).collect()
+                }
+            },
+            Err(err) => {
+                // If earcutr fails with an error, use fallback
+                console_log!("Earcutr failed with error: {:?}, using simple triangulation", err);
+                
+                // Detailed diagnostic output
+                console_log!("Polygon properties: {} points, bbox size: {:.2} x {:.2}", 
+                    unique_points_count, width, height_bbox);
+                
+                if flat_coords.len() < 6 { // Need at least 3 points (6 coordinates) for a triangle
+                    console_log!("Not enough points for triangulation: {} points", flat_coords.len() / 2);
                 }
                 
-                // Check for duplicate points
-                let mut has_duplicates = false;
-                for i in 0..(flat_coords.len() / 2 - 1) {
-                    let ix = i * 2;
-                    let iy = ix + 1;
-                    for j in (i + 1)..(flat_coords.len() / 2) {
-                        let jx = j * 2;
-                        let jy = jx + 1;
-                        if (flat_coords[ix] - flat_coords[jx]).abs() < EPSILON && 
-                           (flat_coords[iy] - flat_coords[jy]).abs() < EPSILON {
-                            console_log!("Found duplicate points at indices {} and {}", i, j);
-                            has_duplicates = true;
-                            break;
-                        }
-                    }
-                    if has_duplicates {
-                        break;
-                    }
-                }
+                simple_triangulate_polygon(unique_shape_points)
             }
-            
-            simple_triangulate_polygon(unique_shape_points)
         }
+    } else {
+        // Skip earcutr due to detected input errors
+        console_log!("Skipping earcutr due to input data issues: {}", error_message);
+        simple_triangulate_polygon(unique_shape_points)
     };
     
     if indices_2d.is_empty() {
@@ -856,7 +900,7 @@ fn create_extruded_shape(
         return BufferGeometry {
             vertices: Vec::new(),
             normals: None,
-            colors: None,
+            colors: None, 
             indices: None,
             uvs: None,
             hasData: false,
@@ -938,7 +982,11 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         Ok(data) => data,
         Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
     };
-    
+
+    // Debug log full input and specific dataset config
+    console_log!("create_polygon_geometry input: {:?}", input);
+    console_log!("create_polygon_geometry vtDataSet config: {:?}", input.vtDataSet);
+
     console_log!("Processing polygon geometry with {} polygons", input.polygons.len());
     
     if input.polygons.is_empty() {
@@ -999,14 +1047,14 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Determine if CSG clipping should be used
         let use_csg = input.csgClipping
             .or(input.vtDataSet.csgClipping)
-            .unwrap_or(true);
+            .unwrap_or(false);
 
+        // Clip against the overall terrain tile bounds (include any shape that overlaps)
+        let half_tile = TERRAIN_SIZE * 0.5;
         let clipped_points = if use_csg {
             clip_polygon_to_bbox_2d(&cleaned_points, &[
-                mesh_points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
-                mesh_points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
-                mesh_points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
-                mesh_points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+                -half_tile, -half_tile,
+                half_tile,  half_tile,
             ])
         } else {
             // No clipping at all, use cleaned polygon directly

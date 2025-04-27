@@ -79,7 +79,14 @@ function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
     sub_class: jsVtDataSet.subClass ? [jsVtDataSet.subClass] : undefined,
     enabled: jsVtDataSet.enabled,
     buffer_size: jsVtDataSet.bufferSize,
-    // Exclude fields that Rust doesn't expect like geometry, color
+    //color: jsVtDataSet.color ?? "#4B85AA",
+    extrusion_depth: jsVtDataSet.extrusionDepth ?? null,
+    min_extrusion_depth: jsVtDataSet.minExtrusionDepth ?? null,
+    height_scale_factor: jsVtDataSet.heightScaleFactor ?? null,
+    use_adaptive_scale_factor: jsVtDataSet.useAdaptiveScaleFactor ?? null,
+    z_offset: jsVtDataSet.zOffset ?? null,
+    align_vertices_to_terrain: jsVtDataSet.alignVerticesToTerrain ?? null,
+    csg_clipping: jsVtDataSet.csgClipping ?? null,
   };
 }
 
