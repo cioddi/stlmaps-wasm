@@ -900,7 +900,7 @@ fn create_extruded_shape(
         return BufferGeometry {
             vertices: Vec::new(),
             normals: None,
-            colors: None, 
+            colors: None,
             indices: None,
             uvs: None,
             hasData: false,
@@ -1024,8 +1024,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             continue; // Skip invalid polygons
         }
         
-        // Get height for extrusion
-        let height = polygon_data.height.unwrap_or(10.0);
+        // Determine extrusion height: prefer positive polygon_data.height, then vtDataSet.extrusionDepth, else default to 10.0
+        let height = polygon_data
+            .height
+            .filter(|h| *h > 0.0)
+            .or(input.vtDataSet.extrusionDepth)
+            .unwrap_or(10.0);
         if height <= 0.0 {
             continue; // Skip flat polygons
         }
