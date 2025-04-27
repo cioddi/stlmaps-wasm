@@ -11,6 +11,7 @@ use geozero::mvt::{Tile, Message};
 
 use crate::module_state::{ModuleState, TileData};
 use crate::{console_log, fetch};
+use crate::polygon_geometry::VtDataSet;
 
 // Reuse the TileRequest struct from elevation.rs
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -50,24 +51,13 @@ pub struct GeometryData {
     pub base_elevation: f64,     // Elevation at geometry position
 }
 
-// Structure for VtDataset config
-#[derive(Serialize, Deserialize, Clone)]
-pub struct VtDataset {
-    pub source_layer: String,
-    pub sub_class: Option<Vec<String>>,
-    pub filter: Option<serde_json::Value>,
-    pub enabled: Option<bool>,
-    // Add other properties as needed
-    pub buffer_size: Option<f64>,
-}
-
 // Input for extracting features from vector tiles
 #[derive(Serialize, Deserialize)]
 pub struct ExtractFeaturesInput {
     pub bbox: Vec<f64>,                     // [minLng, minLat, maxLng, maxLat]
-    pub vt_dataset: VtDataset,              // Configuration for the layer
-    pub bbox_key: String,                   // Cache key for vector tiles
-    pub elevation_bbox_key: Option<String>, // ID to find cached elevation data
+    pub vtDataSet: VtDataSet,               // Configuration for the layer
+    pub bboxKey: String,                    // Cache key for vector tiles
+    pub elevationBBoxKey: Option<String>,   // ID to find cached elevation data
 }
 
 // Feature geometry types
@@ -224,26 +214,18 @@ pub async fn extract_features_from_vector_tiles(
     let min_lat = bbox[1];
     let max_lng = bbox[2];
     let max_lat = bbox[3];
-    let vt_dataset = &input.vt_dataset;
+    let vt_dataset = &input.vtDataSet;
     
     // Always use standard bbox_key format: lng_min_lat_min_lng_max_lat_max
     let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
     
     // Log if input.bbox_key was in a non-standard format
-    if input.bbox_key != bbox_key {
-        console_log!("Converting non-standard key to standard bbox_key format: {} -> {}", input.bbox_key, bbox_key);
+    if input.bboxKey != bbox_key {
+        console_log!("Converting non-standard key to standard bbox_key format: {} -> {}", input.bboxKey, bbox_key);
     }
     
-    console_log!("Starting feature extraction for layer '{}' using cache key: {}", vt_dataset.source_layer, bbox_key);
+    console_log!("Starting feature extraction for layer '{}' using cache key: {}", vt_dataset.sourceLayer, bbox_key);
 
-    // Skip processing if layer is disabled
-    if let Some(enabled) = vt_dataset.enabled {
-        if !enabled {
-            console_log!("Skipping disabled layer: {}", vt_dataset.source_layer);
-            return Ok(to_value(&Vec::<GeometryData>::new())?);
-        }
-    }
-    
     // Retrieve module state (mutable for parsed tile cache)
     let module_state_mutex = ModuleState::get_instance();
     let mut module_state = module_state_mutex.lock().unwrap();
@@ -264,9 +246,9 @@ pub async fn extract_features_from_vector_tiles(
     
     // Get cached elevation data if available 
     // Use the specific elevation_bbox_key provided in the input
-    let elevation_data = match &input.elevation_bbox_key {
+    let elevation_data = match &input.elevationBBoxKey {
         Some(key) => {
-            console_log!("Using elevation_bbox_key for elevation data lookup: {}", key);
+            console_log!("Using elevationBBoxKey for elevation data lookup: {}", key);
             module_state.get_elevation_data(key)
         }
         None => {
@@ -340,9 +322,9 @@ pub async fn extract_features_from_vector_tiles(
         };
 
         // Find the requested layer in the newly parsed tile
-        let layer = match parsed_tile.layers.get(&vt_dataset.source_layer) {
+        let layer = match parsed_tile.layers.get(&vt_dataset.sourceLayer) {
             Some(layer_data) => {
-                console_log!("  Found layer '{}' with {} features in tile {}/{}/{}", vt_dataset.source_layer, layer_data.features.len(), tile_z, tile_x, tile_y);
+                console_log!("  Found layer '{}' with {} features in tile {}/{}/{}", vt_dataset.sourceLayer, layer_data.features.len(), tile_z, tile_x, tile_y);
                 layer_data
             }
             None => {
@@ -364,7 +346,7 @@ pub async fn extract_features_from_vector_tiles(
              
              // --- Filtering (Example - needs refinement based on actual filter structure) ---
             // Filter by subclass if specified (Example property: "class" or "subclass")
-            // if let Some(ref sub_classes) = vt_dataset.sub_class {
+            // if let Some(ref sub_classes) = vt_dataset.subClass {
             //     if let Some(feature_class) = feature.properties.get("class").or_else(|| feature.properties.get("subclass")) {
             //         if let Some(class_str) = feature_class.as_str() {
             //             if !sub_classes.iter().any(|s| s == class_str) {
@@ -512,7 +494,7 @@ pub async fn extract_features_from_vector_tiles(
     }
     
     console_log!("✅ Finished extraction. Processed {} raw features. Extracted {} geometries from source layer '{}' for key '{}'", 
-        feature_count, geometry_data_list.len(), vt_dataset.source_layer, bbox_key);
+        feature_count, geometry_data_list.len(), vt_dataset.sourceLayer, bbox_key);
     
     // Return the extracted geometry data
     Ok(to_value(&geometry_data_list)?)

@@ -75,18 +75,17 @@ interface VtDataSet {
 // Helper function to convert JS VtDataSet to Rust-compatible format
 function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
   return {
-    source_layer: jsVtDataSet.sourceLayer,
-    sub_class: jsVtDataSet.subClass ? [jsVtDataSet.subClass] : undefined,
+    sourceLayer: jsVtDataSet.sourceLayer,
+    subClass: jsVtDataSet.subClass ? [jsVtDataSet.subClass] : undefined,
     enabled: jsVtDataSet.enabled,
-    buffer_size: jsVtDataSet.bufferSize,
-    //color: jsVtDataSet.color ?? "#4B85AA",
-    extrusion_depth: jsVtDataSet.extrusionDepth ?? null,
-    min_extrusion_depth: jsVtDataSet.minExtrusionDepth ?? null,
-    height_scale_factor: jsVtDataSet.heightScaleFactor ?? null,
-    use_adaptive_scale_factor: jsVtDataSet.useAdaptiveScaleFactor ?? null,
-    z_offset: jsVtDataSet.zOffset ?? null,
-    align_vertices_to_terrain: jsVtDataSet.alignVerticesToTerrain ?? null,
-    csg_clipping: jsVtDataSet.csgClipping ?? null,
+    bufferSize: jsVtDataSet.bufferSize,
+    extrusionDepth: jsVtDataSet.extrusionDepth ?? null,
+    minExtrusionDepth: jsVtDataSet.minExtrusionDepth ?? null,
+    heightScaleFactor: jsVtDataSet.heightScaleFactor ?? null,
+    useAdaptiveScaleFactor: jsVtDataSet.useAdaptiveScaleFactor ?? null,
+    zOffset: jsVtDataSet.zOffset ?? null,
+    alignVerticesToTerrain: jsVtDataSet.alignVerticesToTerrain ?? null,
+    csgClipping: jsVtDataSet.csgClipping ?? null,
   };
 }
 
@@ -527,9 +526,9 @@ export const GenerateMeshButton = function () {
         // Fetch data for this layer using our new Rust/WASM implementation
         let layerData = await getWasmModule().extract_features_from_vector_tiles({
           bbox: [minLng, minLat, maxLng, maxLat],
-          vt_dataset: convertToRustVtDataSet(currentLayer),
-          bbox_key: currentBboxHash,
-          elevation_bbox_key: currentBboxHash // assuming elevation data is stored under the same ID
+          vtDataSet: convertToRustVtDataSet(currentLayer),
+          bboxKey: currentBboxHash,
+          elevationBboxKey: currentBboxHash // assuming elevation data is stored under the same ID
         });
 
         console.log(

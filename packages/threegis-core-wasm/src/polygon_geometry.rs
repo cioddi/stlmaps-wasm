@@ -977,6 +977,7 @@ fn create_extruded_shape(
 
 // Process the polygon geometry input and produce a buffer geometry output
 pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
+    console_log!("create_polygon_geometry raw input: {:?}", input_json);
     // Parse the input JSON
     let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
         Ok(data) => data,
