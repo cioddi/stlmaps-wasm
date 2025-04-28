@@ -605,7 +605,17 @@ export const GenerateMeshButton = function () {
               // Compute normals if not provided
               geometry.computeVertexNormals();
             }
-            
+            // Invert normals to correct orientation if they are flipped
+            //{
+              const normalsAttr = geometry.getAttribute('normal');
+              if (normalsAttr) {
+                const array = normalsAttr.array as Float32Array;
+                for (let i = 0; i < array.length; i++) {
+                  array[i] = -array[i];
+                }
+                normalsAttr.needsUpdate = true;
+              }
+            //}  
             // Add color attribute if available
             if (geometryData.colors && geometryData.colors.length > 0) {
               geometry.setAttribute(
@@ -618,7 +628,22 @@ export const GenerateMeshButton = function () {
             if (geometryData.indices && geometryData.indices.length > 0) {
               geometry.setIndex(Array.from(geometryData.indices));
             }
-            
+            // Flip triangle winding to correct face orientation
+            //{
+            //  const idxAttr = geometry.getIndex();
+            //  if (idxAttr) {
+            //    const arr = idxAttr.array as (Uint16Array | Uint32Array);
+            //    for (let i = 0; i < arr.length; i += 3) {
+            //      const tmp = arr[i + 1];
+            //      arr[i + 1] = arr[i + 2];
+            //      arr[i + 2] = tmp;
+            //    }
+            //    idxAttr.needsUpdate = true;
+            //  }
+            //}  
+            // Recompute normals now that winding is corrected
+            geometry.computeVertexNormals();
+
             console.log(`Successfully created ${currentLayer.sourceLayer} geometry with Rust: ${geometry.attributes.position?.count || 0} vertices`);
             
             // Use the created geometry as the promise result
