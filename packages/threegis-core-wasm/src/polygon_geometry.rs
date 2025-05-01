@@ -279,147 +279,6 @@ fn calculate_adaptive_scale_factor(
     dampening + (combined_factor * (1.0 - dampening))
 }
 
-// Compute vertex normals for a mesh
-fn compute_vertex_normals(
-    positions: &[f32],
-    indices: Option<&[u32]>,
-) -> Vec<f32> {
-    let vertex_count = positions.len() / 3;
-    let mut normals = vec![0.0f32; positions.len()];
-    
-    if let Some(idx) = indices {
-        // Use indexed geometry
-        let face_count = idx.len() / 3;
-        
-        for f in 0..face_count {
-            let i = (f * 3) as usize;
-            let a = idx[i] as usize;
-            let b = idx[i + 1] as usize;
-            let c = idx[i + 2] as usize;
-            
-            // Calculate face normal using cross product
-            let ax = positions[a * 3] as f32;
-            let ay = positions[a * 3 + 1] as f32;
-            let az = positions[a * 3 + 2] as f32;
-            
-            let bx = positions[b * 3] as f32;
-            let by = positions[b * 3 + 1] as f32;
-            let bz = positions[b * 3 + 2] as f32;
-            
-            let cx = positions[c * 3] as f32;
-            let cy = positions[c * 3 + 1] as f32;
-            let cz = positions[c * 3 + 2] as f32;
-            
-            // Vectors for sides of the triangle
-            let v1x = bx - ax;
-            let v1y = by - ay;
-            let v1z = bz - az;
-            
-            let v2x = cx - ax;
-            let v2y = cy - ay;
-            let v2z = cz - az;
-            
-            // Cross product to get normal
-            let nx = v1y * v2z - v1z * v2y;
-            let ny = v1z * v2x - v1x * v2z;
-            let nz = v1x * v2y - v1y * v2x;
-            
-            // Normalize
-            let len = (nx*nx + ny*ny + nz*nz).sqrt();
-            let nnx = if len > 0.0 { nx / len } else { 0.0 };
-            let nny = if len > 0.0 { ny / len } else { 0.0 };
-            let nnz = if len > 0.0 { nz / len } else { 1.0 };
-            
-            // Add this normal to each vertex
-            normals[a * 3] += nnx;
-            normals[a * 3 + 1] += nny;
-            normals[a * 3 + 2] += nnz;
-            
-            normals[b * 3] += nnx;
-            normals[b * 3 + 1] += nny;
-            normals[b * 3 + 2] += nnz;
-            
-            normals[c * 3] += nnx;
-            normals[c * 3 + 1] += nny;
-            normals[c * 3 + 2] += nnz;
-        }
-    } else {
-        // Non-indexed geometry
-        let face_count = vertex_count / 3;
-        
-        for f in 0..face_count {
-            let i = (f * 9) as usize;
-            
-            let ax = positions[i];
-            let ay = positions[i + 1];
-            let az = positions[i + 2];
-            
-            let bx = positions[i + 3];
-            let by = positions[i + 4];
-            let bz = positions[i + 5];
-            
-            let cx = positions[i + 6];
-            let cy = positions[i + 7];
-            let cz = positions[i + 8];
-            
-            // Vectors for sides of the triangle
-            let v1x = bx - ax;
-            let v1y = by - ay;
-            let v1z = bz - az;
-            
-            let v2x = cx - ax;
-            let v2y = cy - ay;
-            let v2z = cz - az;
-            
-            // Cross product to get normal
-            let nx = v1y * v2z - v1z * v2y;
-            let ny = v1z * v2x - v1x * v2z;
-            let nz = v1x * v2y - v1y * v2x;
-            
-            // Normalize
-            let len = (nx*nx + ny*ny + nz*nz).sqrt();
-            let nnx = if len > 0.0 { nx / len } else { 0.0 };
-            let nny = if len > 0.0 { ny / len } else { 0.0 };
-            let nnz = if len > 0.0 { nz / len } else { 1.0 };
-            
-            // Add this normal to each vertex
-            normals[i] += nnx;
-            normals[i + 1] += nny;
-            normals[i + 2] += nnz;
-            
-            normals[i + 3] += nnx;
-            normals[i + 4] += nny;
-            normals[i + 5] += nnz;
-            
-            normals[i + 6] += nnx;
-            normals[i + 7] += nny;
-            normals[i + 8] += nnz;
-        }
-    }
-    
-    // Normalize all vertex normals
-    for v in 0..vertex_count {
-        let i = v * 3;
-        let nx = normals[i];
-        let ny = normals[i + 1];
-        let nz = normals[i + 2];
-        
-        let len = (nx*nx + ny*ny + nz*nz).sqrt();
-        
-        if len > 0.0 {
-            normals[i] = nx / len;
-            normals[i + 1] = ny / len;
-            normals[i + 2] = nz / len;
-        } else {
-            normals[i] = 0.0;
-            normals[i + 1] = 0.0;
-            normals[i + 2] = 1.0;
-        }
-    }
-    
-    normals
-}
-
 // Parse a color string in hex format (#RRGGBB)
 fn parse_color(color_str: &str) -> Color {
     if color_str.starts_with('#') && color_str.len() >= 7 {
@@ -731,23 +590,6 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
     clean_polygon_footprint(&clipped)
 }
 
-// Improved simple triangulation fallback when earcutr fails
-fn simple_triangulate_polygon(points: &[Vector2]) -> Vec<u32> {
-    if points.len() < 3 {
-        return Vec::new();
-    }
-    
-    // Simple fan triangulation from the first point
-    let mut indices = Vec::with_capacity((points.len() - 2) * 3);
-    
-    for i in 1..(points.len() - 1) {
-        indices.push(0);           // Center point
-        indices.push(i as u32);    // Current point
-        indices.push((i + 1) as u32); // Next point
-    }
-    
-    indices
-}
 
 // REVISED: Improved implementation of an extruded shape using the extrude_geometry function
 fn create_extruded_shape(
@@ -788,11 +630,11 @@ fn create_extruded_shape(
     let options = serde_json::json!({
         "depth": height,
         "steps": 1,
-        "bevelEnabled": false,
-        "bevelThickness": 0.2,
-        "bevelSize": 0.1,
-        "bevelOffset": 0.0,
-        "bevelSegments": 3
+        "bevelEnabled": false,  // Keep bevel disabled for clean edges
+        "bevelThickness": 0.0,  // Set explicitly to 0 to ensure no bevel effect
+        "bevelSize": 0.0,       // Set explicitly to 0 to ensure no bevel effect
+        "bevelOffset": 0.0,     // Set explicitly to 0 to ensure no bevel effect
+        "bevelSegments": 1      // Set to minimum value since it's not used
     });
     
     // Convert inputs to JsValue

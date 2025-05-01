@@ -1,8 +1,8 @@
-use wasm_bindgen::prelude::*;
-use serde::{Deserialize, Serialize};
-use js_sys::{Object, Float32Array, Array};
 use earcutr::earcut;
+use js_sys::{Array, Float32Array, Object};
+use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
+use wasm_bindgen::prelude::*;
 
 const EPSILON: f64 = 1e-10;
 
@@ -19,7 +19,10 @@ impl Vector2 {
     }
 
     fn clone(&self) -> Self {
-        Self { x: self.x, y: self.y }
+        Self {
+            x: self.x,
+            y: self.y,
+        }
     }
 
     fn add_scaled_vector(&self, v: &Vector2, s: f64) -> Self {
@@ -85,38 +88,38 @@ struct ExtrudeOptions {
     steps: u32,
     #[serde(default = "default_depth")]
     depth: f64,
-    #[serde(default = "default_bevel_enabled")]
-    bevelEnabled: bool,
-    #[serde(default = "default_bevel_thickness")]
-    bevelThickness: f64,
-    #[serde(default = "default_bevel_size")]
-    bevelSize: f64,
-    #[serde(default = "default_bevel_offset")]
-    bevelOffset: f64,
-    #[serde(default = "default_bevel_segments")]
-    bevelSegments: u32,
+    // bevel options have been removed
     #[serde(skip)] // Skip this field during deserialization
     extrudePath: Option<()>, // Changed from JsValue to () since we're not using it
 }
 
 // Default values for options
-fn default_curve_segments() -> u32 { 12 }
-fn default_steps() -> u32 { 1 }
-fn default_depth() -> f64 { 1.0 }
-fn default_bevel_enabled() -> bool { true }
-fn default_bevel_thickness() -> f64 { 0.2 }
-fn default_bevel_size() -> f64 { 0.1 } // In JS this defaults to bevelThickness - 0.1
-fn default_bevel_offset() -> f64 { 0.0 }
-fn default_bevel_segments() -> u32 { 3 }
+fn default_curve_segments() -> u32 {
+    12
+}
+fn default_steps() -> u32 {
+    1
+}
+fn default_depth() -> f64 {
+    1.0
+}
 
 // UV Generator similar to WorldUVGenerator in JS
 struct UVGenerator;
 
 impl UVGenerator {
-    fn generate_top_uv(vertices: &[f32], index_a: usize, index_b: usize, index_c: usize) -> Vec<Vector2> {
+    fn generate_top_uv(
+        vertices: &[f32],
+        index_a: usize,
+        index_b: usize,
+        index_c: usize,
+    ) -> Vec<Vector2> {
         // Bounds checking
         let vertices_len = vertices.len();
-        if (index_a * 3 + 2 >= vertices_len) || (index_b * 3 + 2 >= vertices_len) || (index_c * 3 + 2 >= vertices_len) {
+        if (index_a * 3 + 2 >= vertices_len)
+            || (index_b * 3 + 2 >= vertices_len)
+            || (index_c * 3 + 2 >= vertices_len)
+        {
             // Return default UVs if any index is out of bounds
             return vec![
                 Vector2::new(0.0, 0.0),
@@ -124,7 +127,7 @@ impl UVGenerator {
                 Vector2::new(0.0, 0.0),
             ];
         }
-        
+
         let a_x = vertices[index_a * 3] as f64;
         let a_y = vertices[index_a * 3 + 1] as f64;
         let b_x = vertices[index_b * 3] as f64;
@@ -139,11 +142,20 @@ impl UVGenerator {
         ]
     }
 
-    fn generate_side_wall_uv(vertices: &[f32], index_a: usize, index_b: usize, index_c: usize, index_d: usize) -> Vec<Vector2> {
+    fn generate_side_wall_uv(
+        vertices: &[f32],
+        index_a: usize,
+        index_b: usize,
+        index_c: usize,
+        index_d: usize,
+    ) -> Vec<Vector2> {
         // Bounds checking
         let vertices_len = vertices.len();
-        if (index_a * 3 + 2 >= vertices_len) || (index_b * 3 + 2 >= vertices_len) ||
-           (index_c * 3 + 2 >= vertices_len) || (index_d * 3 + 2 >= vertices_len) {
+        if (index_a * 3 + 2 >= vertices_len)
+            || (index_b * 3 + 2 >= vertices_len)
+            || (index_c * 3 + 2 >= vertices_len)
+            || (index_d * 3 + 2 >= vertices_len)
+        {
             // Return default UVs if any index is out of bounds
             return vec![
                 Vector2::new(0.0, 0.0),
@@ -152,7 +164,7 @@ impl UVGenerator {
                 Vector2::new(0.0, 1.0),
             ];
         }
-        
+
         let a_x = vertices[index_a * 3] as f64;
         let a_y = vertices[index_a * 3 + 1] as f64;
         let a_z = vertices[index_a * 3 + 2] as f64;
@@ -204,7 +216,7 @@ fn merge_overlapping_points(points: &mut Vec<Vector2>) {
     let threshold_sq = EPSILON * EPSILON;
     let mut prev_pos = points[0];
     let mut i = 1;
-    
+
     while i <= points.len() {
         let current_index = i % points.len();
         if current_index == 0 {
@@ -218,7 +230,7 @@ fn merge_overlapping_points(points: &mut Vec<Vector2>) {
 
         let scaling_factor_sqrt = f64::max(
             f64::max(current_pos.x.abs(), current_pos.y.abs()),
-            f64::max(prev_pos.x.abs(), prev_pos.y.abs())
+            f64::max(prev_pos.x.abs(), prev_pos.y.abs()),
         );
         let threshold_sq_scaled = threshold_sq * scaling_factor_sqrt * scaling_factor_sqrt;
 
@@ -240,33 +252,33 @@ fn get_bevel_vec(in_pt: &Vector2, in_prev: &Vector2, in_next: &Vector2) -> Vecto
     let v_next_y = in_next.y - in_pt.y;
 
     let v_prev_lensq = v_prev_x * v_prev_x + v_prev_y * v_prev_y;
-    
+
     // Check for collinear edges
     let collinear0 = v_prev_x * v_next_y - v_prev_y * v_next_x;
-    
+
     if collinear0.abs() > EPSILON {
         // Not collinear
         let v_prev_len = v_prev_lensq.sqrt();
         let v_next_len = (v_next_x * v_next_x + v_next_y * v_next_y).sqrt();
-        
+
         // Shift adjacent points by unit vectors to the left
         let pt_prev_shift_x = in_prev.x - v_prev_y / v_prev_len;
         let pt_prev_shift_y = in_prev.y + v_prev_x / v_prev_len;
-        
+
         let pt_next_shift_x = in_next.x - v_next_y / v_next_len;
         let pt_next_shift_y = in_next.y + v_next_x / v_next_len;
-        
+
         // Scaling factor for v_prev to intersection point
-        let sf = ((pt_next_shift_x - pt_prev_shift_x) * v_next_y -
-                 (pt_next_shift_y - pt_prev_shift_y) * v_next_x) /
-                (v_prev_x * v_next_y - v_prev_y * v_next_x);
-        
+        let sf = ((pt_next_shift_x - pt_prev_shift_x) * v_next_y
+            - (pt_next_shift_y - pt_prev_shift_y) * v_next_x)
+            / (v_prev_x * v_next_y - v_prev_y * v_next_x);
+
         // Vector from inPt to intersection point
         let v_trans_x = pt_prev_shift_x + v_prev_x * sf - in_pt.x;
         let v_trans_y = pt_prev_shift_y + v_prev_y * sf - in_pt.y;
-        
+
         let v_trans_lensq = v_trans_x * v_trans_x + v_trans_y * v_trans_y;
-        
+
         if v_trans_lensq <= 2.0 {
             return Vector2::new(v_trans_x, v_trans_y);
         } else {
@@ -276,7 +288,7 @@ fn get_bevel_vec(in_pt: &Vector2, in_prev: &Vector2, in_next: &Vector2) -> Vecto
     } else {
         // Handle special case of collinear edges
         let mut direction_eq = false; // assumes: opposite
-        
+
         if v_prev_x > EPSILON {
             if v_next_x > EPSILON {
                 direction_eq = true;
@@ -288,7 +300,7 @@ fn get_bevel_vec(in_pt: &Vector2, in_prev: &Vector2, in_next: &Vector2) -> Vecto
         } else if v_prev_y.signum() == v_next_y.signum() {
             direction_eq = true;
         }
-        
+
         if direction_eq {
             // Lines are a straight sequence
             let v_trans_x = -v_prev_y;
@@ -324,60 +336,51 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
     let mut uv_array: Vec<f32> = Vec::new();
     let mut indices_array: Vec<u32> = Vec::new();
     let mut normals_array: Vec<f32> = Vec::new();
-    
+
     // Determine if extrusion is along a path
     let mut extrude_by_path = false;
     let mut extrude_pts: Vec<Vector3> = Vec::new();
-    let mut spline_tube = SplineTube { normals: Vec::new(), binormals: Vec::new() };
-    
+    let mut spline_tube = SplineTube {
+        normals: Vec::new(),
+        binormals: Vec::new(),
+    };
+
     if let Some(_path) = &opts.extrudePath {
         // For simplicity, we're not implementing the full path extrusion here
         // In a complete implementation, we would extract points from the path
         // and compute the Frenet frames
         extrude_by_path = true;
-        
+
         // Create placeholder points along the path
         for s in 0..=opts.steps {
             let t = s as f64 / opts.steps as f64;
             // In a real implementation, these would come from the path
             extrude_pts.push(Vector3::new(t, 0.0, 0.0));
-            
+
             // Set up normals and binormals for the path
             spline_tube.normals.push(Vector3::new(0.0, 1.0, 0.0));
             spline_tube.binormals.push(Vector3::new(0.0, 0.0, 1.0));
         }
     }
-    
-    // Adjust bevel parameters if bevels are not enabled
-    let mut bevel_segments = opts.bevelSegments;
-    let mut bevel_thickness = opts.bevelThickness;
-    let mut bevel_size = opts.bevelSize;
-    let mut bevel_offset = opts.bevelOffset;
-    
-    if !opts.bevelEnabled {
-        bevel_segments = 0;
-        bevel_thickness = 0.0;
-        bevel_size = 0.0;
-        bevel_offset = 0.0;
-    }
-    
+
     for RawShape(rings) in raw_shapes.into_iter() {
-        if rings.is_empty() { continue; }
-        
+        if rings.is_empty() {
+            continue;
+        }
+
         // Convert raw points to Vector2 objects
-        let mut contour: Vec<Vector2> = rings[0].iter()
-            .map(|p| Vector2::new(p[0], p[1]))
-            .collect();
-            
-        let mut holes: Vec<Vec<Vector2>> = rings[1..].iter()
+        let mut contour: Vec<Vector2> = rings[0].iter().map(|p| Vector2::new(p[0], p[1])).collect();
+
+        let mut holes: Vec<Vec<Vector2>> = rings[1..]
+            .iter()
             .map(|ring| ring.iter().map(|p| Vector2::new(p[0], p[1])).collect())
             .collect();
-        
+
         // Ensure proper winding of contours
         let reverse = !is_clockwise(&contour);
         if reverse {
             contour.reverse();
-            
+
             // Check holes winding direction
             for hole in &mut holes {
                 if is_clockwise(hole) {
@@ -385,159 +388,94 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
                 }
             }
         }
-        
+
         // Merge overlapping points
         merge_overlapping_points(&mut contour);
         for hole in &mut holes {
             merge_overlapping_points(hole);
         }
-        
+
         // Compute placeholder array where vertices will be stored temporarily
         let mut placeholder: Vec<f32> = Vec::new();
-        
+
         // Find directions for point movement (bevel vectors)
         let num_holes = holes.len();
         let mut vertices = contour.clone();
-        
+
         // Calculate bevel vectors for contour
         let mut contour_movements: Vec<Vector2> = Vec::with_capacity(contour.len());
         for i in 0..contour.len() {
             let j = if i == 0 { contour.len() - 1 } else { i - 1 };
             let k = if i == contour.len() - 1 { 0 } else { i + 1 };
-            
+
             contour_movements.push(get_bevel_vec(&contour[i], &contour[j], &contour[k]));
         }
-        
+
         // Calculate bevel vectors for holes
         let mut holes_movements: Vec<Vec<Vector2>> = Vec::with_capacity(num_holes);
         let mut vertices_movements = contour_movements.clone();
-        
+
         for h in 0..num_holes {
             let hole = &holes[h];
             let mut one_hole_movements: Vec<Vector2> = Vec::with_capacity(hole.len());
-            
+
             for i in 0..hole.len() {
                 let j = if i == 0 { hole.len() - 1 } else { i - 1 };
                 let k = if i == hole.len() - 1 { 0 } else { i + 1 };
-                
+
                 one_hole_movements.push(get_bevel_vec(&hole[i], &hole[j], &hole[k]));
             }
-            
+
             holes_movements.push(one_hole_movements.clone());
             vertices_movements.extend(one_hole_movements);
-            
+
             // Append hole vertices to the vertices array
             vertices.extend(hole.clone());
         }
-        
+
         // Triangulate the shape (with holes)
         let faces: Vec<Vec<usize>>;
-        
-        if bevel_segments == 0 {
-            // For non-beveled shapes, we can triangulate directly
-            // Flatten coordinates for earcut
-            let mut data: Vec<f64> = Vec::new();
-            for pt in &contour { 
-                data.push(pt.x); 
-                data.push(pt.y);
-            }
-            
-            let mut hole_indices: Vec<usize> = Vec::new();
-            let mut idx_offset = contour.len();
-            
-            for hole in &holes {
-                hole_indices.push(idx_offset);
-                for pt in hole { 
-                    data.push(pt.x); 
-                    data.push(pt.y);
-                }
-                idx_offset += hole.len();
-            }
-            
-            // Triangulate using earcut
-            let indices = earcut(&data, &hole_indices, 2);
-            let indices = indices.unwrap(); // Handle error as needed
-            
-            // Convert to the faces format (triplets of indices)
-            faces = indices.chunks(3)
-                .map(|chunk| chunk.to_vec())
-                .collect();
-        } else {
-            // For beveled shapes, we need to contract the contour and expand the holes
-            // This implementation is simplified compared to Three.js
-            let mut contracted_contour_vertices: Vec<Vector2> = Vec::new();
-            let mut expanded_hole_vertices: Vec<Vec<Vector2>> = Vec::new();
-            
-            // Contract the shape for bevel
-            let bs = bevel_size + bevel_offset;
-            
-            for i in 0..contour.len() {
-                let vert = scale_pt2(&contour[i], &contour_movements[i], bs);
-                contracted_contour_vertices.push(vert);
-            }
-            
-            // Expand holes for bevel
-            for h in 0..num_holes {
-                let ahole = &holes[h];
-                let one_hole_movements = &holes_movements[h];
-                let mut one_hole_vertices: Vec<Vector2> = Vec::new();
-                
-                for i in 0..ahole.len() {
-                    let vert = scale_pt2(&ahole[i], &one_hole_movements[i], bs);
-                    one_hole_vertices.push(vert);
-                }
-                
-                expanded_hole_vertices.push(one_hole_vertices);
-            }
-            
-            // Triangulate the contracted shape
-            // Flatten coordinates for earcut
-            let mut data: Vec<f64> = Vec::new();
-            for pt in &contracted_contour_vertices {
+
+        // For non-beveled shapes, we can triangulate directly
+        // Flatten coordinates for earcut
+        let mut data: Vec<f64> = Vec::new();
+        for pt in &contour {
+            data.push(pt.x);
+            data.push(pt.y);
+        }
+
+        let mut hole_indices: Vec<usize> = Vec::new();
+        let mut idx_offset = contour.len();
+
+        for hole in &holes {
+            hole_indices.push(idx_offset);
+            for pt in hole {
                 data.push(pt.x);
                 data.push(pt.y);
             }
-            
-            let mut hole_indices: Vec<usize> = Vec::new();
-            let mut idx_offset = contracted_contour_vertices.len();
-            
-            for hole in &expanded_hole_vertices {
-                hole_indices.push(idx_offset);
-                for pt in hole {
-                    data.push(pt.x);
-                    data.push(pt.y);
-                }
-                idx_offset += hole.len();
-            }
-            
-            // Triangulate using earcut
-            let indices = earcut(&data, &hole_indices, 2);
-            let indices = indices.unwrap(); // Handle error as needed
-            
-            // Convert to the faces format (triplets of indices)
-            faces = indices.chunks(3)
-                .map(|chunk| chunk.to_vec())
-                .collect();
+            idx_offset += hole.len();
         }
-        
+
+        // Triangulate using earcut
+        let indices = earcut(&data, &hole_indices, 2);
+        let indices = indices.unwrap(); // Handle error as needed
+
+        // Convert to the faces format (triplets of indices)
+        faces = indices.chunks(3).map(|chunk| chunk.to_vec()).collect();
+
         // Function to add a vertex to the placeholder
         let mut v = |x: f64, y: f64, z: f64| {
             placeholder.push(x as f32);
             placeholder.push(y as f32);
             placeholder.push(z as f32);
         };
-        
+
         let vlen = vertices.len();
-        let bs = bevel_size + bevel_offset;
-        
+
         // Add back facing vertices
         for i in 0..vlen {
-            let vert = if opts.bevelEnabled {
-                scale_pt2(&vertices[i], &vertices_movements[i], bs)
-            } else {
-                vertices[i]
-            };
-            
+            let vert = vertices[i];
+
             if !extrude_by_path {
                 v(vert.x, vert.y, 0.0);
             } else {
@@ -545,20 +483,16 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
                 let normal = spline_tube.normals[0].multiply_scalar(vert.x);
                 let binormal = spline_tube.binormals[0].multiply_scalar(vert.y);
                 let position = extrude_pts[0].add(&normal).add(&binormal);
-                
+
                 v(position.x, position.y, position.z);
             }
         }
-        
+
         // Add stepped vertices (front facing for simple extrusion)
         for s in 1..=opts.steps {
             for i in 0..vlen {
-                let vert = if opts.bevelEnabled {
-                    scale_pt2(&vertices[i], &vertices_movements[i], bs)
-                } else {
-                    vertices[i]
-                };
-                
+                let vert = vertices[i];
+
                 if !extrude_by_path {
                     v(vert.x, vert.y, opts.depth / opts.steps as f64 * s as f64);
                 } else {
@@ -566,50 +500,15 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
                     let normal = spline_tube.normals[s as usize].multiply_scalar(vert.x);
                     let binormal = spline_tube.binormals[s as usize].multiply_scalar(vert.y);
                     let position = extrude_pts[s as usize].add(&normal).add(&binormal);
-                    
+
                     v(position.x, position.y, position.z);
                 }
             }
         }
-        
-        // Add bevel segment planes
-        for b in (0..bevel_segments).rev() {
-            let t = b as f64 / bevel_segments as f64;
-            let z = bevel_thickness * (t * PI / 2.0).cos();
-            let bs = bevel_size * (t * PI / 2.0).sin() + bevel_offset;
-            
-            // Contract shape
-            for i in 0..contour.len() {
-                let vert = scale_pt2(&contour[i], &contour_movements[i], bs);
-                v(vert.x, vert.y, opts.depth + z);
-            }
-            
-            // Expand holes
-            for h in 0..holes.len() {
-                let ahole = &holes[h];
-                let one_hole_movements = &holes_movements[h];
-                
-                for i in 0..ahole.len() {
-                    let vert = scale_pt2(&ahole[i], &one_hole_movements[i], bs);
-                    
-                    if !extrude_by_path {
-                        v(vert.x, vert.y, opts.depth + z);
-                    } else {
-                        // For path extrusion
-                        let s = opts.steps as usize;
-                        let normal = spline_tube.normals[s].multiply_scalar(vert.x);
-                        let binormal = spline_tube.binormals[s].multiply_scalar(vert.y);
-                        let position = extrude_pts[s].add(&normal).add(&binormal);
-                        
-                        v(position.x, position.y, position.z + z);
-                    }
-                }
-            }
-        }
-        
+
         // Add faces
         let vertex_count = vertices_array.len() / 3;
-        
+
         // Define a function to add triangular faces
         fn add_triangle(
             indices_array: &mut Vec<u32>,
@@ -620,22 +519,22 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
             placeholder: &[f32],
             a: usize,
             b: usize,
-            c: usize
+            c: usize,
         ) {
             // Get the current vertex index before adding any vertices
             let current_vertex = vertices_array.len() / 3;
-            
+
             // Add these indices (they'll point to the vertices we're about to add)
             indices_array.push(current_vertex as u32);
             indices_array.push(current_vertex as u32 + 1);
             indices_array.push(current_vertex as u32 + 2);
-            
+
             // Safety check for array bounds
             let placeholder_len = placeholder.len();
-            let has_out_of_bounds = (a * 3 + 2 >= placeholder_len) || 
-                                   (b * 3 + 2 >= placeholder_len) || 
-                                   (c * 3 + 2 >= placeholder_len);
-            
+            let has_out_of_bounds = (a * 3 + 2 >= placeholder_len)
+                || (b * 3 + 2 >= placeholder_len)
+                || (c * 3 + 2 >= placeholder_len);
+
             if has_out_of_bounds {
                 // Use default values if any index is out of bounds
                 // Add default normal vector (pointing upward)
@@ -648,20 +547,20 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
                 normals_array.push(0.0);
                 normals_array.push(0.0);
                 normals_array.push(1.0);
-                
+
                 // Add default vertex positions - a small triangle at z=0
                 vertices_array.push(0.0);
                 vertices_array.push(0.0);
                 vertices_array.push(0.0);
-                
+
                 vertices_array.push(0.1);
                 vertices_array.push(0.0);
                 vertices_array.push(0.0);
-                
+
                 vertices_array.push(0.0);
                 vertices_array.push(0.1);
                 vertices_array.push(0.0);
-                
+
                 // Add default UVs
                 uv_array.push(0.0);
                 uv_array.push(0.0);
@@ -669,27 +568,28 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
                 uv_array.push(0.0);
                 uv_array.push(0.0);
                 uv_array.push(1.0);
-                
+
                 return;
             }
-            
+
             // Compute normal
             let ax = placeholder[a * 3] as f64;
             let ay = placeholder[a * 3 + 1] as f64;
             let az = placeholder[a * 3 + 2] as f64;
-            
+
             let bx = placeholder[b * 3] as f64;
             let by = placeholder[b * 3 + 1] as f64;
             let bz = placeholder[b * 3 + 2] as f64;
-            
+
             let cx = placeholder[c * 3] as f64;
             let cy = placeholder[c * 3 + 1] as f64;
             let cz = placeholder[c * 3 + 2] as f64;
-            
+
             // Check for degenerate triangle - if any vertices are the same
-            if (ax == bx && ay == by && az == bz) || 
-               (bx == cx && by == cy && bz == cz) || 
-               (cx == ax && cy == ay && cz == az) {
+            if (ax == bx && ay == by && az == bz)
+                || (bx == cx && by == cy && bz == cz)
+                || (cx == ax && cy == ay && cz == az)
+            {
                 // Degenerate triangle - use Z-up normal
                 normals_array.push(0.0);
                 normals_array.push(0.0);
@@ -699,19 +599,19 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
                 let v1x = bx - ax;
                 let v1y = by - ay;
                 let v1z = bz - az;
-                
+
                 let v2x = cx - ax;
                 let v2y = cy - ay;
                 let v2z = cz - az;
-                
+
                 // Cross product
                 let nx = v1y * v2z - v1z * v2y;
                 let ny = v1z * v2x - v1x * v2z;
                 let nz = v1x * v2y - v1y * v2x;
-                
+
                 // Normalize
                 let len = (nx * nx + ny * ny + nz * nz).sqrt();
-                
+
                 // Set the normal (will be used for all three vertices)
                 const EPSILON: f64 = 1e-10; // Small threshold to avoid division by zero
                 if len > EPSILON {
@@ -743,45 +643,40 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
                     }
                 }
             }
-            
+
             // Duplicate the same normal for the other two vertices (b and c)
             // Get the normal components we just added for vertex a
             let nx_norm = normals_array[normals_array.len() - 3];
             let ny_norm = normals_array[normals_array.len() - 2];
             let nz_norm = normals_array[normals_array.len() - 1];
-            
+
             // Apply the same normal to vertex b
             normals_array.push(nx_norm);
             normals_array.push(ny_norm);
             normals_array.push(nz_norm);
-            
+
             // Apply the same normal to vertex c
             normals_array.push(nx_norm);
             normals_array.push(ny_norm);
             normals_array.push(nz_norm);
-            
+
             // Add vertex positions
             for &idx in &[a, b, c] {
                 vertices_array.push(placeholder[idx * 3]);
                 vertices_array.push(placeholder[idx * 3 + 1]);
                 vertices_array.push(placeholder[idx * 3 + 2]);
             }
-            
+
             // Generate UVs - make sure to use proper UV mapping
-            let uvs = UVGenerator::generate_top_uv(
-                &placeholder,
-                a,
-                b,
-                c
-            );
-            
+            let uvs = UVGenerator::generate_top_uv(&placeholder, a, b, c);
+
             // Add UVs
             for uv in uvs {
                 uv_array.push(uv.x as f32);
                 uv_array.push(uv.y as f32);
             }
         }
-        
+
         // Define a function for quadrilateral faces (two triangles)
         fn add_quad(
             indices_array: &mut Vec<u32>,
@@ -793,119 +688,132 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
             a: usize,
             b: usize,
             c: usize,
-            d: usize
+            d: usize,
         ) {
             // Add first triangle
             add_triangle(
-                indices_array, vertices_array, normals_array, uv_array,
-                vertex_count, placeholder, a, b, d
+                indices_array,
+                vertices_array,
+                normals_array,
+                uv_array,
+                vertex_count,
+                placeholder,
+                a,
+                b,
+                d,
             );
-            
+
             // Add second triangle
             add_triangle(
-                indices_array, vertices_array, normals_array, uv_array,
-                vertex_count, placeholder, b, c, d
+                indices_array,
+                vertices_array,
+                normals_array,
+                uv_array,
+                vertex_count,
+                placeholder,
+                b,
+                c,
+                d,
             );
         }
-        
-        // Build top and bottom faces
-        if opts.bevelEnabled {
-            let layer_bottom = 0;
-            let offset_bottom = vlen * layer_bottom;
-            
-            // Bottom faces
-            for face in &faces {
-                add_triangle(
-                    &mut indices_array, &mut vertices_array, &mut normals_array, &mut uv_array,
-                    vertex_count, &placeholder,
-                    face[2] + offset_bottom, face[1] + offset_bottom, face[0] + offset_bottom
-                );
-            }
-            
-            let layer_top = opts.steps as usize + bevel_segments as usize * 2;
-            let offset_top = vlen * layer_top;
-            
-            // Top faces
-            for face in &faces {
-                add_triangle(
-                    &mut indices_array, &mut vertices_array, &mut normals_array, &mut uv_array,
-                    vertex_count, &placeholder,
-                    face[0] + offset_top, face[1] + offset_top, face[2] + offset_top
-                );
-            }
-        } else {
-            // Bottom faces
-            for face in &faces {
-                add_triangle(
-                    &mut indices_array, &mut vertices_array, &mut normals_array, &mut uv_array,
-                    vertex_count, &placeholder,
-                    face[2], face[1], face[0]
-                );
-            }
-            
-            // Top faces
-            let offset_top = vlen * opts.steps as usize;
-            for face in &faces {
-                add_triangle(
-                    &mut indices_array, &mut vertices_array, &mut normals_array, &mut uv_array,
-                    vertex_count, &placeholder,
-                    face[0] + offset_top, face[1] + offset_top, face[2] + offset_top
-                );
-            }
+
+        // Bottom faces
+        for face in &faces {
+            add_triangle(
+                &mut indices_array,
+                &mut vertices_array,
+                &mut normals_array,
+                &mut uv_array,
+                vertex_count,
+                &placeholder,
+                face[2],
+                face[1],
+                face[0],
+            );
         }
-        
+
+        // Top faces
+        let offset_top = vlen * opts.steps as usize;
+        for face in &faces {
+            add_triangle(
+                &mut indices_array,
+                &mut vertices_array,
+                &mut normals_array,
+                &mut uv_array,
+                vertex_count,
+                &placeholder,
+                face[0] + offset_top,
+                face[1] + offset_top,
+                face[2] + offset_top,
+            );
+        }
+
         // Build side faces
         let mut layer_offset = 0;
-        
+
         // Sidewalls for contour
         for i in (0..contour.len()).rev() {
             let j = i;
             let k = if i == 0 { contour.len() - 1 } else { i - 1 };
-            
-            for s in 0..opts.steps as usize + bevel_segments as usize * 2 {
+
+            for s in 0..opts.steps as usize * 2 {
                 let slen1 = vlen * s;
                 let slen2 = vlen * (s + 1);
-                
+
                 let a = layer_offset + j + slen1;
                 let b = layer_offset + k + slen1;
                 let c = layer_offset + k + slen2;
                 let d = layer_offset + j + slen2;
-                
+
                 add_quad(
-                    &mut indices_array, &mut vertices_array, &mut normals_array, &mut uv_array,
-                    vertex_count, &placeholder,
-                    a, b, c, d
+                    &mut indices_array,
+                    &mut vertices_array,
+                    &mut normals_array,
+                    &mut uv_array,
+                    vertex_count,
+                    &placeholder,
+                    a,
+                    b,
+                    c,
+                    d,
                 );
             }
         }
-        
+
         layer_offset += contour.len();
-        
+
         // Sidewalls for holes
         for h in 0..holes.len() {
             let ahole = &holes[h];
-            
+
             for i in (0..ahole.len()).rev() {
                 let j = i;
                 let k = if i == 0 { ahole.len() - 1 } else { i - 1 };
-                
-                for s in 0..opts.steps as usize + bevel_segments as usize * 2 {
+
+                for s in 0..opts.steps as usize * 2 {
                     let slen1 = vlen * s;
                     let slen2 = vlen * (s + 1);
-                    
+
                     let a = layer_offset + j + slen1;
                     let b = layer_offset + k + slen1;
                     let c = layer_offset + k + slen2;
                     let d = layer_offset + j + slen2;
-                    
+
                     add_quad(
-                        &mut indices_array, &mut vertices_array, &mut normals_array, &mut uv_array,
-                        vertex_count, &placeholder,
-                        a, b, c, d
+                        &mut indices_array,
+                        &mut vertices_array,
+                        &mut normals_array,
+                        &mut uv_array,
+                        vertex_count,
+                        &placeholder,
+                        a,
+                        b,
+                        c,
+                        d,
                     );
                 }
             }
-            
+
             layer_offset += ahole.len();
         }
     }
@@ -915,18 +823,18 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
     let pos_arr = Float32Array::from(vertices_array.as_slice());
     let normal_arr = Float32Array::from(normals_array.as_slice());
     let uv_arr = Float32Array::from(uv_array.as_slice());
-    
+
     // Create a JS array of indices
     let indices_js_array = Array::new_with_length(indices_array.len() as u32);
     for (i, &index) in indices_array.iter().enumerate() {
         indices_js_array.set(i as u32, JsValue::from_f64(index as f64));
     }
-    
+
     // Set properties on result
     js_sys::Reflect::set(&result, &JsValue::from_str("position"), &pos_arr)?;
     js_sys::Reflect::set(&result, &JsValue::from_str("normal"), &normal_arr)?;
     js_sys::Reflect::set(&result, &JsValue::from_str("uv"), &uv_arr)?;
     js_sys::Reflect::set(&result, &JsValue::from_str("index"), &indices_js_array)?;
-    
+
     Ok(result.into())
 }
