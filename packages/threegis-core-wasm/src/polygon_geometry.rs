@@ -777,8 +777,34 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // Debug log full input and specific dataset config
     console_log!("create_polygon_geometry input: {:?}", input);
     console_log!("create_polygon_geometry vtDataSet config: {:?}", input.vtDataSet);
+    // Compute dataset terrain extremes by sampling the elevation grid
+    const SAMPLE_COUNT: usize = 10;
+    let mut dataset_lowest_z = f64::INFINITY;
+    let mut dataset_highest_z = f64::NEG_INFINITY;
+    for i in 0..SAMPLE_COUNT {
+        let t_i = i as f64 / ((SAMPLE_COUNT - 1) as f64);
+        let sample_lng = input.bbox[0] + (input.bbox[2] - input.bbox[0]) * t_i;
+        for j in 0..SAMPLE_COUNT {
+            let t_j = j as f64 / ((SAMPLE_COUNT - 1) as f64);
+            let sample_lat = input.bbox[1] + (input.bbox[3] - input.bbox[1]) * t_j;
+            let elev = sample_terrain_elevation_at_point(
+                sample_lng, sample_lat,
+                &input.elevationGrid, &input.gridSize,
+                &input.bbox, input.minElevation, input.maxElevation,
+            );
+            dataset_lowest_z = dataset_lowest_z.min(elev);
+            dataset_highest_z = dataset_highest_z.max(elev);
+        }
+    }
+    let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
+    let use_same_z_offset = input.useSameZOffset;
 
     console_log!("Processing polygon geometry with {} polygons", input.polygons.len());
+    // Dataset terrain extremes for fallback and shared Z offset
+    let dataset_lowest_z = input.minElevation;
+    let dataset_highest_z = input.maxElevation;
+    let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
+    let use_same_z_offset = input.useSameZOffset;
     
     if input.polygons.is_empty() {
         console_log!("No polygons to process");
@@ -815,14 +841,35 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             continue; // Skip invalid polygons
         }
         
-        // Determine extrusion height: prefer positive polygon_data.height, then vtDataSet.extrusionDepth, else default to 10.0
-        let height = polygon_data
-            .height
-            .filter(|h| *h > 0.0)
-            .or(input.vtDataSet.extrusionDepth)
-            .unwrap_or(10.0);
+        // Determine extrusion height: vtDataSet.extrusionDepth first, then feature height, else dataset range
+        let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
+        let mut height = if let Some(d) = input.vtDataSet.extrusionDepth {
+            d
+        } else if let Some(h) = polygon_data.height.filter(|h| *h > 0.0) {
+            h
+        } else {
+            dataset_range
+        };
+        // Enforce minimum extrusion depth
+        if let Some(min_d) = input.vtDataSet.minExtrusionDepth {
+            if height < min_d {
+                height = min_d;
+            }
+        }
+        // Clamp to reasonable bounds
+        height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
+        // Apply adaptive scale first, then heightScaleFactor
+        if input.vtDataSet.useAdaptiveScaleFactor.unwrap_or(false) {
+            height *= calculate_adaptive_scale_factor(
+                input.bbox[0], input.bbox[1], input.bbox[2], input.bbox[3],
+                input.minElevation, input.maxElevation,
+            );
+        }
+        if let Some(factor) = input.vtDataSet.heightScaleFactor {
+            height *= factor;
+        }
         if height <= 0.0 {
-            continue; // Skip flat polygons
+            continue; // Skip flat geometry
         }
         
         // Apply mesh coordinates transform
@@ -859,9 +906,26 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             continue;
         }
 
-        // Create 3D extruded shape
-        let z_offset = input.vtDataSet.zOffset.unwrap_or(0.0);
-        let geometry = create_extruded_shape(&clipped_points, height, z_offset);
+        // Compute per-polygon terrain extremes for base alignment
+        let mut lowest_terrain_z = f64::INFINITY;
+        let mut highest_terrain_z = f64::NEG_INFINITY;
+        for pt in &points {
+            let tz = sample_terrain_elevation_at_point(
+                pt.x, pt.y, &input.elevationGrid, &input.gridSize,
+                &input.bbox, input.minElevation, input.maxElevation,
+            );
+            lowest_terrain_z = lowest_terrain_z.min(tz);
+            highest_terrain_z = highest_terrain_z.max(tz);
+        }
+        // Optionally use dataset-wide extremes
+        if use_same_z_offset {
+            lowest_terrain_z = dataset_lowest_z;
+            highest_terrain_z = dataset_highest_z;
+        }
+        // Base z offset: position bottom face at terrain surface minus submerge
+        let z_offset = lowest_terrain_z + input.vtDataSet.zOffset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
+        // Create extruded shape with base aligned to terrain
+        let mut geometry = create_extruded_shape(&clipped_points, height, z_offset);
         
         if geometry.hasData {
             all_geometries.push(geometry);
