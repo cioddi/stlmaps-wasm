@@ -501,10 +501,10 @@ fn clip_polygon_to_bbox_2d(
     // Perform intersection to clip the polygon to the bbox
     let clipped_csg = poly_csg.intersection(&bbox_csg);
     
-    // Handle empty result
+    // Handle empty result - if CSG intersection fails, fall back to simple clipping
     if clipped_csg.polygons.is_empty() {
-        console_log!("CSG intersection resulted in empty geometry");
-        return Vec::new();
+        console_log!("CSG intersection resulted in empty geometry - using simple clipping fallback");
+        return simple_clip_polygon(&ccw_points, mesh_bbox_coords);
     }
     
     // Find the polygon with the largest area
@@ -545,6 +545,44 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
     let min_y = bbox[1];
     let max_x = bbox[2];
     let max_y = bbox[3];
+    
+    // Early return if there's nothing to clip
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    
+    // Check if the polygon intersects with the bbox at all
+    let mut bbox_intersected = false;
+    
+    // Check if any point is inside the bbox
+    for pt in points {
+        if pt.x >= min_x && pt.x <= max_x && pt.y >= min_y && pt.y <= max_y {
+            bbox_intersected = true;
+            break;
+        }
+    }
+    
+    // If no points are inside, check if any edges intersect the bbox
+    if !bbox_intersected {
+        for i in 0..points.len() {
+            let p1 = points[i];
+            let p2 = points[(i + 1) % points.len()];
+            
+            // Check all 4 bbox edges for intersections
+            if (p1.x < min_x && p2.x > min_x) || (p1.x > min_x && p2.x < min_x) ||
+               (p1.x < max_x && p2.x > max_x) || (p1.x > max_x && p2.x < max_x) ||
+               (p1.y < min_y && p2.y > min_y) || (p1.y > min_y && p2.y < min_y) ||
+               (p1.y < max_y && p2.y > max_y) || (p1.y > max_y && p2.y < max_y) {
+                bbox_intersected = true;
+                break;
+            }
+        }
+    }
+    
+    // If there's no intersection at all, return empty
+    if !bbox_intersected {
+        return Vec::new();
+    }
     
     let mut clipped = Vec::new();
     
@@ -605,8 +643,80 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
         }
     }
     
-    // Clean up the clipped points
-    clean_polygon_footprint(&clipped)
+    // Special handling for empty results or cases with just 1-2 points
+    if clipped.len() < 3 {
+        // Check if the polygon overlaps the bbox corners
+        let corner_points = vec![
+            Vector2 { x: min_x, y: min_y },
+            Vector2 { x: max_x, y: min_y },
+            Vector2 { x: max_x, y: max_y },
+            Vector2 { x: min_x, y: max_y }
+        ];
+        
+        // Add bbox corners that are inside the original polygon
+        // This handles the case where the polygon completely contains the bbox
+        for corner in &corner_points {
+            let mut inside = false;
+            let mut j = points.len() - 1;
+            
+            for i in 0..points.len() {
+                let pi = points[i];
+                let pj = points[j];
+                
+                if ((pi.y > corner.y) != (pj.y > corner.y)) &&
+                   (corner.x < (pj.x - pi.x) * (corner.y - pi.y) / (pj.y - pi.y) + pi.x) {
+                    inside = !inside;
+                }
+                
+                j = i;
+            }
+            
+            if inside {
+                clipped.push(*corner);
+            }
+        }
+        
+        // If we've added corners, add the first corner again to close the polygon
+        if clipped.len() >= 3 && clipped.len() <= 4 {
+            clipped.push(clipped[0]);
+        }
+    }
+    
+    // Clean up the clipped points and ensure they form a valid polygon
+    let cleaned = clean_polygon_footprint(&clipped);
+    
+    // If we still don't have a valid polygon after all this, try to return a minimal
+    // valid polygon that represents the clipped area
+    if cleaned.len() < 3 && clipped.len() > 0 {
+        // Create a minimal valid polygon from the points we have
+        let mut fallback = clipped.clone();
+        
+        // Add necessary points to form a triangle at minimum
+        if fallback.len() == 1 {
+            // If we have just one point, add two more to make a small triangle
+            let pt = fallback[0];
+            let epsilon = 0.01; // Small offset
+            fallback.push(Vector2 { x: pt.x + epsilon, y: pt.y });
+            fallback.push(Vector2 { x: pt.x, y: pt.y + epsilon });
+        } else if fallback.len() == 2 {
+            // If we have two points, add a third to make a triangle
+            let p1 = fallback[0];
+            let p2 = fallback[1];
+            let mid_x = (p1.x + p2.x) / 2.0;
+            let mid_y = (p1.y + p2.y) / 2.0;
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            // Create a point perpendicular to the line
+            fallback.push(Vector2 { 
+                x: mid_x - dy * 0.01, 
+                y: mid_y + dx * 0.01 
+            });
+        }
+        
+        return fallback;
+    }
+    
+    cleaned
 }
 
 
@@ -617,7 +727,76 @@ fn create_extruded_shape(
     z_offset: f64
 ) -> BufferGeometry {
     // Basic validation
-    if height < MIN_HEIGHT || unique_shape_points.len() < 3 {
+    if height < MIN_HEIGHT {
+        return BufferGeometry {
+            vertices: Vec::new(),
+            normals: None,
+            colors: None,
+            indices: None,
+            uvs: None,
+            hasData: false,
+        };
+    }
+    
+    // Ensure we have enough points to form a valid polygon
+    if unique_shape_points.len() < 3 {
+        // For debugging purposes
+        console_log!("Warning: Attempting to extrude a shape with fewer than 3 points: {}", unique_shape_points.len());
+        
+        // Not enough points to form a polygon, create a simple fallback shape
+        if unique_shape_points.len() == 1 {
+            // For a single point, create a small square around it
+            let pt = unique_shape_points[0];
+            let size = 0.1; // Small size to make it visible but not obtrusive
+            let square_points = vec![
+                Vector2 { x: pt.x - size, y: pt.y - size },
+                Vector2 { x: pt.x + size, y: pt.y - size },
+                Vector2 { x: pt.x + size, y: pt.y + size },
+                Vector2 { x: pt.x - size, y: pt.y + size },
+            ];
+            return create_extruded_shape(&square_points, height, z_offset);
+        } else if unique_shape_points.len() == 2 {
+            // For two points, create a thin rectangle along the line
+            let p1 = unique_shape_points[0];
+            let p2 = unique_shape_points[1];
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            let length = (dx * dx + dy * dy).sqrt();
+            
+            // Skip if the points are too close
+            if length < 0.001 {
+                return BufferGeometry {
+                    vertices: Vec::new(),
+                    normals: None,
+                    colors: None,
+                    indices: None,
+                    uvs: None,
+                    hasData: false,
+                };
+            }
+            
+            // Normalize direction vector
+            let nx = dx / length;
+            let ny = dy / length;
+            
+            // Perpendicular vector 
+            let px = -ny;
+            let py = nx;
+            
+            // Width of the rectangle
+            let width = 0.05;
+            
+            // Create a thin rectangle
+            let rect_points = vec![
+                Vector2 { x: p1.x + px * width, y: p1.y + py * width },
+                Vector2 { x: p2.x + px * width, y: p2.y + py * width },
+                Vector2 { x: p2.x - px * width, y: p2.y - py * width },
+                Vector2 { x: p1.x - px * width, y: p1.y - py * width },
+            ];
+            return create_extruded_shape(&rect_points, height, z_offset);
+        }
+        
+        // If we somehow get here with no points, return empty geometry
         return BufferGeometry {
             vertices: Vec::new(),
             normals: None,
@@ -629,8 +808,8 @@ fn create_extruded_shape(
     }
     
     let unique_points_count = unique_shape_points.len();
-    console_log!("Extruding polygon with {} points using extrude_geometry", unique_points_count);
-    console_log!("Extrusion height: {}", height);
+    // console_log!("Extruding polygon with {} points using extrude_geometry", unique_points_count);
+    // console_log!("Extrusion height: {}", height);
     // Convert the points to the format expected by extrude_geometry
     // The extrude function expects a list of shapes, each shape is an array of rings
     // First ring is the contour, any additional rings are holes (not used here)
@@ -786,7 +965,7 @@ fn create_extruded_shape(
 
 // Process the polygon geometry input and produce a buffer geometry output
 pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
-    console_log!("create_polygon_geometry raw input: {:?}", input_json);
+    // console_log!("create_polygon_geometry raw input: {:?}", input_json);
     // Parse the input JSON
     let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
         Ok(data) => data,
@@ -794,8 +973,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     };
 
     // Debug log full input and specific dataset config
-    console_log!("create_polygon_geometry input: {:?}", input);
-    console_log!("create_polygon_geometry vtDataSet config: {:?}", input.vtDataSet);
+    // console_log!("create_polygon_geometry input: {:?}", input);
+    // console_log!("create_polygon_geometry vtDataSet config: {:?}", input.vtDataSet);
     // Compute dataset terrain extremes by sampling the elevation grid
     const SAMPLE_COUNT: usize = 10;
     let mut dataset_lowest_z = f64::INFINITY;
@@ -912,18 +1091,69 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
         // Clip against the overall terrain tile bounds (include any shape that overlaps)
         let half_tile = TERRAIN_SIZE * 0.5;
+        
+        // Always ensure points are properly clipped to the terrain bounds
         let clipped_points = if use_csg {
+            // CSG-based clipping for smoother results
             clip_polygon_to_bbox_2d(&cleaned_points, &[
                 -half_tile, -half_tile,
                 half_tile,  half_tile,
             ])
         } else {
-            // No clipping at all, use cleaned polygon directly
-            cleaned_points.clone()
+            // Simple clipping when CSG is not enabled
+            simple_clip_polygon(&cleaned_points, &[
+                -half_tile, -half_tile,
+                half_tile,  half_tile,
+            ])
         };
-        if clipped_points.len() < 3 {
+        
+        // Skip polygons that truly have no valid representation after clipping
+        if clipped_points.is_empty() {
             continue;
         }
+        
+        // For polygons with insufficient points, try to reuse the original cleaned points
+        // if they might be partially visible within the bbox
+        let final_points = if clipped_points.len() < 3 {
+            // Check if the original polygon should visibly intersect the bbox
+            let half_tile_with_margin = half_tile * 1.05; // 5% margin
+            let bbox_with_margin = [
+                -half_tile_with_margin, -half_tile_with_margin,
+                half_tile_with_margin, half_tile_with_margin,
+            ];
+            
+            // Check if original polygon has any points near the bbox
+            let potentially_visible = cleaned_points.iter().any(|pt| {
+                pt.x >= bbox_with_margin[0] && pt.x <= bbox_with_margin[2] &&
+                pt.y >= bbox_with_margin[1] && pt.y <= bbox_with_margin[3]
+            });
+            
+            if potentially_visible {
+                // Use a simple fallback approach to clip against the actual boundary
+                let fallback = simple_clip_polygon(&cleaned_points, &[
+                    -half_tile, -half_tile,
+                    half_tile, half_tile,
+                ]);
+                
+                if fallback.len() >= 3 {
+                    fallback
+                } else {
+                    // Last chance: If we're dealing with a very large polygon that extends
+                    // far beyond the bounds, just use the bbox corners to ensure we show something
+                    vec![
+                        Vector2 { x: -half_tile, y: -half_tile },
+                        Vector2 { x: half_tile, y: -half_tile },
+                        Vector2 { x: half_tile, y: half_tile },
+                        Vector2 { x: -half_tile, y: half_tile },
+                    ]
+                }
+            } else {
+                // Not visible, skip
+                continue;
+            }
+        } else {
+            clipped_points
+        };
 
         // Compute per-polygon terrain extremes for base alignment
         let mut lowest_terrain_z = f64::INFINITY;
@@ -944,7 +1174,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Base z offset: position bottom face at terrain surface minus submerge
         let z_offset = lowest_terrain_z + input.vtDataSet.zOffset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
         // Create extruded shape with base aligned to terrain
-        let mut geometry = create_extruded_shape(&clipped_points, height, z_offset);
+        let mut geometry = create_extruded_shape(&final_points, height, z_offset);
         
         if geometry.hasData {
             all_geometries.push(geometry);
