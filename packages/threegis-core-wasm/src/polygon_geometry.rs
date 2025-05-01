@@ -1,8 +1,13 @@
-use serde::{Serialize, Deserialize};
-use csgrs::csg::CSG;
 use crate::console_log;
 use crate::module_state::ModuleState;
 use crate::bbox_filter::polygon_intersects_bbox;
+use crate::extrude;
+use serde::{Serialize, Deserialize};
+use csgrs::csg::CSG;
+use js_sys::{Object, Array, Float32Array};
+use wasm_bindgen::prelude::JsValue;
+use serde_wasm_bindgen::{from_value, to_value};
+use wasm_bindgen::prelude::*;
 
 // Constants ported from TypeScript
 const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
@@ -744,7 +749,7 @@ fn simple_triangulate_polygon(points: &[Vector2]) -> Vec<u32> {
     indices
 }
 
-// REVISED: Improved implementation of an extruded shape with robust triangulation
+// REVISED: Improved implementation of an extruded shape using the extrude_geometry function
 fn create_extruded_shape(
     unique_shape_points: &[Vector2],
     height: f64,
@@ -763,215 +768,163 @@ fn create_extruded_shape(
     }
     
     let unique_points_count = unique_shape_points.len();
-    console_log!("Triangulating polygon with {} points", unique_points_count);
+    console_log!("Extruding polygon with {} points using extrude_geometry", unique_points_count);
     
-    // Preprocess points for triangulation - using a more stable scaling approach
-    // This helps earcutr handle coordinates with very different magnitudes
-    let mut min_x = std::f64::MAX;
-    let mut min_y = std::f64::MAX;
-    let mut max_x = std::f64::MIN;
-    let mut max_y = std::f64::MIN;
-    
-    // Find the bounding box
+    // Convert the points to the format expected by extrude_geometry
+    // The extrude function expects a list of shapes, each shape is an array of rings
+    // First ring is the contour, any additional rings are holes (not used here)
+    let mut shape_points = Vec::new();
     for point in unique_shape_points {
-        min_x = min_x.min(point.x);
-        min_y = min_y.min(point.y);
-        max_x = max_x.max(point.x);
-        max_y = max_y.max(point.y);
+        shape_points.push([point.x, point.y]);
     }
     
-    // Calculate width and height of bounding box
-    let width = max_x - min_x;
-    let height_bbox = max_y - min_y;
+    // Create the shape array (rings array)
+    let shape_with_rings = vec![shape_points];
     
-    // Use fixed scale factor to avoid numeric instability
-    let scale_factor = if width > EPSILON && height_bbox > EPSILON {
-        // Find appropriate scale factor - aim for coordinates around 1000
-        1000.0 / width.max(height_bbox)
-    } else {
-        // For very small polygons, use high scaling
-        1000.0
+    // Create an array of shapes (only one shape for now)
+    let shapes = vec![shape_with_rings];
+    
+    // Create options for extrusion
+    let options = serde_json::json!({
+        "depth": height,
+        "steps": 1,
+        "bevelEnabled": false,
+        "bevelThickness": 0.2,
+        "bevelSize": 0.1,
+        "bevelOffset": 0.0,
+        "bevelSegments": 3
+    });
+    
+    // Convert inputs to JsValue
+    let shapes_js = match to_value(&shapes) {
+        Ok(val) => val,
+        Err(e) => {
+            console_log!("Failed to convert shapes to JsValue: {:?}", e);
+            return BufferGeometry {
+                vertices: Vec::new(),
+                normals: None,
+                colors: None,
+                indices: None,
+                uvs: None,
+                hasData: false,
+            };
+        }
     };
     
-    console_log!("Polygon bbox: x:[{:.3}, {:.3}], y:[{:.3}, {:.3}], scale: {:.3}", 
-                 min_x, max_x, min_y, max_y, scale_factor);
+    let options_js = match to_value(&options) {
+        Ok(val) => val,
+        Err(e) => {
+            console_log!("Failed to convert options to JsValue: {:?}", e);
+            return BufferGeometry {
+                vertices: Vec::new(),
+                normals: None,
+                colors: None,
+                indices: None,
+                uvs: None,
+                hasData: false,
+            };
+        }
+    };
     
-    // Check for potential precision issues
-    let max_coord_magnitude = unique_shape_points.iter()
-        .map(|p| p.x.abs().max(p.y.abs()))
-        .fold(0.0, f64::max);
+    // Call the extrude_geometry function
+    let extruded_js = match extrude::extrude_geometry(&shapes_js, &options_js) {
+        Ok(val) => val,
+        Err(e) => {
+            console_log!("Error during extrusion: {:?}", e);
+            return BufferGeometry {
+                vertices: Vec::new(),
+                normals: None,
+                colors: None,
+                indices: None,
+                uvs: None,
+                hasData: false,
+            };
+        }
+    };
     
-    if max_coord_magnitude > 1e6 {
-        console_log!("Warning: Very large coordinate values (max: {:.3e}) may cause precision issues", max_coord_magnitude);
+    // Apply z_offset to the vertices
+    if z_offset != 0.0 {
+        // Get position array from extruded_js
+        let position_js = js_sys::Reflect::get(&extruded_js, &JsValue::from_str("position")).unwrap_or(JsValue::null());
+        if position_js.is_null() {
+            console_log!("Failed to get position from extrusion result");
+            return BufferGeometry {
+                vertices: Vec::new(),
+                normals: None,
+                colors: None,
+                indices: None,
+                uvs: None,
+                hasData: false,
+            };
+        }
+        
+        let position_array = Float32Array::from(position_js);
+        let mut vertices = vec![0.0; position_array.length() as usize];
+        position_array.copy_to(&mut vertices);
+        
+        // Apply z_offset to each z value (every 3rd element)
+        for i in (2..vertices.len()).step_by(3) {
+            vertices[i] += z_offset as f32;
+        }
+        
+        // Replace the position array in the result
+        let new_position = Float32Array::from(vertices.as_slice());
+        js_sys::Reflect::set(&extruded_js, &JsValue::from_str("position"), &new_position).unwrap();
     }
     
-    // Prepare scaled coordinates for triangulation
-    let mut flat_coords: Vec<f64> = Vec::with_capacity(unique_points_count * 2);
-    let center_x = (min_x + max_x) / 2.0;
-    let center_y = (min_y + max_y) / 2.0;
+    // Convert the extrusion result to our BufferGeometry struct
+    let position_js = js_sys::Reflect::get(&extruded_js, &JsValue::from_str("position")).unwrap_or(JsValue::null());
+    let normal_js = js_sys::Reflect::get(&extruded_js, &JsValue::from_str("normal")).unwrap_or(JsValue::null());
+    let index_js = js_sys::Reflect::get(&extruded_js, &JsValue::from_str("index")).unwrap_or(JsValue::null());
+    let uv_js = js_sys::Reflect::get(&extruded_js, &JsValue::from_str("uv")).unwrap_or(JsValue::null());
     
-    for point in unique_shape_points {
-        // Center and scale coordinates for better numeric stability
-        let scaled_x = (point.x - center_x) * scale_factor;
-        let scaled_y = (point.y - center_y) * scale_factor;
-        flat_coords.push(scaled_x);
-        flat_coords.push(scaled_y);
+    let mut vertices = Vec::new();
+    let mut normals = Vec::new();
+    let mut indices = Vec::new();
+    let mut uvs = Vec::new();
+    
+    // Extract position
+    if !position_js.is_null() {
+        let position_array = Float32Array::from(position_js);
+        vertices = vec![0.0; position_array.length() as usize];
+        position_array.copy_to(&mut vertices);
     }
     
-    let ring_starts = vec![0];
+    // Extract normals
+    if !normal_js.is_null() {
+        let normal_array = Float32Array::from(normal_js);
+        normals = vec![0.0; normal_array.length() as usize];
+        normal_array.copy_to(&mut normals);
+    }
     
-    // Pre-validate the input data for earcutr
-    let mut has_error = false;
-    let mut error_message = String::new();
-    
-    // Check for duplicate points or very close points
-    let mut consecutive_close_points = 0;
-    for i in 0..(flat_coords.len() / 2) {
-        let ix = i * 2;
-        let iy = ix + 1;
-        let jx = ((i + 1) % (flat_coords.len() / 2)) * 2;
-        let jy = jx + 1;
-        
-        let dx = flat_coords[ix] - flat_coords[jx];
-        let dy = flat_coords[iy] - flat_coords[jy];
-        
-        if dx.abs() < 1e-10 && dy.abs() < 1e-10 {
-            consecutive_close_points += 1;
-            // Only log a few examples to avoid excessive logging
-            if consecutive_close_points <= 3 {
-                console_log!("Very close consecutive points detected at index {}: ({}, {}) and ({}, {})",
-                          i, flat_coords[ix], flat_coords[iy], flat_coords[jx], flat_coords[jy]);
-            }
+    // Extract indices
+    if !index_js.is_null() {
+        let index_array = Array::from(&index_js);
+        indices = Vec::with_capacity(index_array.length() as usize);
+        for i in 0..index_array.length() {
+            let value = index_array.get(i);
+            indices.push(value.as_f64().unwrap_or(0.0) as u32);
         }
     }
     
-    if consecutive_close_points > 0 {
-        console_log!("Found {} pairs of very close consecutive points", consecutive_close_points);
+    // Extract uvs
+    if !uv_js.is_null() {
+        let uv_array = Float32Array::from(uv_js);
+        uvs = vec![0.0; uv_array.length() as usize];
+        uv_array.copy_to(&mut uvs);
     }
     
-    // Check for NaN/infinite values
-    let invalid_values = flat_coords.iter()
-        .filter(|&&val| val.is_nan() || val.is_infinite())
-        .count();
+    // Check if we have any vertices before constructing the result
+    let has_data = !vertices.is_empty();
     
-    if invalid_values > 0 {
-        has_error = true;
-        error_message = format!("Input contains {} NaN/infinite values", invalid_values);
-    }
-    
-    // Attempt earcut triangulation with fallback
-    let indices_2d = if !has_error {
-        match earcutr::earcut(&flat_coords, &ring_starts, 2) {
-            Ok(indices) => {
-                if indices.is_empty() {
-                    // If earcutr returns empty indices, use fallback
-                    console_log!("Earcutr returned empty indices, using simple triangulation");
-                    simple_triangulate_polygon(unique_shape_points)
-                } else {
-                    // Log success
-                    console_log!("Earcutr triangulation succeeded with {} triangles", indices.len() / 3);
-                    // Convert from usize to u32
-                    indices.into_iter().map(|i| i as u32).collect()
-                }
-            },
-            Err(err) => {
-                // If earcutr fails with an error, use fallback
-                console_log!("Earcutr failed with error: {:?}, using simple triangulation", err);
-                
-                // Detailed diagnostic output
-                console_log!("Polygon properties: {} points, bbox size: {:.2} x {:.2}", 
-                    unique_points_count, width, height_bbox);
-                
-                if flat_coords.len() < 6 { // Need at least 3 points (6 coordinates) for a triangle
-                    console_log!("Not enough points for triangulation: {} points", flat_coords.len() / 2);
-                }
-                
-                simple_triangulate_polygon(unique_shape_points)
-            }
-        }
-    } else {
-        // Skip earcutr due to detected input errors
-        console_log!("Skipping earcutr due to input data issues: {}", error_message);
-        simple_triangulate_polygon(unique_shape_points)
-    };
-    
-    if indices_2d.is_empty() {
-        console_log!("Both earcutr and fallback triangulation failed");
-        return BufferGeometry {
-            vertices: Vec::new(),
-            normals: None,
-            colors: None,
-            indices: None,
-            uvs: None,
-            hasData: false,
-        };
-    }
-    
-    // Generate 3D vertices
-    let mut vertices: Vec<f32> = Vec::with_capacity(unique_points_count * 2 * 3);
-    
-    // Add bottom face vertices
-    for point in unique_shape_points {
-        vertices.push(point.x as f32);
-        vertices.push(point.y as f32);
-        vertices.push(z_offset as f32);
-    }
-    
-    // Add top face vertices
-    for point in unique_shape_points {
-        vertices.push(point.x as f32);
-        vertices.push(point.y as f32);
-        vertices.push((z_offset + height) as f32);
-    }
-    
-    // Generate 3D indices
-    let top_vertex_offset = unique_points_count as u32;
-    let mut indices = Vec::with_capacity(indices_2d.len() * 2 + unique_points_count * 6);
-    
-    // Bottom face (flip winding)
-    for i in (0..indices_2d.len()).step_by(3) {
-        indices.push(indices_2d[i]);
-        indices.push(indices_2d[i+2]);
-        indices.push(indices_2d[i+1]);
-    }
-    
-    // Top face
-    for i in (0..indices_2d.len()).step_by(3) {
-        indices.push(indices_2d[i] + top_vertex_offset);
-        indices.push(indices_2d[i+1] + top_vertex_offset);
-        indices.push(indices_2d[i+2] + top_vertex_offset);
-    }
-    
-    // Side walls
-    for i in 0..unique_points_count {
-        let next = (i + 1) % unique_points_count;
-        
-        let bottom_current = i as u32;
-        let bottom_next = next as u32;
-        let top_current = bottom_current + top_vertex_offset;
-        let top_next = bottom_next + top_vertex_offset;
-        
-        // First triangle
-        indices.push(bottom_current);
-        indices.push(bottom_next);
-        indices.push(top_next);
-        
-        // Second triangle
-        indices.push(bottom_current);
-        indices.push(top_next);
-        indices.push(top_current);
-    }
-    
-    // Generate normals
-    let normals = compute_vertex_normals(&vertices, Some(&indices));
-    
+    // Create and return the BufferGeometry
     BufferGeometry {
         vertices,
-        indices: Some(indices),
-        normals: Some(normals),
+        normals: if normals.is_empty() { None } else { Some(normals) },
+        indices: if indices.is_empty() { None } else { Some(indices) },
         colors: None,
-        uvs: None,
-        hasData: true,
+        uvs: if uvs.is_empty() { None } else { Some(uvs) },
+        hasData: has_data,
     }
 }
 

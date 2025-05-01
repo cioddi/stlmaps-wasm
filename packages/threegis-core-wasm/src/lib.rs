@@ -26,6 +26,9 @@ pub mod geojson_features;
 mod polygon_geometry;
 // Import our bbox filter module
 mod bbox_filter;
+// Import our geometry functions
+#[path = "../geometry_functions/extrude.rs"]
+pub mod extrude;
 
 use module_state::{ModuleState, TileData, create_tile_key};
 use models::{CacheStats, RustResponse};
