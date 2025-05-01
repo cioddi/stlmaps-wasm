@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 use wasm_bindgen::prelude::*;
 
+use crate::console_log;
+
 const EPSILON: f64 = 1e-10;
 
 /// Simple 2D vector struct
@@ -77,23 +79,42 @@ struct SplineTube {
 
 /// Raw shape structure: first vector is contour, remaining vectors are holes.
 #[derive(Deserialize)]
-struct RawShape(Vec<Vec<[f64; 2]>>);
+pub struct RawShape(pub Vec<Vec<[f64; 2]>>);
 
 /// Extrusion options.
+#[derive(Clone, Debug)]
+pub struct ExtrudeOptions {
+    pub curve_segments: u32,
+    pub steps: u32,
+    pub depth: f64,
+    pub extrude_path: Option<()>, // For future path extrusion support
+}
+
+impl Default for ExtrudeOptions {
+    fn default() -> Self {
+        Self {
+            curve_segments: 12,
+            steps: 1,
+            depth: 1.0,
+            extrude_path: None,
+        }
+    }
+}
+
+// For JSON deserialization compatibility
 #[derive(Deserialize)]
-struct ExtrudeOptions {
+struct ExtrudeOptionsJson {
     #[serde(default = "default_curve_segments")]
     curveSegments: u32,
     #[serde(default = "default_steps")]
     steps: u32,
     #[serde(default = "default_depth")]
     depth: f64,
-    // bevel options have been removed
-    #[serde(skip)] // Skip this field during deserialization
-    extrudePath: Option<()>, // Changed from JsValue to () since we're not using it
+    #[serde(skip)]
+    extrudePath: Option<()>,
 }
 
-// Default values for options
+// Default values for JSON options
 fn default_curve_segments() -> u32 {
     12
 }
@@ -142,58 +163,6 @@ impl UVGenerator {
         ]
     }
 
-    fn generate_side_wall_uv(
-        vertices: &[f32],
-        index_a: usize,
-        index_b: usize,
-        index_c: usize,
-        index_d: usize,
-    ) -> Vec<Vector2> {
-        // Bounds checking
-        let vertices_len = vertices.len();
-        if (index_a * 3 + 2 >= vertices_len)
-            || (index_b * 3 + 2 >= vertices_len)
-            || (index_c * 3 + 2 >= vertices_len)
-            || (index_d * 3 + 2 >= vertices_len)
-        {
-            // Return default UVs if any index is out of bounds
-            return vec![
-                Vector2::new(0.0, 0.0),
-                Vector2::new(1.0, 0.0),
-                Vector2::new(1.0, 1.0),
-                Vector2::new(0.0, 1.0),
-            ];
-        }
-
-        let a_x = vertices[index_a * 3] as f64;
-        let a_y = vertices[index_a * 3 + 1] as f64;
-        let a_z = vertices[index_a * 3 + 2] as f64;
-        let b_x = vertices[index_b * 3] as f64;
-        let b_y = vertices[index_b * 3 + 1] as f64;
-        let b_z = vertices[index_b * 3 + 2] as f64;
-        let c_x = vertices[index_c * 3] as f64;
-        let c_y = vertices[index_c * 3 + 1] as f64;
-        let c_z = vertices[index_c * 3 + 2] as f64;
-        let d_x = vertices[index_d * 3] as f64;
-        let d_y = vertices[index_d * 3 + 1] as f64;
-        let d_z = vertices[index_d * 3 + 2] as f64;
-
-        if (a_y - b_y).abs() < (a_x - b_x).abs() {
-            vec![
-                Vector2::new(a_x, 1.0 - a_z),
-                Vector2::new(b_x, 1.0 - b_z),
-                Vector2::new(c_x, 1.0 - c_z),
-                Vector2::new(d_x, 1.0 - d_z),
-            ]
-        } else {
-            vec![
-                Vector2::new(a_y, 1.0 - a_z),
-                Vector2::new(b_y, 1.0 - b_z),
-                Vector2::new(c_y, 1.0 - c_z),
-                Vector2::new(d_y, 1.0 - d_z),
-            ]
-        }
-    }
 }
 
 /// Helper function to check if points are in clockwise order
@@ -244,94 +213,39 @@ fn merge_overlapping_points(points: &mut Vec<Vector2>) {
     }
 }
 
-/// Get bevel vector for a point
-fn get_bevel_vec(in_pt: &Vector2, in_prev: &Vector2, in_next: &Vector2) -> Vector2 {
-    let v_prev_x = in_pt.x - in_prev.x;
-    let v_prev_y = in_pt.y - in_prev.y;
-    let v_next_x = in_next.x - in_pt.x;
-    let v_next_y = in_next.y - in_pt.y;
-
-    let v_prev_lensq = v_prev_x * v_prev_x + v_prev_y * v_prev_y;
-
-    // Check for collinear edges
-    let collinear0 = v_prev_x * v_next_y - v_prev_y * v_next_x;
-
-    if collinear0.abs() > EPSILON {
-        // Not collinear
-        let v_prev_len = v_prev_lensq.sqrt();
-        let v_next_len = (v_next_x * v_next_x + v_next_y * v_next_y).sqrt();
-
-        // Shift adjacent points by unit vectors to the left
-        let pt_prev_shift_x = in_prev.x - v_prev_y / v_prev_len;
-        let pt_prev_shift_y = in_prev.y + v_prev_x / v_prev_len;
-
-        let pt_next_shift_x = in_next.x - v_next_y / v_next_len;
-        let pt_next_shift_y = in_next.y + v_next_x / v_next_len;
-
-        // Scaling factor for v_prev to intersection point
-        let sf = ((pt_next_shift_x - pt_prev_shift_x) * v_next_y
-            - (pt_next_shift_y - pt_prev_shift_y) * v_next_x)
-            / (v_prev_x * v_next_y - v_prev_y * v_next_x);
-
-        // Vector from inPt to intersection point
-        let v_trans_x = pt_prev_shift_x + v_prev_x * sf - in_pt.x;
-        let v_trans_y = pt_prev_shift_y + v_prev_y * sf - in_pt.y;
-
-        let v_trans_lensq = v_trans_x * v_trans_x + v_trans_y * v_trans_y;
-
-        if v_trans_lensq <= 2.0 {
-            return Vector2::new(v_trans_x, v_trans_y);
-        } else {
-            let shrink_by = (v_trans_lensq / 2.0).sqrt();
-            return Vector2::new(v_trans_x / shrink_by, v_trans_y / shrink_by);
-        }
-    } else {
-        // Handle special case of collinear edges
-        let mut direction_eq = false; // assumes: opposite
-
-        if v_prev_x > EPSILON {
-            if v_next_x > EPSILON {
-                direction_eq = true;
-            }
-        } else if v_prev_x < -EPSILON {
-            if v_next_x < -EPSILON {
-                direction_eq = true;
-            }
-        } else if v_prev_y.signum() == v_next_y.signum() {
-            direction_eq = true;
-        }
-
-        if direction_eq {
-            // Lines are a straight sequence
-            let v_trans_x = -v_prev_y;
-            let v_trans_y = v_prev_x;
-            let shrink_by = v_prev_lensq.sqrt();
-            return Vector2::new(v_trans_x / shrink_by, v_trans_y / shrink_by);
-        } else {
-            // Lines are a straight spike
-            let v_trans_x = v_prev_x;
-            let v_trans_y = v_prev_y;
-            let shrink_by = (v_prev_lensq / 2.0).sqrt();
-            return Vector2::new(v_trans_x / shrink_by, v_trans_y / shrink_by);
-        }
-    }
-}
-
-/// Scale a point along a vector
-fn scale_pt2(pt: &Vector2, vec: &Vector2, size: f64) -> Vector2 {
-    pt.add_scaled_vector(vec, size)
-}
-
 /// Extrude a list of shapes into geometry. Each shape is an array of rings: first is contour, others are holes.
+/// This version maintains JavaScript compatibility through JsValue parameters and is exported via wasm_bindgen.
 /// Returns an object with `position` and `uv` Float32Array attributes plus indices and normals.
+///
+/// For internal Rust usage, prefer using `extrude_shape` instead.
 #[wasm_bindgen]
 pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, JsValue> {
     // Deserialize input
     let raw_shapes: Vec<RawShape> = serde_wasm_bindgen::from_value(shapes.clone())
         .map_err(|e| JsValue::from_str(&format!("Invalid shapes: {}", e)))?;
-    let opts: ExtrudeOptions = serde_wasm_bindgen::from_value(options.clone())
+    
+    // Parse options from JSON
+    let options_json: ExtrudeOptionsJson = serde_wasm_bindgen::from_value(options.clone())
         .map_err(|e| JsValue::from_str(&format!("Invalid options: {}", e)))?;
+    
+    // Convert to our native Rust struct
+    let opts = ExtrudeOptions {
+        curve_segments: options_json.curveSegments,
+        steps: options_json.steps,
+        depth: options_json.depth,
+        extrude_path: options_json.extrudePath,
+    };
+    
+    // Call the native implementation
+    extrude_geometry_native(raw_shapes, opts)
+}
 
+/// Extrude a list of shapes into geometry using Rust native types.
+/// This is the core implementation without the JS binding layer.
+pub fn extrude_geometry_native(
+    raw_shapes: Vec<RawShape>,
+    opts: ExtrudeOptions,
+) -> Result<JsValue, JsValue> {
     let mut vertices_array: Vec<f32> = Vec::new();
     let mut uv_array: Vec<f32> = Vec::new();
     let mut indices_array: Vec<u32> = Vec::new();
@@ -345,7 +259,7 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
         binormals: Vec::new(),
     };
 
-    if let Some(_path) = &opts.extrudePath {
+    if let Some(_path) = &opts.extrude_path {
         // For simplicity, we're not implementing the full path extrusion here
         // In a complete implementation, we would extract points from the path
         // and compute the Frenet frames
@@ -459,6 +373,7 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
             for i in 0..vlen {
                 let vert = vertices[i];
 
+                console_log!("Extruding vertex: extrude_by_path {} ({}, {}, {}) {}", extrude_by_path, vert.x, vert.y, s, opts.depth);
                 if !extrude_by_path {
                     v(vert.x, vert.y, opts.depth / opts.steps as f64 * s as f64);
                 } else {
@@ -803,4 +718,37 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
     js_sys::Reflect::set(&result, &JsValue::from_str("index"), &indices_js_array)?;
 
     Ok(result.into())
+}
+
+/// A convenience function to directly extrude a shape with Rust native types.
+/// This is meant to be used from other Rust code in the crate, providing a more idiomatic
+/// Rust interface compared to using JsValue parameters.
+///
+/// # Parameters
+/// * `shapes` - A vector of shapes, where each shape is a vector of rings (first is contour, others are holes).
+/// * `depth` - The depth of the extrusion.
+/// * `steps` - The number of steps for the extrusion (default: 1).
+///
+/// # Returns
+/// * `Result<JsValue, JsValue>` - The extruded geometry data or an error.
+pub fn extrude_shape(
+    shapes: Vec<Vec<Vec<[f64; 2]>>>,
+    depth: f64,
+    steps: u32,
+) -> Result<JsValue, JsValue> {
+    // Convert the shapes to RawShapes
+    let raw_shapes: Vec<RawShape> = shapes.into_iter()
+        .map(|shape| RawShape(shape))
+        .collect();
+    
+    // Create the extrusion options
+    let opts = ExtrudeOptions {
+        depth,
+        steps,
+        curve_segments: 12, // Default
+        extrude_path: None,
+    };
+    
+    // Call the native implementation
+    extrude_geometry_native(raw_shapes, opts)
 }

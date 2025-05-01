@@ -372,13 +372,14 @@ pub async fn extract_features_from_vector_tiles(
             //     // }
             // }
 
-             // --- Height Extraction ---
+            // --- Height Extraction ---
             let height = feature.properties.get("height")
                 .and_then(|v| v.as_f64())
                 .or_else(|| feature.properties.get("render_height").and_then(|v| v.as_f64()))
                 .or_else(|| feature.properties.get("ele").and_then(|v| v.as_f64())) // Check 'ele' too
                 .unwrap_or(0.0);
-             // if height > 0.0 { console_log!("    Found height: {}", height); }
+            // Debug: log extracted height for each feature
+            console_log!("    [vectortile] Feature ID {}: extracted height = {}", feature.id.unwrap_or(0), height);
 
              // --- Geometry Processing & Transformation ---
             let geometry_type_str = feature.geometry_type.as_str();

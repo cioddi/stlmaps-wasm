@@ -611,7 +611,7 @@ fn create_extruded_shape(
     
     let unique_points_count = unique_shape_points.len();
     console_log!("Extruding polygon with {} points using extrude_geometry", unique_points_count);
-    
+    console_log!("Extrusion height: {}", height);
     // Convert the points to the format expected by extrude_geometry
     // The extrude function expects a list of shapes, each shape is an array of rings
     // First ring is the contour, any additional rings are holes (not used here)
@@ -663,8 +663,8 @@ fn create_extruded_shape(
         }
     };
     
-    // Call the extrude_geometry function
-    let extruded_js = match extrude::extrude_geometry(&shapes_js, &options_js) {
+    // Call the extrude_shape function with native Rust types
+    let extruded_js = match extrude::extrude_shape(shapes, height, 1) {
         Ok(val) => val,
         Err(e) => {
             console_log!("Error during extrusion: {:?}", e);
