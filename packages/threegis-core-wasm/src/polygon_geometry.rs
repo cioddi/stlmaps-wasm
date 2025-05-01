@@ -630,11 +630,6 @@ fn create_extruded_shape(
     let options = serde_json::json!({
         "depth": height,
         "steps": 1,
-        "bevelEnabled": false,  // Keep bevel disabled for clean edges
-        "bevelThickness": 0.0,  // Set explicitly to 0 to ensure no bevel effect
-        "bevelSize": 0.0,       // Set explicitly to 0 to ensure no bevel effect
-        "bevelOffset": 0.0,     // Set explicitly to 0 to ensure no bevel effect
-        "bevelSegments": 1      // Set to minimum value since it's not used
     });
     
     // Convert inputs to JsValue

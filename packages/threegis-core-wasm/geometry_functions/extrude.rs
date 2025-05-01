@@ -398,55 +398,24 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
         // Compute placeholder array where vertices will be stored temporarily
         let mut placeholder: Vec<f32> = Vec::new();
 
-        // Find directions for point movement (bevel vectors)
-        let num_holes = holes.len();
+        // Prepare vertices (contour and holes)
         let mut vertices = contour.clone();
-
-        // Calculate bevel vectors for contour
-        let mut contour_movements: Vec<Vector2> = Vec::with_capacity(contour.len());
-        for i in 0..contour.len() {
-            let j = if i == 0 { contour.len() - 1 } else { i - 1 };
-            let k = if i == contour.len() - 1 { 0 } else { i + 1 };
-
-            contour_movements.push(get_bevel_vec(&contour[i], &contour[j], &contour[k]));
-        }
-
-        // Calculate bevel vectors for holes
-        let mut holes_movements: Vec<Vec<Vector2>> = Vec::with_capacity(num_holes);
-        let mut vertices_movements = contour_movements.clone();
-
-        for h in 0..num_holes {
-            let hole = &holes[h];
-            let mut one_hole_movements: Vec<Vector2> = Vec::with_capacity(hole.len());
-
-            for i in 0..hole.len() {
-                let j = if i == 0 { hole.len() - 1 } else { i - 1 };
-                let k = if i == hole.len() - 1 { 0 } else { i + 1 };
-
-                one_hole_movements.push(get_bevel_vec(&hole[i], &hole[j], &hole[k]));
-            }
-
-            holes_movements.push(one_hole_movements.clone());
-            vertices_movements.extend(one_hole_movements);
-
-            // Append hole vertices to the vertices array
+        for hole in &holes {
             vertices.extend(hole.clone());
         }
 
         // Triangulate the shape (with holes)
         let faces: Vec<Vec<usize>>;
 
-        // For non-beveled shapes, we can triangulate directly
-        // Flatten coordinates for earcut
+
+        // Triangulate contour and holes directly (no bevel)
         let mut data: Vec<f64> = Vec::new();
         for pt in &contour {
             data.push(pt.x);
             data.push(pt.y);
         }
-
         let mut hole_indices: Vec<usize> = Vec::new();
         let mut idx_offset = contour.len();
-
         for hole in &holes {
             hole_indices.push(idx_offset);
             for pt in hole {
@@ -455,10 +424,7 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
             }
             idx_offset += hole.len();
         }
-
-        // Triangulate using earcut
-        let indices = earcut(&data, &hole_indices, 2);
-        let indices = indices.unwrap(); // Handle error as needed
+        let indices = earcut(&data, &hole_indices, 2).unwrap();
 
         // Convert to the faces format (triplets of indices)
         faces = indices.chunks(3).map(|chunk| chunk.to_vec()).collect();
