@@ -96,7 +96,7 @@ pub struct GridSize {
 }
 
 // Struct to match VtDataSet from TypeScript
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VtDataSet {
     #[serde(default)]
     pub sourceLayer: String,
