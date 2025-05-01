@@ -256,27 +256,46 @@ fn calculate_adaptive_scale_factor(
     // Area in km^2
     let area_km2 = width_km * height_km;
     
+    // Calculate meters per unit of mesh (mesh size is 200 units, as per transform_to_mesh_coordinates)
+    const TERRAIN_SIZE: f64 = 200.0; // Mesh size in visualization units
+    // Calculate real-world dimensions in meters (1km = 1000m)
+    let width_m = width_km * 1000.0;
+    let height_m = height_km * 1000.0;
+    
+    // The average meters per unit
+    let meters_per_unit = ((width_m / TERRAIN_SIZE) + (height_m / TERRAIN_SIZE)) / 2.0;
+    
     // Elevation range in meters
     let elev_range_m = (max_elevation - min_elevation).abs().max(10.0);
     
-    // Base scale is 1.0 for a "standard" area (100km²) and elevation range (1000m)
-    let standard_area = 100.0;
-    let standard_elev_range = 1000.0;
+    // Calculate how many visualization units we need for a meter of height
+    // to maintain proper scale with geographic extent
+    let units_per_meter = 1.0 / meters_per_unit;
     
-    // Calculate area-based scaling factor with reduced impact
-    // Square root reduces the influence of area growth
-    let area_factor = (area_km2 / standard_area).sqrt().sqrt(); // Apply sqrt twice to further dampen effect
+    // Apply scaling based on area to adjust for zoom level
+    let area_scale_factor = if area_km2 < 1.0 {
+        // For very small areas, increase the height to make it more visible
+        1.5
+    } else if area_km2 < 10.0 {
+        // Medium small areas
+        1.2
+    } else if area_km2 < 100.0 {
+        // Standard area
+        1.0
+    } else if area_km2 < 1000.0 {
+        // Larger areas, reduce height to avoid massive structures
+        0.7
+    } else {
+        // Very large areas, further reduce height
+        0.5
+    };
     
-    // Calculate elevation-based scaling factor with reduced impact
-    let elev_factor = (standard_elev_range / elev_range_m).sqrt(); // Square root to reduce effect
+    // Final scaling factor that converts real-world meters to visualization units
+    // with area-based adjustment
+    let scale_factor = units_per_meter * area_scale_factor;
     
-    // Combine factors, with tighter limits to prevent extreme values
-    // Use a lower maximum bound for more reasonable heights
-    let combined_factor = (area_factor * elev_factor).clamp(0.1, 3.0);
-    
-    // Apply a dampening factor to make the initial view more reasonable
-    let dampening = 0.5; // 50% reduction overall
-    dampening + (combined_factor * (1.0 - dampening))
+    // Clamp to reasonable bounds
+    scale_factor.clamp(0.05, 5.0)
 }
 
 // Parse a color string in hex format (#RRGGBB)
