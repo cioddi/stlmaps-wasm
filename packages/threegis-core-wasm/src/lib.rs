@@ -1,4 +1,5 @@
 use wasm_bindgen::prelude::*;
+use crate::cache_keys::{make_bbox_key, make_inner_key};
 use geojson::{Feature, GeoJson, Geometry, Value};
 use geo::{Coord, LineString, Polygon};
 use geo_buffer::buffer_polygon;
@@ -17,6 +18,7 @@ mod module_state;
 mod models;
 // Import our cache manager
 mod cache_manager;
+mod cache_keys;
 // Import our terrain geometry generation module
 mod terrain;
 // Import our vector tile processing module
@@ -352,8 +354,8 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     let min_lat = bbox[1].as_f64().unwrap_or(0.0);
     let max_lng = bbox[2].as_f64().unwrap_or(0.0);
     let max_lat = bbox[3].as_f64().unwrap_or(0.0);
-    // Compute standard bbox_key
-    let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
+    // Compute consistent bbox_key using central function
+    let bbox_key = cache_keys::make_bbox_key(min_lng, min_lat, max_lng, max_lat);
     // Determine source layer from vtDataSet
     let source_layer = input_val
         .get("vtDataSet")
@@ -361,15 +363,29 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| JsValue::from_str("Missing 'vtDataSet.sourceLayer' field"))?;
 
-    // Retrieve cached features for this bbox and layer
+    // Retrieve cached features for this bbox and layer, preferring feature_data_cache populated by extract_features_from_vector_tiles
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
-    let features = state
-        .get_cached_geometry_data(&bbox_key, source_layer)
-        .unwrap_or_default();
+    // Assemble inner cache key using central function (no filter currently)
+    let filter_str = input_val
+        .get("vtDataSet")
+        .and_then(|v| v.get("filter"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let inner_key = cache_keys::make_inner_key(source_layer, filter_str);
+    // Retrieve features from feature_data_cache
+    let features: Vec<crate::polygon_geometry::GeometryData> = if let Some(js_val) = state.get_feature_data(&bbox_key, &inner_key) {
+        // Stored as JSON string in JsValue
+        let json_str = js_val.as_string().unwrap_or_else(|| "[]".to_string());
+        serde_json::from_str(&json_str).unwrap_or_default()
+    } else {
+        // No cached features found
+        Vec::new()
+    };
 
     // Insert retrieved features into 'polygons' field
-    let features_value = serde_json::to_value(&features)
+    let features_value: serde_json::Value = serde_json::to_value(&features)
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize features: {}", e)))?;
     input_val["polygons"] = features_value;
     // Update bbox_key in input

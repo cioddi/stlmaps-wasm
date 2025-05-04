@@ -11,7 +11,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::module_state::{ModuleState, TileData};
 use crate::polygon_geometry::VtDataSet;
-use crate::{console_log, fetch};
+use crate::{console_log, fetch, cache_keys};
 
 // Reuse the TileRequest struct from elevation.rs
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -238,8 +238,8 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     let max_lat = bbox[3];
     let vt_dataset = &input.vtDataSet;
 
-    // Always use standard bbox_key format: lng_min_lat_min_lng_max_lat_max
-    let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
+    // Compute consistent bbox_key using central function
+    let bbox_key = cache_keys::make_bbox_key(min_lng, min_lat, max_lng, max_lat);
 
     // Log if input.bbox_key was in a non-standard format
     if input.bboxKey != bbox_key {
@@ -626,13 +626,9 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     // Cache the extracted feature data for later use
     {
-        // Build inner cache key: sourceLayer + stringified_filter
+        // Build inner cache key using central function
         let filter_str = ""; // TODO: use actual filter string if available
-        let inner_key = if filter_str.is_empty() {
-            vt_dataset.sourceLayer.clone()
-        } else {
-            format!("{}_{}", vt_dataset.sourceLayer, filter_str)
-        };
+        let inner_key = cache_keys::make_inner_key(&vt_dataset.sourceLayer, filter_str);
         let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
         module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str);
     }
@@ -646,9 +642,8 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse input
     let input: VectortileProcessingInput = from_value(input_js)?;
 
-    // Always use standard bbox_key format for consistent caching
-    let standard_bbox_key = format!(
-        "{}_{}_{}_{}",
+    // Compute consistent bbox_key using central function
+    let standard_bbox_key = cache_keys::make_bbox_key(
         input.min_lng, input.min_lat, input.max_lng, input.max_lat
     );
 
