@@ -43,7 +43,7 @@ export const parseVectorTile = (arrayBuffer: ArrayBuffer): VectorTile => {
  * Parse vector tile data using Rust/WASM implementation
  */
 export const parseVectorTileRust = (
-  arrayBuffer: ArrayBuffer, 
+  arrayBuffer: ArrayBuffer,
   tile: Tile
 ): string => {
   try {
@@ -51,16 +51,16 @@ export const parseVectorTileRust = (
     if (!wasmModule || !wasmModule.parse_mvt_data) {
       throw new Error("WASM module or parse_mvt_data function not available");
     }
-    
+
     // Convert ArrayBuffer to Uint8Array for WASM
     const uint8Array = new Uint8Array(arrayBuffer);
-    
+
     // Generate a unique key for this tile
     const tileKey = `${tile.z}/${tile.x}/${tile.y}`;
-    
+
     // Parse MVT data using Rust
     wasmModule.parse_mvt_data(uint8Array, tile.z, tile.x, tile.y, tileKey);
-    
+
     return tileKey;
   } catch (error) {
     console.error("Error parsing vector tile with Rust:", error);
@@ -80,10 +80,10 @@ export const extractFeaturesFromLayer = (
     if (!wasmModule || !wasmModule.extract_features_from_vector_tiles) {
       throw new Error("WASM module or extract_features_from_vector_tiles function not available");
     }
-    
+
     // Call Rust function to store features in cache.
     wasmModule.extract_features_from_vector_tiles(tileKey, layerName);
-    
+
     // Do not return features directly.
     return { type: "FeatureCollection", features: [] };
   } catch (error) {
@@ -182,7 +182,15 @@ export const fetchVtData = async (
     const wasmModule = getWasmModule();
     if (wasmModule && wasmModule.fetch_vector_tiles) {
       console.log("Using WASM vector tile fetching for performance");
-      
+
+      const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
+      if (tileCount > 9) {
+        console.warn(
+          `Skipping geometry data fetch: area too large (${tileCount} tiles, max allowed: 9)`
+        );
+        return [];
+      }
+
       // Create a bbox_key using the same approach as terrain
       // This ensures tiles are cached under the same key for both terrain and vector tiles
       const bboxKeyValue = bboxKey || hashBbox({
@@ -192,7 +200,7 @@ export const fetchVtData = async (
           coordinates: [[[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]]]
         }
       });
-      
+
       // Prepare the input for the Rust function
       const input = {
         min_lng: minLng,
@@ -204,50 +212,12 @@ export const fetchVtData = async (
         grid_height: gridSize.height,
         bbox_key: bboxKeyValue
       };
-      
+
       // Call the Rust function to fetch and cache the vector tiles
       await wasmModule.fetch_vector_tiles(input);
-      
-      // Return an empty array since we don't need the tile data directly
-      // The tiles are now cached in Rust and can be accessed via extractFeaturesFromLayer
-      return [];
-    } else {
-      console.log("WASM module not available, using JavaScript vector tile fetching");
-      
-      // Fall back to the original JavaScript implementation if WASM is not available
-      const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
-      if (tileCount > 9) {
-        console.warn(
-          `Skipping geometry data fetch: area too large (${tileCount} tiles, max allowed: 9)`
-        );
-        return [];
-      }
 
-      const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-      console.log(`Fetching geometry data from ${tiles.length} tiles`);
-
-      await Promise.all(
-        tiles.map(async (tile) => {
-          const url = `https://wms.wheregroup.com/tileserver/tile/world-0-14/${tile.z}/${tile.x}/${tile.y}.pbf`;
-
-          console.log(`Fetching geometry from: ${url}`);
-
-          try {
-            const response = await fetch(url);
-            if (!response.ok) {
-              console.warn(`Failed to fetch tile: ${response.status}`);
-              return;
-            }
-
-            const arrayBuffer = await response.arrayBuffer();
-            parseVectorTile(arrayBuffer);
-          } catch (error) {
-            console.error(`Error fetching tile ${tile.z}/${tile.x}/${tile.y}:`, error);
-          }
-        })
-      );
-      return [];
     }
+    return [];
   } catch (error) {
     console.error("Error in fetchVtData:", error);
     // Fall back to an empty result set in case of errors

@@ -1,12 +1,10 @@
 import { useState, useEffect } from "react";
 import {
   GeometryData,
-  extractGeojsonFeaturesFromVectorTiles,
 } from "./VectorTileFunctions";
 import * as THREE from "three";
 //@ts-expect-error
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
-import { createPolygonGeometryAsync } from "../three_maps/createPolygonGeometryAsync";
 import { bufferLineString } from "../three_maps/bufferLineString";
 import useLayerStore from "../stores/useLayerStore";
 import {
@@ -444,7 +442,7 @@ export const GenerateMeshButton = function () {
       });
 
       // Fetch vt data for this bbox
-      let vtData = await fetchVtData({
+      await fetchVtData({
         bbox: [minLng, minLat, maxLng, maxLat],
         zoom: 14,
         gridSize,
