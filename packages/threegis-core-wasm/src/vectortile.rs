@@ -627,10 +627,19 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     // Cache the extracted feature data for later use
     {
         // Build inner cache key using central function
-        let filter_str = ""; // TODO: use actual filter string if available
-        let inner_key = cache_keys::make_inner_key(&vt_dataset.sourceLayer, filter_str);
+        let filter_str = input.vtDataSet.filter
+            .as_ref()
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| "".to_string());
+        let inner_key = cache_keys::make_inner_key(&vt_dataset.sourceLayer, filter_str.as_str());
         let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
-        module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str);
+        module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str.clone());
+        console_log!(
+            "✅ Stored {} features under bbox_key: '{}' and inner_key: '{}'",
+            geometry_data_list.len(),
+            bbox_key,
+            inner_key
+        );
     }
     // Return undefined since data is cached at bbox_key level
     Ok(JsValue::undefined())

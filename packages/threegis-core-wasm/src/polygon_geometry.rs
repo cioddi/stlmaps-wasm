@@ -113,7 +113,7 @@ pub struct VtDataSet {
     pub useAdaptiveScaleFactor: Option<bool>,
     pub zOffset: Option<f64>,
     pub alignVerticesToTerrain: Option<bool>,
-    pub csgClipping: Option<bool>,
+    pub filter: Option<String>,
 }
 
 // Default color function for VtDataSet
@@ -1086,7 +1086,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
         // Determine if CSG clipping should be used
         let use_csg = input.csgClipping
-            .or(input.vtDataSet.csgClipping)
             .unwrap_or(false);
 
         // Clip against the overall terrain tile bounds (include any shape that overlaps)
