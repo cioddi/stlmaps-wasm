@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+// Removed JsValue import: storing JSON strings instead
 
 // We need JsValue for caching objects
 use js_sys::Uint8Array;
@@ -92,6 +93,8 @@ pub struct ModuleState {
     // Stats
     pub cache_hits: usize,
     pub cache_misses: usize,
+    // Cache for extracted feature data: maps bbox_key -> inner_key -> JSON string
+    pub feature_data_cache: HashMap<String, HashMap<String, String>>,
 }
 
 // Create a global static instance of the module state
@@ -111,6 +114,7 @@ impl ModuleState {
             max_vector_tiles: 50,
             cache_hits: 0,
             cache_misses: 0,
+            feature_data_cache: HashMap::new(),
         }
     }
     
@@ -332,6 +336,30 @@ impl ModuleState {
         None
     }
     
+    /// Store extracted feature data under a bbox_key and inner_key as JSON string
+    pub fn add_feature_data(&mut self, bbox_key: &str, inner_key: &str, json: String) {
+        let entry = self.feature_data_cache
+            .entry(bbox_key.to_string())
+            .or_insert_with(HashMap::new);
+        entry.insert(inner_key.to_string(), json);
+        console_log!("Stored feature data for bbox_key: {} inner_key: {}", bbox_key, inner_key);
+    }
+    
+    /// Retrieve stored feature data by bbox_key and inner_key
+    pub fn get_feature_data(&self, bbox_key: &str, inner_key: &str) -> Option<JsValue> {
+        self.feature_data_cache
+            .get(bbox_key)
+            .and_then(|inner| inner.get(inner_key).cloned())
+            .map(|s| JsValue::from_str(&s))
+    }
+    
+    /// Clear all feature data entries for a given bbox_key
+    pub fn clear_feature_data_for_bbox(&mut self, bbox_key: &str) {
+        if self.feature_data_cache.remove(bbox_key).is_some() {
+            console_log!("Cleared feature data cache for bbox_key: {}", bbox_key);
+        }
+    }
+    
     // Get cache statistics
     pub fn get_stats(&self) -> (usize, usize, usize, usize, usize, usize) {
         (
@@ -349,6 +377,8 @@ impl ModuleState {
         self.raster_tiles.clear();
         self.vector_tiles.clear();
         self.elevation_grids.clear();
+        self.bbox_vector_tiles.clear();
+        self.feature_data_cache.clear();
         // Reset stats
         self.cache_hits = 0;
         self.cache_misses = 0;

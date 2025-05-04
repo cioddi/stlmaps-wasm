@@ -561,6 +561,21 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "geo"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7d640a4dd1d1c98b45f4653c841a8ec15f461a71b86bc30533ae64c6f20f268"
+dependencies = [
+ "float_next_after 1.0.0",
+ "geo-types 0.7.16",
+ "geographiclib-rs",
+ "log",
+ "num-traits 0.2.19",
+ "robust 0.2.3",
+ "rstar 0.10.0",
+]
+
+[[package]]
+name = "geo"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4841b40fdbccd4b7042bd6195e4de91da54af34c50632e371bcbfcdfb558b873"
@@ -618,6 +633,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "geo-buffer"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12cbe3b86915de92c956f951af03123c9cdfbbb9bf9caf7ccd0171d7fee92301"
+dependencies = [
+ "geo 0.24.1",
+ "geo-types 0.7.16",
+]
+
+[[package]]
 name = "geo-types"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -636,6 +661,7 @@ dependencies = [
  "approx 0.5.1",
  "num-traits 0.2.19",
  "rayon",
+ "rstar 0.10.0",
  "rstar 0.11.0",
  "rstar 0.12.2",
  "serde",
@@ -1745,9 +1771,26 @@ checksum = "222155e5550abd9100afdcdefbd08aa1b856d226b60e327044ec21b1ece2f78e"
 
 [[package]]
 name = "robust"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5864e7ef1a6b7bcf1d6ca3f655e65e724ed3b52546a0d0a663c991522f552ea"
+
+[[package]]
+name = "robust"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbf4a6aa5f6d6888f39e980649f3ad6b666acdce1d78e95b8a2cb076e687ae30"
+
+[[package]]
+name = "rstar"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f39465655a1e3d8ae79c6d9e007f4953bfc5d55297602df9dc38f9ae9f1359a"
+dependencies = [
+ "heapless 0.7.17",
+ "num-traits 0.2.19",
+ "smallvec",
+]
 
 [[package]]
 name = "rstar"
@@ -2115,6 +2158,7 @@ dependencies = [
  "flate2",
  "geo 0.27.0",
  "geo-booleanop",
+ "geo-buffer",
  "geo-types 0.7.16",
  "geojson",
  "geozero",

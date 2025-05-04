@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 use geojson::{Feature, GeoJson, Geometry, Value};
 use geo::{Coord, LineString, Polygon};
+use geo_buffer::buffer_polygon;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
 use std::collections::HashMap;
@@ -139,6 +140,30 @@ pub fn clear_caches() -> bool {
     state.clear_all_caches();
     true
 }
+/// Store extracted feature data under a bbox_key and inner_key
+#[wasm_bindgen]
+pub fn add_feature_data_js(bbox_key: &str, inner_key: &str, value: JsValue) -> bool {
+    let mut state = ModuleState::global().lock().unwrap();
+    // Convert JsValue to String before storing
+    let json = value.as_string().unwrap_or_else(|| String::from("{}"));
+    state.add_feature_data(bbox_key, inner_key, json);
+    true
+}
+/// Retrieve stored feature data by bbox_key and inner_key
+#[wasm_bindgen]
+pub fn get_feature_data_js(bbox_key: &str, inner_key: &str) -> JsValue {
+    let state = ModuleState::global().lock().unwrap();
+    state
+        .get_feature_data(bbox_key, inner_key)
+        .unwrap_or(JsValue::undefined())
+}
+/// Clear feature data entries for a given bbox_key
+#[wasm_bindgen]
+pub fn clear_feature_data_for_bbox_js(bbox_key: &str) -> bool {
+    let mut state = ModuleState::global().lock().unwrap();
+    state.clear_feature_data_for_bbox(bbox_key);
+    true
+}
 
 #[wasm_bindgen]
 pub fn hello_from_rust(name: &str) -> Result<JsValue, JsValue> {
@@ -197,18 +222,38 @@ pub fn buffer_line_string(line_string_json: &str, buffer_distance: f64) -> Strin
                     })
                     .collect();
                 
-                let line = LineString::new(points);
-                
-                // Implement the buffer logic (simplified example)
-                // In a real implementation, you'd use proper buffering algorithms
-                // This is just a placeholder for demonstration
-                let buffered = line; // Replace with real buffering
-                
-                // Convert back to GeoJSON Feature
-                let geo_poly = Polygon::new(buffered.into(), vec![]);
-                let coords = geo_poly.exterior().coords().map(|c| vec![c.x, c.y]).collect();
-                
-                let geometry = Geometry::new(Value::Polygon(vec![coords]));
+                // Construct a closed polygon from the linestring for buffering
+                let mut ring_coords = points.clone();
+                if let (Some(first), Some(last)) = (ring_coords.first(), ring_coords.last()) {
+                    if first != last {
+                        ring_coords.push(*first);
+                    }
+                }
+                let poly = Polygon::new(LineString::new(ring_coords), vec![]);
+                // Buffer using geo-buffer crate (straight skeleton)
+                let multi_poly = buffer_polygon(&poly, buffer_distance);
+
+                // Convert buffered MultiPolygon back to GeoJSON Feature
+                let coords_multi: Vec<Vec<Vec<Vec<f64>>>> = multi_poly
+                    .0
+                    .into_iter()
+                    .map(|poly| {
+                        // exterior ring
+                        let exterior: Vec<Vec<f64>> =
+                            poly.exterior().coords().map(|c| vec![c.x, c.y]).collect();
+                        // interior rings (holes)
+                        let interiors: Vec<Vec<Vec<f64>>> = poly
+                            .interiors()
+                            .iter()
+                            .map(|ring| ring.coords().map(|c| vec![c.x, c.y]).collect())
+                            .collect();
+                        let mut rings = Vec::with_capacity(1 + interiors.len());
+                        rings.push(exterior);
+                        rings.extend(interiors);
+                        rings
+                    })
+                    .collect();
+                let geometry = Geometry::new(Value::MultiPolygon(coords_multi));
                 let feature = Feature {
                     bbox: None,
                     geometry: Some(geometry),
@@ -216,7 +261,6 @@ pub fn buffer_line_string(line_string_json: &str, buffer_distance: f64) -> Strin
                     properties: None,
                     foreign_members: None,
                 };
-                
                 return serde_json::to_string(&feature).unwrap();
             }
         }
@@ -291,28 +335,53 @@ pub fn free_cache_group(group_id: &str) -> Result<(), JsValue> {
     crate::cache_manager::free_group_js(group_id)
 }
 
-// Export the polygon geometry creation function
+// Export the polygon geometry creation function with cached feature retrieval
 #[wasm_bindgen]
 pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
-    match polygon_geometry::create_polygon_geometry(input_json) {
-        Ok(json_string) => {
-            // Debug log the size of the string we're sending back
-            let bytes = json_string.as_bytes().len();
-            console_log!("Sending back {} bytes of geometry data", bytes);
-            
-            // For very large results, parse the string to check vertex count
-            if bytes > 100000 {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_string) {
-                    if let Some(vertices) = parsed.get("vertices") {
-                        if let Some(arr) = vertices.as_array() {
-                            console_log!("Verified {} vertices in geometry", arr.len() / 3);
-                        }
-                    }
-                }
-            }
-            
-            Ok(JsValue::from_str(&json_string))
-        },
+    // Parse input JSON to extract bbox and vtDataSet
+    let mut input_val: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid input JSON: {}", e)))?;
+    // Extract bbox coordinates
+    let bbox = input_val.get("bbox")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| JsValue::from_str("Missing or invalid 'bbox' field"))?;
+    if bbox.len() != 4 {
+        return Err(JsValue::from_str("Invalid 'bbox': must contain [minLng, minLat, maxLng, maxLat]"));
+    }
+    let min_lng = bbox[0].as_f64().unwrap_or(0.0);
+    let min_lat = bbox[1].as_f64().unwrap_or(0.0);
+    let max_lng = bbox[2].as_f64().unwrap_or(0.0);
+    let max_lat = bbox[3].as_f64().unwrap_or(0.0);
+    // Compute standard bbox_key
+    let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
+    // Determine source layer from vtDataSet
+    let source_layer = input_val
+        .get("vtDataSet")
+        .and_then(|v| v.get("sourceLayer"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsValue::from_str("Missing 'vtDataSet.sourceLayer' field"))?;
+
+    // Retrieve cached features for this bbox and layer
+    let state = ModuleState::global();
+    let mut state = state.lock().unwrap();
+    let features = state
+        .get_cached_geometry_data(&bbox_key, source_layer)
+        .unwrap_or_default();
+
+    // Insert retrieved features into 'polygons' field
+    let features_value = serde_json::to_value(&features)
+        .map_err(|e| JsValue::from_str(&format!("Failed to serialize features: {}", e)))?;
+    input_val["polygons"] = features_value;
+    // Update bbox_key in input
+    input_val["bbox_key"] = serde_json::Value::String(bbox_key.clone());
+
+    // Serialize modified input for geometry creation
+    let new_input = serde_json::to_string(&input_val)
+        .map_err(|e| JsValue::from_str(&format!("Failed to serialize input: {}", e)))?;
+
+    // Call create_polygon_geometry with cached features applied
+    match polygon_geometry::create_polygon_geometry(&new_input) {
+        Ok(json_string) => Ok(JsValue::from_str(&json_string)),
         Err(err_string) => Err(JsValue::from_str(&err_string)),
     }
 }

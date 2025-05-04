@@ -624,8 +624,20 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     //console_log!("✅ Finished extraction. Processed {} raw features. Extracted {} geometries from source layer '{}' for key '{}'",
     //    feature_count, geometry_data_list.len(), vt_dataset.sourceLayer, bbox_key);
 
-    // Return the extracted geometry data
-    Ok(to_value(&geometry_data_list)?)
+    // Cache the extracted feature data for later use
+    {
+        // Build inner cache key: sourceLayer + stringified_filter
+        let filter_str = ""; // TODO: use actual filter string if available
+        let inner_key = if filter_str.is_empty() {
+            vt_dataset.sourceLayer.clone()
+        } else {
+            format!("{}_{}", vt_dataset.sourceLayer, filter_str)
+        };
+        let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
+        module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str);
+    }
+    // Return undefined since data is cached at bbox_key level
+    Ok(JsValue::undefined())
 }
 
 // Make this function available to JS

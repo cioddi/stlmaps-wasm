@@ -534,17 +534,6 @@ export const GenerateMeshButton = function () {
         );
 
         if (layerData && layerData.length > 0) {
-          // Convert LineString geometries to polygons using a buffer
-          layerData = layerData.map((feature) => {
-            if (feature.type === "LineString") {
-              const bufferedPolygon = bufferLineString(
-                feature.geometry,
-                currentLayer.bufferSize || 1
-              );
-              return { ...feature, type: "Polygon", geometry: bufferedPolygon };
-            }
-            return feature;
-          });
 
           // Check for cancellation before creating polygon geometry
           cancellationToken.throwIfCancelled();
@@ -557,7 +546,6 @@ export const GenerateMeshButton = function () {
           try {
             // Prepare the input for the Rust function
             const polygonGeometryInput = {
-              polygons: layerData as GeometryData[], // Fallback data in case cache fails
               terrainBaseHeight: terrainSettings.baseHeight,
               bbox: [minLng, minLat, maxLng, maxLat],
               elevationGrid: processedElevationGrid,

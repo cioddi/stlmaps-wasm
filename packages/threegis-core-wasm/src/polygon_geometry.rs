@@ -7,7 +7,7 @@ use csgrs::csg::CSG;
 use js_sys::{Object, Array, Float32Array};
 use wasm_bindgen::prelude::JsValue;
 use serde_wasm_bindgen::{from_value, to_value};
-use wasm_bindgen::prelude::*;
+
 
 // Constants ported from TypeScript
 const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
@@ -85,7 +85,7 @@ pub struct Color {
 }
 
 // Deserializable struct matching GeometryData from TypeScript
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometryData {
     pub geometry: Vec<Vec<f64>>,  // Array of [lng, lat] points
     pub height: Option<f64>,
