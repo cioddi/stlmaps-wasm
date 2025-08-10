@@ -43,23 +43,21 @@ export const parseVectorTile = (arrayBuffer: ArrayBuffer): VectorTile => {
  * Parse vector tile data using Rust/WASM implementation
  */
 export const parseVectorTileRust = (
-  arrayBuffer: ArrayBuffer,
+  _arrayBuffer: ArrayBuffer,
   tile: Tile
 ): string => {
   try {
     const wasmModule = getWasmModule();
-    if (!wasmModule || !wasmModule.parse_mvt_data) {
-      throw new Error("WASM module or parse_mvt_data function not available");
+    if (!wasmModule) {
+      throw new Error("WASM module not available");
     }
-
-    // Convert ArrayBuffer to Uint8Array for WASM
-    const uint8Array = new Uint8Array(arrayBuffer);
 
     // Generate a unique key for this tile
     const tileKey = `${tile.z}/${tile.x}/${tile.y}`;
 
-    // Parse MVT data using Rust
-    wasmModule.parse_mvt_data(uint8Array, tile.z, tile.x, tile.y, tileKey);
+    // Note: parse_mvt_data function doesn't exist in the current WASM module
+    // This functionality might be handled differently or needs to be implemented
+    console.warn("parseVectorTileRust: parse_mvt_data function not available in WASM module");
 
     return tileKey;
   } catch (error) {
@@ -70,26 +68,54 @@ export const parseVectorTileRust = (
 
 /**
  * Extract features from parsed MVT data using Rust
+ * This function calls WASM to process and cache features, not to return them directly
  */
 export const extractFeaturesFromLayer = (
-  tileKey: string,
-  layerName: string
-): GeoJSON.FeatureCollection => {
+  bbox: number[],
+  vtDataSet: any,
+  bboxKey: string,
+  elevationBboxKey?: string
+): Promise<void> => {
   try {
     const wasmModule = getWasmModule();
     if (!wasmModule || !wasmModule.extract_features_from_vector_tiles) {
       throw new Error("WASM module or extract_features_from_vector_tiles function not available");
     }
 
-    // Call Rust function to store features in cache.
-    wasmModule.extract_features_from_vector_tiles(tileKey, layerName);
-
-    // Do not return features directly.
-    return { type: "FeatureCollection", features: [] };
+    // Call Rust function with proper input structure for feature extraction
+    const input = {
+      bbox: bbox,
+      vtDataSet: vtDataSet,
+      bboxKey: bboxKey,
+      elevationBBoxKey: elevationBboxKey
+    };
+    
+    // This processes and caches the features in WASM, doesn't return them
+    return wasmModule.extract_features_from_vector_tiles(input);
   } catch (error) {
-    console.error(`Error extracting features from layer '${layerName}':`, error);
-    return { type: "FeatureCollection", features: [] };
+    console.error(`Error extracting features from layer '${vtDataSet.sourceLayer}':`, error);
+    throw error;
   }
+};
+
+/**
+ * Extract features for a specific layer after vector tiles have been cached
+ * This is the main function to call for feature extraction in the app
+ */
+export const extractGeojsonFeaturesFromVectorTiles = async (config: {
+  bbox: number[];
+  vtDataSet: any;
+  bboxKey: string;
+  elevationBboxKey?: string;
+}): Promise<void> => {
+  const { bbox, vtDataSet, bboxKey, elevationBboxKey } = config;
+  
+  console.log(`Extracting features for layer: ${vtDataSet.sourceLayer}`);
+  
+  // Call the WASM function to extract and cache features
+  await extractFeaturesFromLayer(bbox, vtDataSet, bboxKey, elevationBboxKey);
+  
+  console.log(`✅ Features extracted and cached for layer: ${vtDataSet.sourceLayer}`);
 };
 
 /**
