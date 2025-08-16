@@ -54,8 +54,10 @@ export const vtGeometries: VtDataSet[] = [
     filter: [
       "in",
       "class",
+      "motorway",
       "primary",
-      "secondary"
+      "secondary",
+      "tertiary"
     ],
     csgClipping: false,
   },

@@ -303,6 +303,7 @@ impl ModuleState {
                                 // you'd handle different geometry types appropriately
                                 features.push(crate::polygon_geometry::GeometryData {
                                     geometry: coords,
+                                    r#type: Some(feature.geometry.r#type.clone()),
                                     height: Some(height),
                                     layer: Some(source_layer.to_string()),
                                     tags: None,

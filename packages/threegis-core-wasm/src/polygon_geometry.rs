@@ -88,6 +88,7 @@ pub struct Color {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometryData {
     pub geometry: Vec<Vec<f64>>,  // Array of [lng, lat] points
+    pub r#type: Option<String>,   // Geometry type (e.g., "Polygon", "LineString")
     pub height: Option<f64>,
     pub layer: Option<String>,
     pub tags: Option<serde_json::Value>,
@@ -1024,16 +1025,101 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             console_log!("Processed {} out of {} polygons", i, input.polygons.len());
         }
         
-        // Extract and validate polygon points
-        let points: Vec<Vector2> = polygon_data.geometry.iter()
-            .filter_map(|point| {
+        // Handle both Polygon and LineString geometries
+        let points: Vec<Vector2> = if polygon_data.r#type.as_deref() == Some("LineString") {
+            // For LineStrings (roads), convert to a buffered polygon
+            // Use a small buffer distance for road width
+            let buffer_distance = 0.00005; // ~5 meters in degrees
+            
+            let mut line_points = Vec::new();
+            for point in &polygon_data.geometry {
                 if point.len() >= 2 {
-                    Some(Vector2 { x: point[0], y: point[1] })
-                } else {
-                    None
+                    line_points.push(Vector2 { x: point[0], y: point[1] });
                 }
-            })
-            .collect();
+            }
+            
+            if line_points.len() >= 2 {
+                // Create a proper buffered polygon around the LineString
+                let mut buffered_polygon = Vec::new();
+                
+                // First, go along the line adding points on the "right" side
+                for i in 0..line_points.len() {
+                    let current = &line_points[i];
+                    
+                    if i == 0 {
+                        // For the first point, use the direction to the next point
+                        if line_points.len() > 1 {
+                            let next = &line_points[1];
+                            let dx = next.x - current.x;
+                            let dy = next.y - current.y;
+                            let length = (dx * dx + dy * dy).sqrt();
+                            if length > 0.0 {
+                                let perp_x = -dy / length * buffer_distance;
+                                let perp_y = dx / length * buffer_distance;
+                                buffered_polygon.push(Vector2 { x: current.x + perp_x, y: current.y + perp_y });
+                            }
+                        }
+                    } else {
+                        // For middle and end points, use the direction from the previous point
+                        let prev = &line_points[i - 1];
+                        let dx = current.x - prev.x;
+                        let dy = current.y - prev.y;
+                        let length = (dx * dx + dy * dy).sqrt();
+                        if length > 0.0 {
+                            let perp_x = -dy / length * buffer_distance;
+                            let perp_y = dx / length * buffer_distance;
+                            buffered_polygon.push(Vector2 { x: current.x + perp_x, y: current.y + perp_y });
+                        }
+                    }
+                }
+                
+                // Then, go back along the line adding points on the "left" side
+                for i in (0..line_points.len()).rev() {
+                    let current = &line_points[i];
+                    
+                    if i == line_points.len() - 1 {
+                        // For the last point, use the direction from the previous point
+                        if i > 0 {
+                            let prev = &line_points[i - 1];
+                            let dx = current.x - prev.x;
+                            let dy = current.y - prev.y;
+                            let length = (dx * dx + dy * dy).sqrt();
+                            if length > 0.0 {
+                                let perp_x = -dy / length * buffer_distance;
+                                let perp_y = dx / length * buffer_distance;
+                                buffered_polygon.push(Vector2 { x: current.x - perp_x, y: current.y - perp_y });
+                            }
+                        }
+                    } else {
+                        // For middle and start points, use the direction to the next point
+                        let next = &line_points[i + 1];
+                        let dx = next.x - current.x;
+                        let dy = next.y - current.y;
+                        let length = (dx * dx + dy * dy).sqrt();
+                        if length > 0.0 {
+                            let perp_x = -dy / length * buffer_distance;
+                            let perp_y = dx / length * buffer_distance;
+                            buffered_polygon.push(Vector2 { x: current.x - perp_x, y: current.y - perp_y });
+                        }
+                    }
+                }
+                
+                buffered_polygon
+            } else {
+                Vec::new()
+            }
+        } else {
+            // For Polygons, extract points normally
+            polygon_data.geometry.iter()
+                .filter_map(|point| {
+                    if point.len() >= 2 {
+                        Some(Vector2 { x: point[0], y: point[1] })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
         
         if points.len() < 3 {
             continue; // Skip invalid polygons

@@ -267,9 +267,8 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 expected_value.as_str().map_or(false, |v| v == geometry_type)
             } else {
                 // Compare property value
-                let actual_value = feature.properties.get(key);
-                match actual_value {
-                    Some(val) => val == expected_value,
+                match feature.properties.as_object().and_then(|obj| obj.get(key)) {
+                    Some(actual_value) => actual_value == expected_value,
                     None => expected_value.is_null(),
                 }
             }
@@ -298,9 +297,8 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 expected_value.as_str().map_or(true, |v| v != geometry_type)
             } else {
                 // Compare property value
-                let actual_value = feature.properties.get(key);
-                match actual_value {
-                    Some(val) => val != expected_value,
+                match feature.properties.as_object().and_then(|obj| obj.get(key)) {
+                    Some(actual_value) => actual_value != expected_value,
                     None => !expected_value.is_null(),
                 }
             }
@@ -335,11 +333,10 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 false
             } else {
                 // Check if property value is in the list
-                let actual_value = feature.properties.get(key);
-                match actual_value {
-                    Some(val) => {
+                match feature.properties.as_object().and_then(|obj| obj.get(key)) {
+                    Some(actual_value) => {
                         for i in 2..filter_array.len() {
-                            if &filter_array[i] == val {
+                            if &filter_array[i] == actual_value {
                                 return true;
                             }
                         }
@@ -385,11 +382,10 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 true
             } else {
                 // Check if property value is NOT in the list
-                let actual_value = feature.properties.get(key);
-                match actual_value {
-                    Some(val) => {
+                match feature.properties.as_object().and_then(|obj| obj.get(key)) {
+                    Some(actual_value) => {
                         for i in 2..filter_array.len() {
-                            if &filter_array[i] == val {
+                            if &filter_array[i] == actual_value {
                                 return false;
                             }
                         }
@@ -425,7 +421,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 true // For now, assume features always have some form of id
             } else {
                 // Check if property exists
-                feature.properties.get(key).is_some()
+                feature.properties.as_object().map_or(false, |obj| obj.contains_key(key))
             }
         }
         "!has" => {
@@ -443,7 +439,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 false // For now, assume features always have some form of id
             } else {
                 // Check if property does NOT exist
-                feature.properties.get(key).is_none()
+                feature.properties.as_object().map_or(true, |obj| !obj.contains_key(key))
             }
         }
         
@@ -463,7 +459,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 return true; // Skip comparison for special keys
             }
             
-            match feature.properties.get(key) {
+            match feature.properties.as_object().and_then(|obj| obj.get(key)) {
                 Some(actual_value) => {
                     // Try to compare as numbers first, then as strings
                     if let (Some(actual_num), Some(expected_num)) = 
@@ -751,6 +747,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let extent = 4096; // Standard MVT extent
 
         // Process each feature in the layer
+        let mut filtered_by_expression = 0;
+        let mut processed_features = 0;
+        let mut geometry_created = 0;
+        let mut geometry_filtered_by_bbox = 0;
+        
         for feature in &layer.features {
             feature_count += 1;
 
@@ -765,10 +766,36 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     properties: serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
                 };
                 
+                // Debug: log a few examples to understand the filter issue
+                if feature_count <= 3 {
+                    console_log!("🔍 received DEBUG Feature {}: class = {:?}, filter = {:?}", 
+                        feature_count, 
+                        feature.properties.get("class"),
+                        filter
+                    );
+                }
+                
+                // Debug: specifically track primary and secondary features
+                if let Some(class_value) = feature.properties.get("class") {
+                    if let Some(class_str) = class_value.as_str() {
+                        if class_str == "primary" || class_str == "secondary" {
+                            console_log!("🎯 Found {} feature, testing filter...", class_str);
+                            let filter_result = evaluate_filter(filter, &filterable_feature);
+                            console_log!("🎯 Filter result for {}: {}", class_str, filter_result);
+                            if !filter_result {
+                                console_log!("❌ {} feature was incorrectly filtered out!", class_str);
+                            }
+                        }
+                    }
+                }
+                
                 if !evaluate_filter(filter, &filterable_feature) {
+                    filtered_by_expression += 1;
                     continue; // Skip features that don't pass the filter
                 }
             }
+            
+            processed_features += 1;
 
             // --- Height Extraction ---
             let height = feature
@@ -920,19 +947,49 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     // console_log!("  Skipping unhandled geometry type: {}", geometry_type_str);
                 }
             }
+            
+            let pre_bbox_count = transformed_geometry_parts.len();
+            geometry_created += pre_bbox_count;
+            
             // Filter out any geometries whose points are outside the requested bbox
+            // For LineStrings, use a more lenient bbox check with small buffer to catch roads that cross boundaries
+            let bbox_buffer = 0.001; // ~100m buffer for roads crossing boundaries
             let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
                 .into_iter()
                 .filter(|geom| {
+                    let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
+                        if geom.r#type == "LineString" {
+                            // Use buffered bbox for LineStrings (roads)
+                            (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
+                        } else {
+                            // Use strict bbox for Polygons (buildings)
+                            (min_lng, max_lng, min_lat, max_lat)
+                        };
+                    
                     geom.geometry.iter().any(|coord| {
                         let lon = coord[0];
                         let lat = coord[1];
-                        lon >= min_lng && lon <= max_lng && lat >= min_lat && lat <= max_lat
+                        lon >= effective_min_lng && lon <= effective_max_lng && lat >= effective_min_lat && lat <= effective_max_lat
                     })
                 })
                 .collect();
+            
+            let post_bbox_count = filtered_parts.len();
+            geometry_filtered_by_bbox += pre_bbox_count - post_bbox_count;
+            
             geometry_data_list.extend(filtered_parts);
         }
+        
+        // Log the filtering statistics for this tile
+        console_log!(
+            "📊received  Tile {}/{}/{} stats: {} total, {} filtered by expression, {} processed, {} geometries created, {} filtered by bbox",
+            tile_z, tile_x, tile_y,
+            layer.features.len(),
+            filtered_by_expression,
+            processed_features,
+            geometry_created,
+            geometry_filtered_by_bbox
+        );
     }
 
     console_log!(
@@ -948,11 +1005,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     // Cache the extracted feature data for later use
     {
         // Build inner cache key using central function
-        let filter_str = input.vtDataSet.filter
-            .as_ref()
-            .map(|f| f.to_string())
-            .unwrap_or_else(|| "".to_string());
-        let inner_key = cache_keys::make_inner_key(&vt_dataset.sourceLayer, filter_str.as_str());
+        let inner_key = cache_keys::make_inner_key_from_filter(&vt_dataset.sourceLayer, input.vtDataSet.filter.as_ref());
         let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
         module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str.clone());
         console_log!(

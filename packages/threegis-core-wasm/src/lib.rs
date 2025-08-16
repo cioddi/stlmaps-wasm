@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use crate::cache_keys::{make_bbox_key, make_inner_key};
+use crate::cache_keys::{make_bbox_key, make_inner_key, make_inner_key_from_filter};
 use geojson::{Feature, GeoJson, Geometry, Value};
 use geo::{Coord, LineString, Polygon};
 use geo_buffer::buffer_polygon;
@@ -367,20 +367,38 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
     // Assemble inner cache key using central function (no filter currently)
-    let filter_str = input_val
-        .get("vtDataSet")
-        .and_then(|v| v.get("filter"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let inner_key = cache_keys::make_inner_key(source_layer, filter_str);
+    let inner_key = make_inner_key_from_filter(
+        source_layer, 
+        input_val.get("vtDataSet").and_then(|v| v.get("filter"))
+    );
+    console_log!("🔍 Looking for cached features: bbox_key='{}', inner_key='{}', source_layer='{}'", bbox_key, inner_key, source_layer);
+    
     // Retrieve features from feature_data_cache
     let features: Vec<crate::polygon_geometry::GeometryData> = if let Some(js_val) = state.get_feature_data(&bbox_key, &inner_key) {
         // Stored as JSON string in JsValue
         let json_str = js_val.as_string().unwrap_or_else(|| "[]".to_string());
-        serde_json::from_str(&json_str).unwrap_or_default()
+        console_log!("✅ Found cached data for {}: {} characters", inner_key, json_str.len());
+        match serde_json::from_str::<Vec<crate::polygon_geometry::GeometryData>>(&json_str) {
+            Ok(data) => {
+                console_log!("Successfully deserialized {} features", data.len());
+                data
+            },
+            Err(e) => {
+                console_log!("Failed to deserialize features: {}", e);
+                Vec::new()
+            }
+        }
     } else {
-        // No cached features found
+        console_log!("❌ No cached features found for bbox_key='{}', inner_key='{}'", bbox_key, inner_key);
+        console_log!("🔍 Available cache keys for bbox:");
+        // List what cache keys are actually available
+        if let Some(bbox_cache) = state.feature_data_cache.get(&bbox_key) {
+            for (key, _) in bbox_cache.iter() {
+                console_log!("  Available key: '{}'", key);
+            }
+        } else {
+            console_log!("  No cache entry for bbox_key: '{}'", bbox_key);
+        }
         Vec::new()
     };
 

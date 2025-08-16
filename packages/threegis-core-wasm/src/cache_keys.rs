@@ -14,3 +14,13 @@ pub fn make_inner_key(source_layer: &str, filter_str: &str) -> String {
         format!("{}_{}", source_layer, filter_str)
     }
 }
+
+/// Generate an inner cache key from a source layer and optional filter JSON value.
+/// Handles null values and empty filters consistently by treating them as empty strings.
+pub fn make_inner_key_from_filter(source_layer: &str, filter: Option<&serde_json::Value>) -> String {
+    let filter_str = filter
+        .filter(|f| !f.is_null())
+        .map(|f| f.to_string())
+        .unwrap_or_else(|| "".to_string());
+    make_inner_key(source_layer, &filter_str)
+}
