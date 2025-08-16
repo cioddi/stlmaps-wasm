@@ -3,7 +3,7 @@ import {
   GeometryData,
 } from "./VectorTileFunctions";
 import * as THREE from "three";
-//@ts-expect-error
+//@ts-expect-error No types available for BufferGeometryUtils
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { bufferLineString } from "../three_maps/bufferLineString";
 import useLayerStore from "../stores/useLayerStore";
@@ -14,6 +14,7 @@ import {
 } from "../utils/configHashing";
 import { WorkerService } from "../workers/WorkerService";
 import { tokenManager } from "../utils/CancellationToken";
+import { VtDataSet } from "../types/VtDataSet";
 // Import WASM functionality
 import { 
   useWasm, 
@@ -59,17 +60,6 @@ interface ConfigHashes {
   layerHashes: { index: number; hash: string }[];
 }
 
-// VtDataSet interface for type safety
-interface VtDataSet {
-  sourceLayer: string;
-  subClass?: string;
-  geometry?: THREE.BufferGeometry;
-  // Add other properties as needed
-  enabled?: boolean;
-  color?: string;
-  bufferSize?: number;
-}
-
 // Helper function to convert JS VtDataSet to Rust-compatible format
 function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
   return {
@@ -84,6 +74,7 @@ function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
     zOffset: jsVtDataSet.zOffset ?? null,
     alignVerticesToTerrain: jsVtDataSet.alignVerticesToTerrain ?? null,
     csgClipping: jsVtDataSet.csgClipping ?? null,
+    filter: jsVtDataSet.filter ?? null, // Pass the filter to Rust
   };
 }
 

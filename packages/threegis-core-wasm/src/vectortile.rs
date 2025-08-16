@@ -193,13 +193,326 @@ fn calculate_base_elevation(
 }
 
 // Evaluate if a feature matches a filter expression
-fn evaluate_filter(_filter: &serde_json::Value, _feature: &Feature) -> bool {
-    // This is a simplified filter evaluation - you may need to implement a more comprehensive
-    // filter system based on your application's needs
-
-    // For now, just assume true if there's no filter
-    // In a real implementation, you'd parse and evaluate the filter expression
-    true // TODO: Implement actual filter logic if needed
+fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
+    use serde_json::Value;
+    
+    console_log!("🔍 evaluate_filter called with filter: {:?}", filter);
+    
+    // If no filter, always pass
+    if filter.is_null() {
+        console_log!("    Filter is null, returning true");
+        return true;
+    }
+    
+    // Filters should be arrays where the first element is the operator
+    let filter_array = match filter.as_array() {
+        Some(arr) if !arr.is_empty() => {
+            console_log!("    Filter is array with {} elements", arr.len());
+            arr
+        },
+        _ => {
+            console_log!("    Invalid filter format (not an array or empty), returning true");
+            return true; // Invalid filter format, default to pass
+        }
+    };
+    
+    let operator = match filter_array[0].as_str() {
+        Some(op) => {
+            console_log!("    Filter operator: '{}'", op);
+            op
+        },
+        None => {
+            console_log!("    Invalid operator (not a string), returning true");
+            return true; // Invalid operator, default to pass
+        }
+    };
+    
+    match operator {
+        // Logical operators
+        "all" => {
+            // All conditions must be true
+            for i in 1..filter_array.len() {
+                if !evaluate_filter(&filter_array[i], feature) {
+                    return false;
+                }
+            }
+            true
+        }
+        "any" => {
+            // At least one condition must be true
+            for i in 1..filter_array.len() {
+                if evaluate_filter(&filter_array[i], feature) {
+                    return true;
+                }
+            }
+            false
+        }
+        "none" => {
+            // None of the conditions should be true
+            for i in 1..filter_array.len() {
+                if evaluate_filter(&filter_array[i], feature) {
+                    return false;
+                }
+            }
+            true
+        }
+        
+        // Equality operators
+        "==" => {
+            if filter_array.len() < 3 {
+                return true; // Invalid format
+            }
+            let key = match filter_array[1].as_str() {
+                Some(k) => k,
+                None => return true,
+            };
+            let expected_value = &filter_array[2];
+            
+            if key == "$type" {
+                // Compare geometry type
+                let geometry_type = match feature.geometry.r#type.as_str() {
+                    "Point" => "Point",
+                    "LineString" => "LineString", 
+                    "Polygon" => "Polygon",
+                    "MultiPoint" => "MultiPoint",
+                    "MultiLineString" => "MultiLineString",
+                    "MultiPolygon" => "MultiPolygon",
+                    _ => "Unknown",
+                };
+                expected_value.as_str().map_or(false, |v| v == geometry_type)
+            } else {
+                // Compare property value
+                let actual_value = feature.properties.get(key);
+                match actual_value {
+                    Some(val) => val == expected_value,
+                    None => expected_value.is_null(),
+                }
+            }
+        }
+        "!=" => {
+            if filter_array.len() < 3 {
+                return true; // Invalid format
+            }
+            let key = match filter_array[1].as_str() {
+                Some(k) => k,
+                None => return true,
+            };
+            let expected_value = &filter_array[2];
+            
+            if key == "$type" {
+                // Compare geometry type
+                let geometry_type = match feature.geometry.r#type.as_str() {
+                    "Point" => "Point",
+                    "LineString" => "LineString",
+                    "Polygon" => "Polygon", 
+                    "MultiPoint" => "MultiPoint",
+                    "MultiLineString" => "MultiLineString",
+                    "MultiPolygon" => "MultiPolygon",
+                    _ => "Unknown",
+                };
+                expected_value.as_str().map_or(true, |v| v != geometry_type)
+            } else {
+                // Compare property value
+                let actual_value = feature.properties.get(key);
+                match actual_value {
+                    Some(val) => val != expected_value,
+                    None => !expected_value.is_null(),
+                }
+            }
+        }
+        
+        // Membership operators
+        "in" => {
+            if filter_array.len() < 3 {
+                return true; // Invalid format
+            }
+            let key = match filter_array[1].as_str() {
+                Some(k) => k,
+                None => return true,
+            };
+            
+            if key == "$type" {
+                // Check if geometry type is in the list
+                let geometry_type = match feature.geometry.r#type.as_str() {
+                    "Point" => "Point",
+                    "LineString" => "LineString",
+                    "Polygon" => "Polygon",
+                    "MultiPoint" => "MultiPoint", 
+                    "MultiLineString" => "MultiLineString",
+                    "MultiPolygon" => "MultiPolygon",
+                    _ => "Unknown",
+                };
+                for i in 2..filter_array.len() {
+                    if filter_array[i].as_str().map_or(false, |v| v == geometry_type) {
+                        return true;
+                    }
+                }
+                false
+            } else {
+                // Check if property value is in the list
+                let actual_value = feature.properties.get(key);
+                match actual_value {
+                    Some(val) => {
+                        for i in 2..filter_array.len() {
+                            if &filter_array[i] == val {
+                                return true;
+                            }
+                        }
+                        false
+                    }
+                    None => {
+                        // Check if null is in the list
+                        for i in 2..filter_array.len() {
+                            if filter_array[i].is_null() {
+                                return true;
+                            }
+                        }
+                        false
+                    }
+                }
+            }
+        }
+        "!in" => {
+            if filter_array.len() < 3 {
+                return true; // Invalid format
+            }
+            let key = match filter_array[1].as_str() {
+                Some(k) => k,
+                None => return true,
+            };
+            
+            if key == "$type" {
+                // Check if geometry type is NOT in the list
+                let geometry_type = match feature.geometry.r#type.as_str() {
+                    "Point" => "Point",
+                    "LineString" => "LineString",
+                    "Polygon" => "Polygon",
+                    "MultiPoint" => "MultiPoint",
+                    "MultiLineString" => "MultiLineString", 
+                    "MultiPolygon" => "MultiPolygon",
+                    _ => "Unknown",
+                };
+                for i in 2..filter_array.len() {
+                    if filter_array[i].as_str().map_or(false, |v| v == geometry_type) {
+                        return false;
+                    }
+                }
+                true
+            } else {
+                // Check if property value is NOT in the list
+                let actual_value = feature.properties.get(key);
+                match actual_value {
+                    Some(val) => {
+                        for i in 2..filter_array.len() {
+                            if &filter_array[i] == val {
+                                return false;
+                            }
+                        }
+                        true
+                    }
+                    None => {
+                        // Check if null is NOT in the list
+                        for i in 2..filter_array.len() {
+                            if filter_array[i].is_null() {
+                                return false;
+                            }
+                        }
+                        true
+                    }
+                }
+            }
+        }
+        
+        // Existence operators
+        "has" => {
+            if filter_array.len() < 2 {
+                return true; // Invalid format
+            }
+            let key = match filter_array[1].as_str() {
+                Some(k) => k,
+                None => return true,
+            };
+            
+            if key == "$type" {
+                true // Geometry type always exists
+            } else if key == "$id" {
+                // Check if feature has an id
+                true // For now, assume features always have some form of id
+            } else {
+                // Check if property exists
+                feature.properties.get(key).is_some()
+            }
+        }
+        "!has" => {
+            if filter_array.len() < 2 {
+                return true; // Invalid format
+            }
+            let key = match filter_array[1].as_str() {
+                Some(k) => k,
+                None => return true,
+            };
+            
+            if key == "$type" {
+                false // Geometry type always exists
+            } else if key == "$id" {
+                false // For now, assume features always have some form of id
+            } else {
+                // Check if property does NOT exist
+                feature.properties.get(key).is_none()
+            }
+        }
+        
+        // Comparison operators
+        "<" | ">" | "<=" | ">=" => {
+            if filter_array.len() < 3 {
+                return true; // Invalid format
+            }
+            let key = match filter_array[1].as_str() {
+                Some(k) => k,
+                None => return true,
+            };
+            let expected_value = &filter_array[2];
+            
+            // Only compare properties (not $type or $id for ordering)
+            if key.starts_with('$') {
+                return true; // Skip comparison for special keys
+            }
+            
+            match feature.properties.get(key) {
+                Some(actual_value) => {
+                    // Try to compare as numbers first, then as strings
+                    if let (Some(actual_num), Some(expected_num)) = 
+                        (actual_value.as_f64(), expected_value.as_f64()) {
+                        match operator {
+                            "<" => actual_num < expected_num,
+                            ">" => actual_num > expected_num,
+                            "<=" => actual_num <= expected_num,
+                            ">=" => actual_num >= expected_num,
+                            _ => true,
+                        }
+                    } else if let (Some(actual_str), Some(expected_str)) = 
+                        (actual_value.as_str(), expected_value.as_str()) {
+                        match operator {
+                            "<" => actual_str < expected_str,
+                            ">" => actual_str > expected_str,
+                            "<=" => actual_str <= expected_str,
+                            ">=" => actual_str >= expected_str,
+                            _ => true,
+                        }
+                    } else {
+                        true // Can't compare different types
+                    }
+                }
+                None => false, // Property doesn't exist
+            }
+        }
+        
+        // Default case for unsupported operators
+        _ => {
+            console_log!("Unsupported filter operator: {}", operator);
+            true // Default to pass for unsupported operators
+        }
+    }
 }
 
 // Convert tile-local coordinates to longitude/latitude
@@ -237,6 +550,13 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     let max_lng = bbox[2];
     let max_lat = bbox[3];
     let vt_dataset = &input.vtDataSet;
+
+    // Log VtDataSet to check if filter is arriving
+    console_log!(
+        "🔍 VtDataSet received - sourceLayer: '{}', filter: {:?}",
+        vt_dataset.sourceLayer,
+        vt_dataset.filter
+    );
 
     // Compute consistent bbox_key using central function
     let bbox_key = cache_keys::make_bbox_key(min_lng, min_lat, max_lng, max_lat);
@@ -444,17 +764,32 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             //     }
             // }
 
-            // Apply filter expression if provided (Requires evaluate_filter implementation)
-            // if let Some(ref filter) = vt_dataset.filter {
-            //     // Need to convert MvtFeature properties to a structure evaluate_filter expects, if necessary
-            //     // Or adapt evaluate_filter to work with HashMap<String, serde_json::Value>
-            //     // let filterable_feature = Feature { /* ... construct if needed ... */ };
-            //     console_log!("    Applying filter: {:?}", filter);
-            //     // if !evaluate_filter(filter, &filterable_feature) { // Assuming evaluate_filter is adapted
-            //     //     console_log!("    Skipping feature: Filter evaluated to false.");
-            //     //     continue;
-            //     // }
-            // }
+            // Apply filter expression if provided
+            if let Some(ref filter) = vt_dataset.filter {
+                console_log!("    ✅ Filter found, applying to feature ID {:?}", feature.id);
+                console_log!("    Filter expression: {:?}", filter);
+                
+                // Convert MvtFeature to Feature for filter evaluation
+                let filterable_feature = Feature {
+                    geometry: FeatureGeometry {
+                        r#type: feature.geometry_type.clone(),
+                        coordinates: serde_json::to_value(&feature.geometry).unwrap_or(serde_json::Value::Null),
+                    },
+                    properties: serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+                };
+                
+                console_log!("    Feature properties: {:?}", feature.properties);
+                console_log!("    Feature geometry type: {}", feature.geometry_type);
+                
+                if !evaluate_filter(filter, &filterable_feature) {
+                    console_log!("    ❌ Skipping feature: Filter evaluated to false.");
+                    continue;
+                } else {
+                    console_log!("    ✅ Feature passed filter evaluation.");
+                }
+            } else {
+                console_log!("    ❓ No filter provided for layer '{}'", vt_dataset.sourceLayer);
+            }
 
             // --- Height Extraction ---
             let height = feature

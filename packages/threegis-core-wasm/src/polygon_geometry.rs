@@ -113,7 +113,7 @@ pub struct VtDataSet {
     pub useAdaptiveScaleFactor: Option<bool>,
     pub zOffset: Option<f64>,
     pub alignVerticesToTerrain: Option<bool>,
-    pub filter: Option<String>,
+    pub filter: Option<serde_json::Value>,
 }
 
 // Default color function for VtDataSet

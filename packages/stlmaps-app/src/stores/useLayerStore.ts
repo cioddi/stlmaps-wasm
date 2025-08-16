@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import * as THREE from 'three';
+import { create } from "zustand";
+import * as THREE from "three";
 import { vtGeometries as defaultVtGeometries } from "../config/layers";
-import { VtDataSet } from '../components/GenerateMeshButton';
+import { VtDataSet } from "../types/VtDataSet";
 
 interface TerrainSettings {
   enabled: boolean;
