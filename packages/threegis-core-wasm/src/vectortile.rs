@@ -196,35 +196,20 @@ fn calculate_base_elevation(
 fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
     use serde_json::Value;
     
-    console_log!("🔍 evaluate_filter called with filter: {:?}", filter);
-    
     // If no filter, always pass
     if filter.is_null() {
-        console_log!("    Filter is null, returning true");
         return true;
     }
     
     // Filters should be arrays where the first element is the operator
     let filter_array = match filter.as_array() {
-        Some(arr) if !arr.is_empty() => {
-            console_log!("    Filter is array with {} elements", arr.len());
-            arr
-        },
-        _ => {
-            console_log!("    Invalid filter format (not an array or empty), returning true");
-            return true; // Invalid filter format, default to pass
-        }
+        Some(arr) if !arr.is_empty() => arr,
+        _ => return true, // Invalid filter format, default to pass
     };
     
     let operator = match filter_array[0].as_str() {
-        Some(op) => {
-            console_log!("    Filter operator: '{}'", op);
-            op
-        },
-        None => {
-            console_log!("    Invalid operator (not a string), returning true");
-            return true; // Invalid operator, default to pass
-        }
+        Some(op) => op,
+        None => return true, // Invalid operator, default to pass
     };
     
     match operator {
@@ -509,7 +494,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
         
         // Default case for unsupported operators
         _ => {
-            console_log!("Unsupported filter operator: {}", operator);
+            // Silently pass unsupported operators (could log in debug mode)
             true // Default to pass for unsupported operators
         }
     }
@@ -722,13 +707,35 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let layer = match parsed_tile.layers.get(&vt_dataset.sourceLayer) {
             Some(layer_data) => {
                 console_log!(
-                    "  Found layer '{}' with {} features in tile {}/{}/{}",
+                    "📊 Layer '{}' received {} features from tile {}/{}/{}",
                     vt_dataset.sourceLayer,
                     layer_data.features.len(),
                     tile_z,
                     tile_x,
                     tile_y
                 );
+                
+                // Count features by class for this tile
+                let mut class_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for feature in &layer_data.features {
+                    let class_value = feature.properties.get("class")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    *class_counts.entry(class_value.to_string()).or_insert(0) += 1;
+                }
+                
+                // Format the class counts for logging
+                let mut class_stats: Vec<String> = class_counts.iter()
+                    .map(|(class, count)| format!("{} ({})", class, count))
+                    .collect();
+                class_stats.sort(); // Sort alphabetically for consistent output
+                
+                console_log!(
+                    "📊 received Layer '{}' classes: {}",
+                    vt_dataset.sourceLayer,
+                    class_stats.join(", ")
+                );
+                
                 layer_data
             }
             None => {
@@ -746,29 +753,9 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         // Process each feature in the layer
         for feature in &layer.features {
             feature_count += 1;
-            // console_log!("  Processing feature ID {:?} (Type: {})...", feature.id, feature.geometry_type);
-
-            // --- Filtering (Example - needs refinement based on actual filter structure) ---
-            // Filter by subclass if specified (Example property: "class" or "subclass")
-            // if let Some(ref sub_classes) = vt_dataset.subClass {
-            //     if let Some(feature_class) = feature.properties.get("class").or_else(|| feature.properties.get("subclass")) {
-            //         if let Some(class_str) = feature_class.as_str() {
-            //             if !sub_classes.iter().any(|s| s == class_str) {
-            //                  console_log!("    Skipping feature: subclass '{}' not in {:?}", class_str, sub_classes);
-            //                 continue; // Skip if subclass doesn't match
-            //             }
-            //         }
-            //     } else {
-            //          console_log!("    Skipping feature: subclass filter active, but feature has no subclass property.");
-            //         continue; // Skip if filter requires subclass but feature doesn't have it
-            //     }
-            // }
 
             // Apply filter expression if provided
             if let Some(ref filter) = vt_dataset.filter {
-                console_log!("    ✅ Filter found, applying to feature ID {:?}", feature.id);
-                console_log!("    Filter expression: {:?}", filter);
-                
                 // Convert MvtFeature to Feature for filter evaluation
                 let filterable_feature = Feature {
                     geometry: FeatureGeometry {
@@ -778,17 +765,9 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     properties: serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
                 };
                 
-                console_log!("    Feature properties: {:?}", feature.properties);
-                console_log!("    Feature geometry type: {}", feature.geometry_type);
-                
                 if !evaluate_filter(filter, &filterable_feature) {
-                    console_log!("    ❌ Skipping feature: Filter evaluated to false.");
-                    continue;
-                } else {
-                    console_log!("    ✅ Feature passed filter evaluation.");
+                    continue; // Skip features that don't pass the filter
                 }
-            } else {
-                console_log!("    ❓ No filter provided for layer '{}'", vt_dataset.sourceLayer);
             }
 
             // --- Height Extraction ---
@@ -955,6 +934,13 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             geometry_data_list.extend(filtered_parts);
         }
     }
+
+    console_log!(
+        "📊 Layer '{}' final: Received {} total features, generated {} valid geometries after filtering",
+        vt_dataset.sourceLayer, 
+        feature_count, 
+        geometry_data_list.len()
+    );
 
     //console_log!("✅ Finished extraction. Processed {} raw features. Extracted {} geometries from source layer '{}' for key '{}'",
     //    feature_count, geometry_data_list.len(), vt_dataset.sourceLayer, bbox_key);

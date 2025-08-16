@@ -55,7 +55,7 @@ export const vtGeometries: VtDataSet[] = [
       "in",
       "class",
       "primary",
-      //"secondary"
+      "secondary"
     ],
     csgClipping: false,
   },
