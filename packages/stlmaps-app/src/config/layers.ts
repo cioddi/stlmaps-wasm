@@ -52,13 +52,22 @@ export const vtGeometries: VtDataSet[] = [
     alignVerticesToTerrain: false,
     // Updated filter to include more street types
     filter: [
-      "in",
-      "class",
-      "motorway",
-      "primary",
-      "secondary",
-      "tertiary"
+      "all",
+      [
+        "in",
+        "class",
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "residential",
+        "service",
+        "minor",
+        "track",
+      ],
     ],
+
     csgClipping: false,
   },
   {
