@@ -20,6 +20,7 @@ import MobileMenu from "./components/MobileMenu";
 import MapSection from "./components/MapSection";
 import ModelSection from "./components/ModelSection";
 import { useWasm } from "@threegis/core";
+import DynamicVectorLayers from "./components/DynamicVectorLayers";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 340;
@@ -62,9 +63,7 @@ const App: React.FC = () => {
 
   // Get layer settings and geometries from Zustand store
   const {
-    terrainSettings,
-    buildingSettings,
-    setBbox,bbox
+    setBbox
   } = useLayerStore();
 
   // Handle city selection to update both center and bbox
@@ -160,6 +159,7 @@ const App: React.FC = () => {
           display={mapDisplay}
           bboxSelectorRef={bboxSelectorRef}
         />
+        <DynamicVectorLayers />
         {showDivider && <Divider />}
         {/* Model Preview - Bottom Half */}
         <ModelSection

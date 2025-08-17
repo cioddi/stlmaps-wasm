@@ -564,16 +564,8 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     let mut module_state = module_state_mutex.lock().unwrap();
 
     // Try to access cached vector tile data using the provided bbox_key
-    console_log!("🔍 DEBUG: Looking for vector tiles with key: {}", bbox_key);
     let vector_tiles_data = match module_state.get_vector_tiles(&bbox_key) {
-        Some(tiles) => {
-            console_log!(
-                "🔍 DEBUG: Found {} cached vector tiles with key: {}",
-                tiles.len(),
-                bbox_key
-            );
-            tiles
-        }
+        Some(tiles) => tiles,
         None => {
             console_log!(
                 "❌ ERROR: No cached vector tiles found for key: {}. Cannot extract features.",
@@ -669,12 +661,9 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
         // Use cached parsed MVT tile if available, otherwise parse and cache it
         let cache_key = format!("{}/{}/{}", tile_z, tile_x, tile_y);
-        console_log!("🔍 Checking parsed tile cache with key: {}", cache_key);
         let parsed_tile = if let Some(cached) = module_state.get_parsed_mvt_tile(&cache_key) {
-            console_log!("  ♻️ Using cached parsed tile for {}", cache_key);
             cached
         } else {
-            console_log!("  ❌ no parsed mvt tile found for {}", cache_key);
             match enhanced_parse_mvt_data(
                 &raw_mvt_data,
                 &TileRequest {
@@ -748,6 +737,25 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         // We have to rely on the default MVT extent.
         let extent = 4096; // Standard MVT extent
 
+        // Statistics tracking for features per class
+        let mut class_stats: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        
+        // First pass: collect statistics
+        for feature in &layer.features {
+            let class_value = feature.properties.get("class")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            *class_stats.entry(class_value.to_string()).or_insert(0) += 1;
+        }
+        
+        // Log statistics for this layer
+        console_log!("=== MVT Layer Statistics for '{}' ===", vt_dataset.sourceLayer);
+        console_log!("Total features before filtering: {}", layer.features.len());
+        for (class, count) in &class_stats {
+            console_log!("  {}: {} features", class, count);
+        }
+        console_log!("=====================================");
+
         // Process each feature in the layer
         let mut filtered_by_expression = 0;
         let mut processed_features = 0;
@@ -768,28 +776,17 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     properties: serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
                 };
                 
-                // Debug: log a few examples to understand the filter issue
-                if feature_count <= 3 {
-                    console_log!("🔍 received DEBUG Feature {}: class = {:?}, filter = {:?}", 
-                        feature_count, 
-                        feature.properties.get("class"),
-                        filter
-                    );
-                }
-                
-                // Debug: specifically track primary and secondary features
-                if let Some(class_value) = feature.properties.get("class") {
-                    if let Some(class_str) = class_value.as_str() {
-                        if class_str == "primary" || class_str == "secondary" {
-                            console_log!("🎯 Found {} feature, testing filter...", class_str);
-                            let filter_result = evaluate_filter(filter, &filterable_feature);
-                            console_log!("🎯 Filter result for {}: {}", class_str, filter_result);
-                            if !filter_result {
-                                console_log!("❌ {} feature was incorrectly filtered out!", class_str);
-                            }
-                        }
-                    }
-                }
+                // Debug: specifically track primary and secondary features (removed individual logging)
+                // if let Some(class_value) = feature.properties.get("class") {
+                //     if let Some(class_str) = class_value.as_str() {
+                //         if class_str == "primary" || class_str == "secondary" {
+                //             let filter_result = evaluate_filter(filter, &filterable_feature);
+                //             if !filter_result {
+                //                 console_log!("❌ {} feature was filtered out by expression!", class_str);
+                //             }
+                //         }
+                //     }
+                // }
                 
                 if !evaluate_filter(filter, &filterable_feature) {
                     filtered_by_expression += 1;
@@ -960,30 +957,41 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             geometry_created += pre_bbox_count;
             
             // Filter out any geometries whose points are outside the requested bbox
-            // For LineStrings, use a more lenient bbox check with larger buffer to catch roads that cross boundaries
-            let bbox_buffer = if vt_dataset.sourceLayer == "transportation" { 0.003 } else { 0.001 }; // ~300m buffer for transportation, ~100m for others
-            let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
-                .into_iter()
-                .filter(|geom| {
-                    let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
-                        if geom.r#type.as_ref().map_or(false, |t| t == "LineString") || vt_dataset.sourceLayer == "transportation" {
-                            // Use buffered bbox for LineStrings (roads) and all transportation features
-                            (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
-                        } else {
-                            // Use strict bbox for Polygons (buildings)
-                            (min_lng, max_lng, min_lat, max_lat)
-                        };
-                    
-                    geom.geometry.iter().any(|coord| {
-                        let lon = coord[0];
-                        let lat = coord[1];
-                        lon >= effective_min_lng && lon <= effective_max_lng && lat >= effective_min_lat && lat <= effective_max_lat
+            // TEMPORARILY DISABLE bbox filtering for transportation to debug missing roads
+            let filtered_parts: Vec<GeometryData> = if vt_dataset.sourceLayer == "transportation" {
+                console_log!("🚫 BBOX FILTERING DISABLED for transportation layer");
+                transformed_geometry_parts // No filtering for transportation
+            } else {
+                // For LineStrings, use a more lenient bbox check with larger buffer to catch roads that cross boundaries
+                let bbox_buffer = 0.001; // ~100m buffer for others
+                transformed_geometry_parts
+                    .into_iter()
+                    .filter(|geom| {
+                        let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
+                            if geom.r#type.as_ref().map_or(false, |t| t == "LineString") {
+                                // Use buffered bbox for LineStrings (roads)
+                                (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
+                            } else {
+                                // Use strict bbox for Polygons (buildings)
+                                (min_lng, max_lng, min_lat, max_lat)
+                            };
+                        
+                        geom.geometry.iter().any(|coord| {
+                            let lon = coord[0];
+                            let lat = coord[1];
+                            lon >= effective_min_lng && lon <= effective_max_lng && lat >= effective_min_lat && lat <= effective_max_lat
+                        })
                     })
-                })
-                .collect();
+                    .collect()
+            };
             
             let post_bbox_count = filtered_parts.len();
-            geometry_filtered_by_bbox += pre_bbox_count - post_bbox_count;
+            if vt_dataset.sourceLayer == "transportation" {
+                // No bbox filtering was applied to transportation
+                geometry_filtered_by_bbox += 0;
+            } else {
+                geometry_filtered_by_bbox += pre_bbox_count - post_bbox_count;
+            }
             
             geometry_data_list.extend(filtered_parts);
         }
@@ -1001,14 +1009,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     }
 
     console_log!(
-        "📊 Layer '{}' final: Received {} total features, generated {} valid geometries after filtering",
+        "📊 Layer '{}': {} features → {} geometries after filtering",
         vt_dataset.sourceLayer, 
         feature_count, 
         geometry_data_list.len()
     );
-
-    //console_log!("✅ Finished extraction. Processed {} raw features. Extracted {} geometries from source layer '{}' for key '{}'",
-    //    feature_count, geometry_data_list.len(), vt_dataset.sourceLayer, bbox_key);
 
     // Cache the extracted feature data for later use
     {
@@ -1016,12 +1021,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let inner_key = cache_keys::make_inner_key_from_filter(&vt_dataset.sourceLayer, input.vtDataSet.filter.as_ref());
         let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
         module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str.clone());
-        console_log!(
-            "✅ Stored {} features under bbox_key: '{}' and inner_key: '{}'",
-            geometry_data_list.len(),
-            bbox_key,
-            inner_key
-        );
     }
     // Return undefined since data is cached at bbox_key level
     Ok(JsValue::undefined())

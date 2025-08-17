@@ -706,12 +706,9 @@ export const GenerateMeshButton = function () {
 
             // Add properties to userData for hover interaction
             if (geometryData.properties) {
-              console.log(`WASM geometry ${geometries.length} properties:`, geometryData.properties);
               geometry.userData = {
                 properties: geometryData.properties
               };
-            } else {
-              console.log(`WASM geometry ${geometries.length} has NO properties`);
             }
             
             // Compute normals if not provided

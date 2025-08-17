@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, useTheme } from "@mui/material";
+import { Box } from "@mui/material";
 import { MapLibreMap } from "@mapcomponents/react-maplibre";
 import BboxToCenterButton from "./BboxToCenterButton";
 
@@ -10,16 +10,20 @@ interface MapSectionProps {
   bboxSelectorRef?: React.RefObject<{ updateBbox: () => void }>;
 }
 
-const MapSection: React.FC<MapSectionProps> = ({ mapCenter, flex, display, bboxSelectorRef }) => {
-  const theme = useTheme();
-
+const MapSection: React.FC<MapSectionProps> = ({
+  mapCenter,
+  flex,
+  display,
+  bboxSelectorRef,
+}) => {
+  console.log('render MapSection')
   return (
-    <Box 
-      sx={{ 
-        flex: flex, 
-        position: "relative", 
-        minHeight: 0, 
-        display: display, 
+    <Box
+      sx={{
+        flex: flex,
+        position: "relative",
+        minHeight: 0,
+        display: display,
       }}
     >
       <MapLibreMap
@@ -32,11 +36,33 @@ const MapSection: React.FC<MapSectionProps> = ({ mapCenter, flex, display, bboxS
         }}
         options={{
           center: mapCenter,
-          
           zoom: 15,
-          style: "https://wms.wheregroup.com/tileserver/style/osm-bright.json",
+          style: {
+            version: 8,
+            sources: {
+              openmaptiles: {
+                type: "vector",
+                url: "https://wms.wheregroup.com/tileserver/tile/world-0-14.json",
+              },
+            },
+            layers: [
+              {
+                id: "background",
+                type: "background",
+                paint: {
+                  "background-color": "#f8f8f8",
+                },
+              },
+            ],
+
+            sprite: "https://wms.wheregroup.com/tileserver/sprites/osm-bright",
+            glyphs:
+              "https://wms.wheregroup.com/tileserver/fonts/{fontstack}/{range}.pbf",
+          },
         }}
       />
+
+
       {/* Add BBOX to Center button */}
       {bboxSelectorRef && (
         <BboxToCenterButton bboxSelectorRef={bboxSelectorRef} />

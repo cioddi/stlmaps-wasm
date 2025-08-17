@@ -1112,11 +1112,36 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 i, polygon_data.properties, polygon_data.r#type);
         }
         
+        // Debug: Track primary and secondary roads specifically
+        if let Some(ref props) = polygon_data.properties {
+            if let serde_json::Value::Object(obj) = props {
+                if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                    if class == "primary" || class == "secondary" {
+                        console_log!("🛣️ Processing {} road: properties = {:?}, type = {:?}", 
+                            class, polygon_data.properties, polygon_data.r#type);
+                    }
+                }
+            }
+        }
+        
         // Check if debug mode is enabled
         let debug_mode = false; // Always disable debug mode special handling
         
         // Handle both Polygon and LineString geometries
         let points: Vec<Vector2> = if polygon_data.r#type.as_deref() == Some("LineString") {
+            // Log LineString processing
+            let is_major_road = if let Some(ref props) = polygon_data.properties {
+                if let serde_json::Value::Object(obj) = props {
+                    if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                        class == "primary" || class == "secondary" || class == "motorway" || class == "trunk"
+                    } else { false }
+                } else { false }
+            } else { false };
+            
+            if is_major_road {
+                console_log!("🛣️ Processing LineString for major road with {} points", polygon_data.geometry.len());
+            }
+            
             // For LineStrings (roads), convert to a buffered polygon
             // Use a small buffer distance for road width
             let buffer_distance = 0.00005; // ~5 meters in degrees
@@ -1194,6 +1219,11 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     }
                 }
                 
+                if is_major_road {
+                    console_log!("🛣️ Created buffered polygon with {} points from {} line points", 
+                        buffered_polygon.len(), line_points.len());
+                }
+                
                 buffered_polygon
             } else {
                 Vec::new()
@@ -1212,6 +1242,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         };
         
         if points.len() < 3 {
+            // Debug: Track why major roads might be skipped
+            if let Some(ref props) = polygon_data.properties {
+                if let serde_json::Value::Object(obj) = props {
+                    if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                        if class == "primary" || class == "secondary" {
+                            console_log!("⚠️ Skipping {} road: only {} points after processing", class, points.len());
+                        }
+                    }
+                }
+            }
             continue; // Skip invalid polygons
         }
         
@@ -1352,21 +1392,17 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Create geometry based on debug mode
         // Extract properties from polygon_data for attaching to geometry
         let properties = if let Some(ref props) = polygon_data.properties {
-            console_log!("🔍 Found properties in polygon_data: {:?}", props);
             // Convert serde_json::Value to HashMap<String, serde_json::Value>
             if let serde_json::Value::Object(obj) = props {
                 let mut hashmap = std::collections::HashMap::new();
                 for (key, value) in obj.iter() {
                     hashmap.insert(key.clone(), value.clone());
                 }
-                console_log!("🔍 Converted properties to hashmap: {:?}", hashmap);
                 Some(hashmap)
             } else {
-                console_log!("🔍 Properties not an object: {:?}", props);
                 None
             }
         } else {
-            console_log!("🔍 No properties found in polygon_data");
             None
         };
         
