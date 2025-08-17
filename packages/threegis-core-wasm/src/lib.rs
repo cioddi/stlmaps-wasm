@@ -1,8 +1,8 @@
 use wasm_bindgen::prelude::*;
 use crate::cache_keys::{make_bbox_key, make_inner_key, make_inner_key_from_filter};
 use geojson::{Feature, GeoJson, Geometry, Value};
-use geo::{Coord, LineString, Polygon};
-use geo_buffer::buffer_polygon;
+use geo::{Coord, LineString, MultiLineString, MultiPolygon, Polygon};
+use geo::algorithm::buffer::Buffer;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
 use std::collections::HashMap;
@@ -203,73 +203,125 @@ pub fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 
-// Buffer a line string by a distance (in coordinate units)
+// Buffer a LineString or MultiLineString by a distance (in coordinate units)
+// Returns a GeoJSON Feature with MultiPolygon geometry.
 #[wasm_bindgen]
-pub fn buffer_line_string(line_string_json: &str, buffer_distance: f64) -> String {
-    console_log!("Buffering line string with distance: {}", buffer_distance);
-    
-    // Parse the GeoJSON
-    let geojson = line_string_json.parse::<GeoJson>().unwrap();
-    
-    // Extract the line string coordinates
-    if let GeoJson::Feature(feature) = geojson {
-        if let Some(geometry) = feature.geometry {
-            if let Value::LineString(coordinates) = geometry.value {
-                // Convert to geo LineString
-                let points: Vec<Coord<f64>> = coordinates
-                    .iter()
-                    .map(|c| Coord {
-                        x: c[0],
-                        y: c[1],
-                    })
-                    .collect();
-                
-                // Construct a closed polygon from the linestring for buffering
-                let mut ring_coords = points.clone();
-                if let (Some(first), Some(last)) = (ring_coords.first(), ring_coords.last()) {
-                    if first != last {
-                        ring_coords.push(*first);
-                    }
-                }
-                let poly = Polygon::new(LineString::new(ring_coords), vec![]);
-                // Buffer using geo-buffer crate (straight skeleton)
-                let multi_poly = buffer_polygon(&poly, buffer_distance);
+pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
+    console_log!("buffer_line_string called with distance: {}, input length: {}", dist, geojson_str.len());
 
-                // Convert buffered MultiPolygon back to GeoJSON Feature
-                let coords_multi: Vec<Vec<Vec<Vec<f64>>>> = multi_poly
-                    .0
-                    .into_iter()
-                    .map(|poly| {
-                        // exterior ring
-                        let exterior: Vec<Vec<f64>> =
-                            poly.exterior().coords().map(|c| vec![c.x, c.y]).collect();
-                        // interior rings (holes)
-                        let interiors: Vec<Vec<Vec<f64>>> = poly
-                            .interiors()
-                            .iter()
-                            .map(|ring| ring.coords().map(|c| vec![c.x, c.y]).collect())
-                            .collect();
-                        let mut rings = Vec::with_capacity(1 + interiors.len());
-                        rings.push(exterior);
-                        rings.extend(interiors);
-                        rings
-                    })
-                    .collect();
-                let geometry = Geometry::new(Value::MultiPolygon(coords_multi));
-                let feature = Feature {
-                    bbox: None,
-                    geometry: Some(geometry),
-                    id: None,
-                    properties: None,
-                    foreign_members: None,
-                };
-                return serde_json::to_string(&feature).unwrap();
+    // Defensive: non-positive or NaN distances return empty geometry
+    if !dist.is_finite() || dist == 0.0 {
+        return "{}".to_string();
+    }
+    let dist = dist.abs();
+
+    // Try to parse any valid GeoJSON payload (Feature, Geometry, or raw geometry JSON)
+    let parsed = match geojson_str.parse::<GeoJson>() {
+        Ok(gj) => gj,
+        Err(e) => {
+            console_log!("buffer_line_string: invalid GeoJSON: {}", e);
+            return "{}".to_string();
+        }
+    };
+
+    // Using default buffer options provided by geo
+
+    // Convert a Vec<[f64; 2+]>-like into a geo LineString, ignoring Z/M if present
+    let coords_to_linestring = |coords: &Vec<Vec<f64>>| -> LineString<f64> {
+        let pts: Vec<Coord<f64>> = coords
+            .iter()
+            .filter_map(|c| if c.len() >= 2 { Some(Coord { x: c[0], y: c[1] }) } else { None })
+            .collect();
+        LineString::new(pts)
+    };
+
+    let geometry_to_multipoly = |val: Option<Value>| -> Option<MultiPolygon<f64>> {
+        match val? {
+            Value::LineString(coords) => {
+                let ls = coords_to_linestring(&coords);
+                console_log!("Buffering LineString with {} points, buffer distance: {}", coords.len(), dist);
+                let buffered = ls.buffer(dist);
+                console_log!("LineString buffer result: {} polygons", buffered.0.len());
+                Some(buffered)
+            }
+            Value::MultiLineString(lines) => {
+                console_log!("Processing MultiLineString input with {} coordinate arrays", lines.len());
+                let parts: Vec<LineString<f64>> = lines.iter().map(|c| coords_to_linestring(c)).collect();
+                console_log!("Buffering MultiLineString with {} lines, buffer distance: {}", parts.len(), dist);
+                let multi_ls = MultiLineString::new(parts);
+                let buffered = multi_ls.buffer(dist);
+                console_log!("MultiLineString buffer result: {} polygons", buffered.0.len());
+                Some(buffered)
+            }
+            _ => {
+                console_log!("Skipping non-LineString geometry type");
+                None
             }
         }
+    };
+
+    let multipoly: Option<MultiPolygon<f64>> = match parsed {
+        GeoJson::Feature(f) => {
+            console_log!("Processing single Feature");
+            geometry_to_multipoly(f.geometry.map(|g| g.value))
+        }
+        GeoJson::Geometry(g) => {
+            console_log!("Processing single Geometry");
+            geometry_to_multipoly(Some(g.value))
+        }
+        GeoJson::FeatureCollection(fc) => {
+            console_log!("Processing FeatureCollection with {} features", fc.features.len());
+            // Buffer all LineString-like features and merge into one MultiPolygon
+            let mut acc: Vec<Polygon<f64>> = Vec::new();
+            for (i, feat) in fc.features.into_iter().enumerate() {
+                if let Some(mp) = geometry_to_multipoly(feat.geometry.map(|g| g.value)) {
+                    console_log!("Feature {}: Added {} polygons from buffering", i, mp.0.len());
+                    acc.extend(mp.0);
+                } else {
+                    console_log!("Feature {}: No geometry to buffer", i);
+                }
+            }
+            console_log!("Total buffered polygons: {}", acc.len());
+            if acc.is_empty() { None } else { Some(MultiPolygon(acc)) }
+        }
+    };
+
+    // Serialize result
+    if let Some(mp) = multipoly {
+        // Handle empty result gracefully
+        if mp.0.is_empty() {
+            console_log!("buffer_line_string: No buffered polygons to return");
+            return "{}".to_string();
+        }
+
+        console_log!("buffer_line_string: Serializing {} buffered polygons", mp.0.len());
+
+        let coords_multi: Vec<Vec<Vec<Vec<f64>>>> = mp
+            .0
+            .into_iter()
+            .map(|poly| {
+                let exterior: Vec<Vec<f64>> = poly.exterior().coords().map(|c| vec![c.x, c.y]).collect();
+                let interiors: Vec<Vec<Vec<f64>>> = poly
+                    .interiors()
+                    .iter()
+                    .map(|ring| ring.coords().map(|c| vec![c.x, c.y]).collect())
+                    .collect();
+                let mut rings = Vec::with_capacity(1 + interiors.len());
+                rings.push(exterior);
+                rings.extend(interiors);
+                rings
+            })
+            .collect();
+
+        let geometry = Geometry::new(Value::MultiPolygon(coords_multi));
+        let feature = Feature { bbox: None, geometry: Some(geometry), id: None, properties: None, foreign_members: None };
+        let result = serde_json::to_string(&feature).unwrap_or_else(|_| "{}".to_string());
+        console_log!("buffer_line_string: Returning result with length: {}", result.len());
+        result
+    } else {
+        console_log!("buffer_line_string: No geometry found to buffer");
+        "{}".to_string()
     }
-    
-    // Return empty result if parsing fails or input is not a LineString
-    "{}".to_string()
 }
 
 // Function to create 3D building geometry from a GeoJSON polygon

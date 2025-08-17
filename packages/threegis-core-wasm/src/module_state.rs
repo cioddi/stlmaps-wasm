@@ -197,7 +197,7 @@ impl ModuleState {
     }
     
     // Set tile data in cache
-    pub fn set_tile_data(&mut self, key: &str, tile_data: TileData) {
+    pub fn set_tile_data(&mut self, key: &str, _tile_data: TileData) {
         // In a real implementation, this would store the tile in a HashMap
         console_log!("Storing tile with key: {}", key);
     }
@@ -325,7 +325,7 @@ impl ModuleState {
     }
     
     // Add a cached object (for general-purpose caching)
-    pub fn add_cached_object(&mut self, key: &str, value: JsValue) {
+    pub fn add_cached_object(&mut self, key: &str, _value: JsValue) {
         // In a real implementation, you would store this in a HashMap<String, JsValue>
         // For now, we'll just log it since we're not implementing the full cache
         console_log!("Caching object with key: {}", key);

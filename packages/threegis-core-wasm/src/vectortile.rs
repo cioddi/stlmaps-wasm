@@ -863,12 +863,23 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         }
                     }
                 }
-                "LineString" => {
-                    // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer is lines, inner is points [px, py]
-                    // Assuming single line per feature for simplicity here based on structure
-                    if let Some(line_tile_coords) = feature.geometry.get(0) {
-                        let mut transformed_line: Vec<Vec<f64>> =
-                            Vec::with_capacity(line_tile_coords.len());
+                "LineString" | "MultiLineString" => {
+                    // UNIFIED PROCESSING for both LineString and MultiLineString
+                    // feature.geometry structure: Vec<Vec<Vec<f64>>> where each Vec<Vec<f64>> represents a line
+                    // For LineString: contains 1 line
+                    // For MultiLineString: contains multiple lines
+                    
+                    let class_value = feature.properties.get("class")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    
+                    console_log!("🛣️ Processing {} with {} line(s) for class '{}'", 
+                        geometry_type_str, feature.geometry.len(), class_value);
+                    
+                    for (line_index, line_tile_coords) in feature.geometry.iter().enumerate() {
+                        let mut transformed_line: Vec<Vec<f64>> = Vec::with_capacity(line_tile_coords.len());
+                        
+                        // Transform each point in the line from tile coordinates to lat/lng
                         for point_tile_coords in line_tile_coords {
                             if point_tile_coords.len() >= 2 {
                                 let (lng, lat) = convert_tile_coords_to_lnglat(
@@ -882,9 +893,10 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 transformed_line.push(vec![lng, lat]);
                             }
                         }
-                        if !transformed_line.is_empty() {
-                            // console_log!("    Transformed LineString with {} vertices.", transformed_line.len());
-                            let base_elevation = calculate_base_elevation(
+                        
+                        // Only create geometry if we have a valid line with at least 2 points
+                        if transformed_line.len() >= 2 {
+                            let _base_elevation = calculate_base_elevation(
                                 &transformed_line,
                                 &elevation_grid,
                                 grid_size.0 as usize,
@@ -894,16 +906,21 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 elev_max_lng,
                                 elev_max_lat,
                             );
-                            // console_log!("    Calculated base elevation: {}", base_elevation);
+                            
+                            console_log!("✅ Created LineString geometry for class '{}' line {} with {} points", 
+                                class_value, line_index, transformed_line.len());
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_line,
-                                r#type: Some("LineString".to_string()),
-                                height: Some(height), // Height might not be typical for lines, but include if present
+                                r#type: Some("LineString".to_string()), // Always output as LineString
+                                height: Some(height),
                                 layer: Some(vt_dataset.sourceLayer.clone()),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
+                        } else {
+                            console_log!("⚠️ Skipping line {} for class '{}': only {} points (need ≥2)", 
+                                line_index, class_value, transformed_line.len());
                         }
                     }
                 }
@@ -948,50 +965,86 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         }
                     }
                 }
+                "MultiPolygon" => {
+                    // Handle MultiPolygon geometries (multiple separate polygons)
+                    // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer Vec contains multiple polygon rings
+                    // Note: This is a simplified approach - proper MultiPolygon handling would need to group rings by polygon
+                    for ring_tile_coords in &feature.geometry {
+                        let mut transformed_ring: Vec<Vec<f64>> = Vec::with_capacity(ring_tile_coords.len());
+                        for point_tile_coords in ring_tile_coords {
+                            if point_tile_coords.len() >= 2 {
+                                let (lng, lat) = convert_tile_coords_to_lnglat(
+                                    point_tile_coords[0],
+                                    point_tile_coords[1],
+                                    extent,
+                                    tile_x,
+                                    tile_y,
+                                    tile_z,
+                                );
+                                transformed_ring.push(vec![lng, lat]);
+                            }
+                        }
+
+                        if !transformed_ring.is_empty() {
+                            let base_elevation = calculate_base_elevation(
+                                &transformed_ring,
+                                &elevation_grid,
+                                grid_size.0 as usize,
+                                grid_size.1 as usize,
+                                elev_min_lng,
+                                elev_min_lat,
+                                elev_max_lng,
+                                elev_max_lat,
+                            );
+
+                            transformed_geometry_parts.push(GeometryData {
+                                geometry: transformed_ring,
+                                r#type: Some("Polygon".to_string()), // Convert MultiPolygon to individual Polygons
+                                height: Some(height),
+                                layer: Some(vt_dataset.sourceLayer.clone()),
+                                tags: None,
+                                properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
+                            });
+                        }
+                    }
+                }
                 _ => {
-                    // console_log!("  Skipping unhandled geometry type: {}", geometry_type_str);
+                    // LOG ALL UNHANDLED GEOMETRY TYPES - THIS IS CRITICAL FOR DEBUGGING
+                    let class_value = feature.properties.get("class")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    console_log!("❌ SKIPPING UNHANDLED geometry type '{}' for feature class '{}' - THIS IS WHY FEATURES ARE MISSING!", 
+                        geometry_type_str, class_value);
                 }
             }
             
             let pre_bbox_count = transformed_geometry_parts.len();
             geometry_created += pre_bbox_count;
             
-            // Filter out any geometries whose points are outside the requested bbox
-            // TEMPORARILY DISABLE bbox filtering for transportation to debug missing roads
-            let filtered_parts: Vec<GeometryData> = if vt_dataset.sourceLayer == "transportation" {
-                console_log!("🚫 BBOX FILTERING DISABLED for transportation layer");
-                transformed_geometry_parts // No filtering for transportation
-            } else {
-                // For LineStrings, use a more lenient bbox check with larger buffer to catch roads that cross boundaries
-                let bbox_buffer = 0.001; // ~100m buffer for others
-                transformed_geometry_parts
-                    .into_iter()
-                    .filter(|geom| {
-                        let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
-                            if geom.r#type.as_ref().map_or(false, |t| t == "LineString") {
-                                // Use buffered bbox for LineStrings (roads)
-                                (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
-                            } else {
-                                // Use strict bbox for Polygons (buildings)
-                                (min_lng, max_lng, min_lat, max_lat)
-                            };
-                        
-                        geom.geometry.iter().any(|coord| {
-                            let lon = coord[0];
-                            let lat = coord[1];
-                            lon >= effective_min_lng && lon <= effective_max_lng && lat >= effective_min_lat && lat <= effective_max_lat
-                        })
+            // Apply smart bbox filtering with buffers for LineStrings
+            let bbox_buffer = 0.001; // ~100m buffer for roads that cross boundaries
+            let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
+                .into_iter()
+                .filter(|geom| {
+                    let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
+                        if geom.r#type.as_ref().map_or(false, |t| t == "LineString") {
+                            // Use buffered bbox for LineStrings (roads)
+                            (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
+                        } else {
+                            // Use strict bbox for Polygons (buildings)
+                            (min_lng, max_lng, min_lat, max_lat)
+                        };
+                    
+                    geom.geometry.iter().any(|coord| {
+                        let lon = coord[0];
+                        let lat = coord[1];
+                        lon >= effective_min_lng && lon <= effective_max_lng && lat >= effective_min_lat && lat <= effective_max_lat
                     })
-                    .collect()
-            };
+                })
+                .collect();
             
             let post_bbox_count = filtered_parts.len();
-            if vt_dataset.sourceLayer == "transportation" {
-                // No bbox filtering was applied to transportation
-                geometry_filtered_by_bbox += 0;
-            } else {
-                geometry_filtered_by_bbox += pre_bbox_count - post_bbox_count;
-            }
+            geometry_filtered_by_bbox += pre_bbox_count - post_bbox_count;
             
             geometry_data_list.extend(filtered_parts);
         }

@@ -3,7 +3,8 @@ use crate::module_state::ModuleState;
 use crate::bbox_filter::polygon_intersects_bbox;
 use crate::extrude;
 use serde::{Serialize, Deserialize};
-use csgrs::csg::CSG;
+use std::collections::HashMap;
+// use csgrs::csg::CSG; // Temporarily commented out - CSG functionality disabled
 use js_sys::{Object, Array, Float32Array};
 use wasm_bindgen::prelude::JsValue;
 use serde_wasm_bindgen::{from_value, to_value};
@@ -469,79 +470,14 @@ fn clip_polygon_to_bbox_2d(
         }
     }
     
-    // Continue with CSG clipping
-    let bbox_width = bbox_max_x - bbox_min_x;
-    let bbox_height = bbox_max_y - bbox_min_y;
-    let bbox_center_x = bbox_min_x + bbox_width * 0.5;
-    let bbox_center_y = bbox_min_y + bbox_height * 0.5;
-    
-    // Try to create a CSG square for the bbox - this should always succeed
-    let bbox_csg: CSG<f64> = CSG::square(
-        bbox_width as f64, 
-        bbox_height as f64, 
-        None
-    ).translate(
-        bbox_center_x as f64,
-        bbox_center_y as f64,
-        0.0
-    );
-    
-    // Make sure polygon points are counter-clockwise
+    // Since CSG is removed, use simple clipping directly
     let mut ccw_points = unique_shape_points.to_vec();
     if is_clockwise(&ccw_points) {
         ccw_points.reverse();
     }
     
-    // Create the CSG polygon from the cleaned points (2D XY only)
-    let points2d: Vec<[f64; 2]> = ccw_points.iter().map(|p| [p.x, p.y]).collect();
-    let poly_csg = match CSG::polygon(&points2d[..], None) {
-        csg if csg.polygons.is_empty() => {
-            console_log!("Failed to create CSG polygon - trying simple clipping");
-            // Fall back to simple clipping
-            return simple_clip_polygon(&ccw_points, mesh_bbox_coords);
-        },
-        csg => csg,
-    };
-    
-    // Perform intersection to clip the polygon to the bbox
-    let clipped_csg = poly_csg.intersection(&bbox_csg);
-    
-    // Handle empty result - if CSG intersection fails, fall back to simple clipping
-    if clipped_csg.polygons.is_empty() {
-        console_log!("CSG intersection resulted in empty geometry - using simple clipping fallback");
-        return simple_clip_polygon(&ccw_points, mesh_bbox_coords);
-    }
-    
-    // Find the polygon with the largest area
-    let mut largest_poly_idx = 0;
-    let mut largest_area = 0.0;
-    let mut areas = Vec::new();
-    for (i, polygon) in clipped_csg.polygons.iter().enumerate() {
-        let vertices = &polygon.vertices;
-        if vertices.len() < 3 {
-            continue; // Skip degenerate polygons
-        }
-        // Calculate area
-        let mut area = 0.0;
-        for j in 0..vertices.len() {
-            let v0 = &vertices[j].pos.coords;
-            let v1 = &vertices[(j + 1) % vertices.len()].pos.coords;
-            area += (v0.x * v1.y) - (v1.x * v0.y);
-        }
-        area = (area / 2.0_f64).abs();
-        if area > largest_area {
-            largest_area = area;
-            largest_poly_idx = i;
-        }
-        areas.push(area);
-    }
-    // Return the largest polygon as Vec<Vector2>
-    let largest_poly = &clipped_csg.polygons[largest_poly_idx];
-    let result: Vec<Vector2> = largest_poly.vertices.iter().map(|v| {
-        let c = &v.pos.coords;
-        Vector2 { x: c.x, y: c.y }
-    }).collect();
-    return result;
+    // Use simple clipping instead of CSG
+    return simple_clip_polygon(&ccw_points, mesh_bbox_coords);
 }
 
 // Simple clipping fallback when CSG fails
@@ -1101,6 +1037,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // Convert all polygons to Vector2 format
     let mut all_geometries: Vec<BufferGeometry> = Vec::new();
     
+    // Debug: Log geometry types for transportation layer
+    if input.vtDataSet.sourceLayer == "transportation" {
+        let mut geometry_types = HashMap::new();
+        for feature in &input.polygons {
+            let geom_type = feature.r#type.as_deref().unwrap_or("unknown");
+            *geometry_types.entry(geom_type).or_insert(0) += 1;
+        }
+        console_log!("🛣️ Transportation geometry types: {:?}", geometry_types);
+    }
+
     for (i, polygon_data) in input.polygons.iter().enumerate() {
         if i % 1000 == 0 && i > 0 {
             console_log!("Processed {} out of {} polygons", i, input.polygons.len());
@@ -1127,105 +1073,118 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Check if debug mode is enabled
         let debug_mode = false; // Always disable debug mode special handling
         
+        // Calculate if this is a major road (for logging purposes)
+        let is_major_road = if let Some(ref props) = polygon_data.properties {
+            if let serde_json::Value::Object(obj) = props {
+                if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                    class == "primary" || class == "secondary" || class == "motorway" || class == "trunk"
+                } else { false }
+            } else { false }
+        } else { false };
+        
         // Handle both Polygon and LineString geometries
         let points: Vec<Vector2> = if polygon_data.r#type.as_deref() == Some("LineString") {
-            // Log LineString processing
-            let is_major_road = if let Some(ref props) = polygon_data.properties {
+            // Extract transportation class for better debugging
+            let transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
-                        class == "primary" || class == "secondary" || class == "motorway" || class == "trunk"
-                    } else { false }
-                } else { false }
-            } else { false };
+                        class.clone()
+                    } else { "unknown".to_string() }
+                } else { "no_props".to_string() }
+            } else { "no_props".to_string() };
             
-            if is_major_road {
-                console_log!("🛣️ Processing LineString for major road with {} points", polygon_data.geometry.len());
-            }
+            console_log!("🛣️ Processing LineString for '{}' road with {} points", 
+                transportation_class, polygon_data.geometry.len());
             
-            // For LineStrings (roads), convert to a buffered polygon
-            // Use a small buffer distance for road width
-            let buffer_distance = 0.00005; // ~5 meters in degrees
-            
-            let mut line_points = Vec::new();
-            for point in &polygon_data.geometry {
-                if point.len() >= 2 {
-                    line_points.push(Vector2 { x: point[0], y: point[1] });
-                }
-            }
-            
-            if line_points.len() >= 2 {
-                // Create a proper buffered polygon around the LineString
-                let mut buffered_polygon = Vec::new();
-                
-                // First, go along the line adding points on the "right" side
-                for i in 0..line_points.len() {
-                    let current = &line_points[i];
-                    
-                    if i == 0 {
-                        // For the first point, use the direction to the next point
-                        if line_points.len() > 1 {
-                            let next = &line_points[1];
-                            let dx = next.x - current.x;
-                            let dy = next.y - current.y;
-                            let length = (dx * dx + dy * dy).sqrt();
-                            if length > 0.0 {
-                                let perp_x = -dy / length * buffer_distance;
-                                let perp_y = dx / length * buffer_distance;
-                                buffered_polygon.push(Vector2 { x: current.x + perp_x, y: current.y + perp_y });
-                            }
-                        }
-                    } else {
-                        // For middle and end points, use the direction from the previous point
-                        let prev = &line_points[i - 1];
-                        let dx = current.x - prev.x;
-                        let dy = current.y - prev.y;
-                        let length = (dx * dx + dy * dy).sqrt();
-                        if length > 0.0 {
-                            let perp_x = -dy / length * buffer_distance;
-                            let perp_y = dx / length * buffer_distance;
-                            buffered_polygon.push(Vector2 { x: current.x + perp_x, y: current.y + perp_y });
-                        }
+            // CLEAN SOLUTION: Only process if we have enough points for a valid line
+            if polygon_data.geometry.len() >= 2 {
+                // Convert to GeoJSON LineString format
+                let mut line_coordinates = Vec::new();
+                for point in &polygon_data.geometry {
+                    if point.len() >= 2 {
+                        line_coordinates.push(vec![point[0], point[1]]);
                     }
                 }
                 
-                // Then, go back along the line adding points on the "left" side
-                for i in (0..line_points.len()).rev() {
-                    let current = &line_points[i];
+                // Only proceed if we have valid coordinates
+                if line_coordinates.len() >= 2 {
+                    // Create GeoJSON feature
+                    let geojson_feature = serde_json::json!({
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": line_coordinates
+                        },
+                        "properties": {}
+                    });
                     
-                    if i == line_points.len() - 1 {
-                        // For the last point, use the direction from the previous point
-                        if i > 0 {
-                            let prev = &line_points[i - 1];
-                            let dx = current.x - prev.x;
-                            let dy = current.y - prev.y;
-                            let length = (dx * dx + dy * dy).sqrt();
-                            if length > 0.0 {
-                                let perp_x = -dy / length * buffer_distance;
-                                let perp_y = dx / length * buffer_distance;
-                                buffered_polygon.push(Vector2 { x: current.x - perp_x, y: current.y - perp_y });
+                    // Use appropriate buffer distance based on road class
+                    let buffer_distance = if is_major_road {
+                        0.00003 // ~3 meters for major roads
+                    } else {
+                        0.00002 // ~2 meters for minor roads  
+                    };
+                    
+                    // Call the WASM buffer_line_string function
+                    console_log!("🛣️ Buffering with distance {:.6} for {} road", 
+                        buffer_distance, transportation_class);
+                    
+                    let result_json = crate::buffer_line_string(&geojson_feature.to_string(), buffer_distance);
+                    
+                    match serde_json::from_str::<serde_json::Value>(&result_json) {
+                        Ok(result) => {
+                            if let Some(geometry) = result.get("geometry") {
+                                if let Some(result_coordinates) = geometry.get("coordinates") {
+                                    if let Some(multipolygon_coords) = result_coordinates.as_array() {
+                                        let mut buffered_points = Vec::new();
+                                        
+                                        // Process first polygon from MultiPolygon result
+                                        if let Some(first_polygon) = multipolygon_coords.get(0) {
+                                            if let Some(polygon_rings) = first_polygon.as_array() {
+                                                if let Some(exterior_ring) = polygon_rings.get(0) {
+                                                    if let Some(ring_coords) = exterior_ring.as_array() {
+                                                        for coord in ring_coords {
+                                                            if let Some(coord_array) = coord.as_array() {
+                                                                if coord_array.len() >= 2 {
+                                                                    if let (Some(x), Some(y)) = (coord_array[0].as_f64(), coord_array[1].as_f64()) {
+                                                                        buffered_points.push(Vector2 { x, y });
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        console_log!("✅ Successfully buffered {} road: {} → {} points", 
+                                            transportation_class, line_coordinates.len(), buffered_points.len());
+                                        
+                                        buffered_points
+                                    } else {
+                                        console_log!("❌ WASM buffer failed: invalid coordinates format");
+                                        Vec::new()
+                                    }
+                                } else {
+                                    console_log!("❌ WASM buffer failed: no coordinates in result");
+                                    Vec::new()
+                                }
+                            } else {
+                                console_log!("❌ WASM buffer failed: no geometry in result");
+                                Vec::new()
                             }
                         }
-                    } else {
-                        // For middle and start points, use the direction to the next point
-                        let next = &line_points[i + 1];
-                        let dx = next.x - current.x;
-                        let dy = next.y - current.y;
-                        let length = (dx * dx + dy * dy).sqrt();
-                        if length > 0.0 {
-                            let perp_x = -dy / length * buffer_distance;
-                            let perp_y = dx / length * buffer_distance;
-                            buffered_polygon.push(Vector2 { x: current.x - perp_x, y: current.y - perp_y });
+                        Err(e) => {
+                            console_log!("❌ WASM buffer failed to parse result: {}", e);
+                            Vec::new()
                         }
                     }
+                } else {
+                    console_log!("❌ LineString has insufficient valid coordinates: {}", line_coordinates.len());
+                    Vec::new()
                 }
-                
-                if is_major_road {
-                    console_log!("🛣️ Created buffered polygon with {} points from {} line points", 
-                        buffered_polygon.len(), line_points.len());
-                }
-                
-                buffered_polygon
             } else {
+                console_log!("❌ LineString has insufficient geometry points: {}", polygon_data.geometry.len());
                 Vec::new()
             }
         } else {
@@ -1242,16 +1201,17 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         };
         
         if points.len() < 3 {
-            // Debug: Track why major roads might be skipped
-            if let Some(ref props) = polygon_data.properties {
+            // Debug: Track why roads might be skipped - THIS IS A MAJOR FILTER
+            let transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
-                        if class == "primary" || class == "secondary" {
-                            console_log!("⚠️ Skipping {} road: only {} points after processing", class, points.len());
-                        }
-                    }
-                }
-            }
+                        class.clone()
+                    } else { "unknown".to_string() }
+                } else { "no_props".to_string() }
+            } else { "no_props".to_string() };
+            
+            console_log!("❌ SKIPPING {} road ({}/{}): only {} points after processing (need ≥3)", 
+                transportation_class, i + 1, input.polygons.len(), points.len());
             continue; // Skip invalid polygons
         }
         
@@ -1283,6 +1243,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             height *= factor;
         }
         if height <= 0.0 {
+            let transportation_class = if let Some(ref props) = polygon_data.properties {
+                if let serde_json::Value::Object(obj) = props {
+                    if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                        class.clone()
+                    } else { "unknown".to_string() }
+                } else { "no_props".to_string() }
+            } else { "no_props".to_string() };
+            
+            console_log!("❌ SKIPPING {} road ({}/{}): height {} <= 0", 
+                transportation_class, i + 1, input.polygons.len(), height);
             continue; // Skip flat geometry
         }
         
@@ -1297,6 +1267,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Clean and validate the polygon
         let cleaned_points = clean_polygon_footprint(&mesh_points);
         if cleaned_points.is_empty() {
+            let transportation_class = if let Some(ref props) = polygon_data.properties {
+                if let serde_json::Value::Object(obj) = props {
+                    if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                        class.clone()
+                    } else { "unknown".to_string() }
+                } else { "no_props".to_string() }
+            } else { "no_props".to_string() };
+            
+            console_log!("❌ SKIPPING {} road ({}/{}): polygon cleaning resulted in empty geometry (had {} mesh points)", 
+                transportation_class, i + 1, input.polygons.len(), mesh_points.len());
             continue; // Skip invalid polygon after cleaning
         }
 
@@ -1324,6 +1304,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         
         // Skip polygons that truly have no valid representation after clipping
         if clipped_points.is_empty() {
+            let transportation_class = if let Some(ref props) = polygon_data.properties {
+                if let serde_json::Value::Object(obj) = props {
+                    if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                        class.clone()
+                    } else { "unknown".to_string() }
+                } else { "no_props".to_string() }
+            } else { "no_props".to_string() };
+            
+            console_log!("❌ SKIPPING {} road ({}/{}): clipping resulted in empty geometry (had {} cleaned points)", 
+                transportation_class, i + 1, input.polygons.len(), cleaned_points.len());
             continue;
         }
         
@@ -1364,11 +1354,33 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 }
             } else {
                 // Not visible, skip
+                let transportation_class = if let Some(ref props) = polygon_data.properties {
+                    if let serde_json::Value::Object(obj) = props {
+                        if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                            class.clone()
+                        } else { "unknown".to_string() }
+                    } else { "no_props".to_string() }
+                } else { "no_props".to_string() };
+                
+                console_log!("❌ SKIPPING {} road ({}/{}): not potentially visible after clipping (had {} clipped points < 3)", 
+                    transportation_class, i + 1, input.polygons.len(), clipped_points.len());
                 continue;
             }
         } else {
             clipped_points
         };
+
+        // SUCCESS: This geometry made it through all filters
+        let transportation_class = if let Some(ref props) = polygon_data.properties {
+            if let serde_json::Value::Object(obj) = props {
+                if let Some(serde_json::Value::String(class)) = obj.get("class") {
+                    class.clone()
+                } else { "unknown".to_string() }
+            } else { "no_props".to_string() }
+        } else { "no_props".to_string() };
+        
+        console_log!("✅ PROCESSING {} road ({}/{}): {} final points", 
+            transportation_class, i + 1, input.polygons.len(), final_points.len());
 
         // Compute per-polygon terrain extremes for base alignment
         let mut lowest_terrain_z = f64::INFINITY;

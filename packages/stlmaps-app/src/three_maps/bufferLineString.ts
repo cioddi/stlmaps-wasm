@@ -1,17 +1,53 @@
-import * as turf from "@turf/turf";
+import { getWasmModule } from "@threegis/core";
 
-export function bufferLineString(geometry:  number[][], bufferSize: number) {
+export function bufferLineString(geometry: number[][], bufferSize: number) {
+    console.log("🛣️ bufferLineString called with geometry:", geometry.length, "points, buffer size:", bufferSize);
+    
+    // Convert buffer size from meters to approximate degrees
+    // Rough conversion: 1 degree ≈ 111,000 meters at equator
+    const bufferSizeDegrees = bufferSize / 111000;
+    
+    console.log("🛣️ Buffer size in degrees:", bufferSizeDegrees);
 
+    // Create a GeoJSON LineString
+    const lineStringGeoJSON = {
+        type: "Feature",
+        geometry: {
+            type: "LineString",
+            coordinates: geometry
+        },
+        properties: {}
+    };
 
-    // Convert the LineString to a Turf.js feature
-    const lineString = turf.lineString(geometry);
-
-    // Buffer the LineString using the provided buffer size
-    const buffered = turf.buffer(lineString, bufferSize, { units: "meters" });
-
-    if (!buffered || buffered.geometry.type !== "Polygon") {
-        throw new Error("Failed to buffer LineString into a Polygon");
+    try {
+        // Use the Rust WASM buffer_line_string function
+        const wasmModule = getWasmModule();
+        if (!wasmModule) {
+            throw new Error("WASM module not available");
+        }
+        
+        const resultGeoJSON = wasmModule.buffer_line_string(JSON.stringify(lineStringGeoJSON), bufferSizeDegrees);
+        console.log("🛣️ WASM buffer result:", resultGeoJSON);
+        
+        const result = JSON.parse(resultGeoJSON);
+        
+        if (!result.geometry || result.geometry.type !== "MultiPolygon" || !result.geometry.coordinates || result.geometry.coordinates.length === 0) {
+            console.warn("🛣️ WASM buffering failed, no valid MultiPolygon returned");
+            return [];
+        }
+        
+        // Return the first polygon's exterior ring
+        const firstPolygon = result.geometry.coordinates[0];
+        if (firstPolygon && firstPolygon.length > 0) {
+            console.log("🛣️ Returning buffered polygon with", firstPolygon[0].length, "points");
+            return firstPolygon[0];
+        }
+        
+        console.warn("🛣️ No valid polygon found in WASM buffer result");
+        return [];
+        
+    } catch (error) {
+        console.error("🛣️ Error in WASM bufferLineString:", error);
+        return [];
     }
-
-    return buffered.geometry.coordinates[0];
 }
