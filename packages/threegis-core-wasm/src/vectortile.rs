@@ -952,14 +952,14 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             geometry_created += pre_bbox_count;
             
             // Filter out any geometries whose points are outside the requested bbox
-            // For LineStrings, use a more lenient bbox check with small buffer to catch roads that cross boundaries
-            let bbox_buffer = 0.001; // ~100m buffer for roads crossing boundaries
+            // For LineStrings, use a more lenient bbox check with larger buffer to catch roads that cross boundaries
+            let bbox_buffer = if vt_dataset.sourceLayer == "transportation" { 0.003 } else { 0.001 }; // ~300m buffer for transportation, ~100m for others
             let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
                 .into_iter()
                 .filter(|geom| {
                     let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
-                        if geom.r#type == "LineString" {
-                            // Use buffered bbox for LineStrings (roads)
+                        if geom.r#type == "LineString" || vt_dataset.sourceLayer == "transportation" {
+                            // Use buffered bbox for LineStrings (roads) and all transportation features
                             (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
                         } else {
                             // Use strict bbox for Polygons (buildings)

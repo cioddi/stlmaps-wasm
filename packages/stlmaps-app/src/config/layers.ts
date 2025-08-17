@@ -50,24 +50,21 @@ export const vtGeometries: VtDataSet[] = [
     bufferSize: 2.4,
     enabled: true,
     alignVerticesToTerrain: false,
-    // Updated filter to include more street types
+    // Filter for main road types
     filter: [
-      "all",
-      [
-        "in",
-        "class",
-        "motorway",
-        "trunk",
-        "primary",
-        "secondary",
-        "tertiary",
-        "residential",
-        "service",
-        "minor",
-        "track",
-      ],
+      "in",
+      "class",
+      "motorway",
+      "trunk",
+      "primary",
+      "secondary",
+      "tertiary",
+      "residential",
+      "service",
+      "minor",
+      "track",
+      "unclassified"
     ],
-
     csgClipping: false,
   },
   {
