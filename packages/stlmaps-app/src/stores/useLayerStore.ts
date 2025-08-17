@@ -31,12 +31,24 @@ interface RenderingSettings {
   mode: 'quality' | 'performance';
 }
 
+interface DebugSettings {
+  geometryDebugMode: boolean; // Skip processing like linestring buffering and polygon extrusion
+}
+
+interface HoverState {
+  hoveredMesh: THREE.Object3D | null;
+  hoveredProperties: Record<string, unknown> | null;
+  mousePosition: { x: number; y: number } | null;
+}
+
 interface LayerState {
   // Layer data
   vtLayers: VtDataSet[];
   terrainSettings: TerrainSettings;
   buildingSettings: BuildingSettings;
   renderingSettings: RenderingSettings;
+  debugSettings: DebugSettings;
+  hoverState: HoverState;
   bbox: GeoJSON.Feature | undefined;
   
   // Config hashes for smart regeneration
@@ -89,6 +101,15 @@ interface LayerState {
   
   // Actions for rendering settings
   setRenderingMode: (mode: 'quality' | 'performance') => void;
+
+  // Actions for debug settings
+  setDebugSettings: (settings: Partial<DebugSettings>) => void;
+  toggleGeometryDebugMode: () => void;
+
+  // Actions for hover state
+  setHoveredMesh: (mesh: THREE.Object3D | null, properties: Record<string, unknown> | null) => void;
+  setMousePosition: (position: { x: number; y: number } | null) => void;
+  clearHover: () => void;
 
   // Geometry actions
   setGeometryDataSets: (geometryDataSets: {
@@ -158,6 +179,14 @@ const useLayerStore = create<LayerState>((set) => ({
   },
   renderingSettings: {
     mode: 'quality'
+  },
+  debugSettings: {
+    geometryDebugMode: false
+  },
+  hoverState: {
+    hoveredMesh: null,
+    hoveredProperties: null,
+    mousePosition: null
   },
   bbox: undefined,
 
@@ -306,6 +335,42 @@ const useLayerStore = create<LayerState>((set) => ({
     renderingSettings: { ...state.renderingSettings, mode }
   })),
 
+  // Debug settings actions
+  setDebugSettings: (settings) => set((state) => ({
+    debugSettings: { ...state.debugSettings, ...settings }
+  })),
+
+  toggleGeometryDebugMode: () => set((state) => ({
+    debugSettings: {
+      ...state.debugSettings,
+      geometryDebugMode: !state.debugSettings.geometryDebugMode
+    }
+  })),
+
+  // Hover state actions
+  setHoveredMesh: (mesh, properties) => set((state) => ({
+    hoverState: {
+      ...state.hoverState,
+      hoveredMesh: mesh,
+      hoveredProperties: properties
+    }
+  })),
+
+  setMousePosition: (position) => set((state) => ({
+    hoverState: {
+      ...state.hoverState,
+      mousePosition: position
+    }
+  })),
+
+  clearHover: () => set((state) => ({
+    hoverState: {
+      hoveredMesh: null,
+      hoveredProperties: null,
+      mousePosition: state.hoverState.mousePosition // Keep mouse position
+    }
+  })),
+
   // Bbox action
   setBbox: (bbox) => set({ bbox }),
 
@@ -332,6 +397,17 @@ const useLayerStore = create<LayerState>((set) => ({
       enabled: true,
       scaleFactor: 0.5
     },
+    renderingSettings: {
+      mode: 'quality'
+    },
+    debugSettings: {
+      geometryDebugMode: false
+    },
+    hoverState: {
+      hoveredMesh: null,
+      hoveredProperties: null,
+      mousePosition: null
+    },
     bbox: undefined,
     geometryDataSets: {
       polygonGeometries: null,
@@ -351,3 +427,4 @@ const useLayerStore = create<LayerState>((set) => ({
 }));
 
 export default useLayerStore;
+export type { TerrainSettings, DebugSettings };

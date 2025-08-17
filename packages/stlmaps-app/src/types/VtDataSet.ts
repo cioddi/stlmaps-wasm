@@ -16,4 +16,5 @@ export interface VtDataSet {
   zOffset?: number;
   alignVerticesToTerrain?: boolean;
   csgClipping?: boolean;
+  geometryDebugMode?: boolean; // Skip processing like linestring buffering and polygon extrusion
 }

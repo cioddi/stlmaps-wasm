@@ -6,6 +6,7 @@ import * as THREE from "three";
 //@ts-expect-error No types available for BufferGeometryUtils
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { bufferLineString } from "../three_maps/bufferLineString";
+import { createDebugGeometry } from "../three_maps/createDebugGeometry";
 import useLayerStore from "../stores/useLayerStore";
 import {
   createComponentHashes,
@@ -98,6 +99,7 @@ export const GenerateMeshButton = function () {
     vtLayers,
     terrainSettings,
     buildingSettings,
+    debugSettings,
     setGeometryDataSets,
     geometryDataSets,
     setIsProcessing,
@@ -533,12 +535,82 @@ export const GenerateMeshButton = function () {
         // Check for cancellation before creating polygon geometry
         cancellationToken.throwIfCancelled();
 
-        // Use the Rust implementation to create polygon geometry
-        // This will retrieve the cached features from WASM memory
-        console.log(`Creating polygon geometry for ${currentLayer.sourceLayer} using Rust implementation`);
+        // Check if debug mode is enabled for this layer or globally
+        const useDebugMode = debugSettings.geometryDebugMode || currentLayer.geometryDebugMode;
         let layerGeometryPromise = Promise.resolve(new THREE.BufferGeometry());
+
+        if (useDebugMode) {
+          // Debug mode: use WASM but with debug flag to skip complex processing
+          console.log(`Creating debug geometry for ${currentLayer.sourceLayer} (skipping extrusion and buffering)`);
+          
+          try {
+            // Prepare the input for the Rust function but with debug flag
+            const polygonGeometryInput = {
+              terrainBaseHeight: terrainSettings.baseHeight,
+              bbox: [minLng, minLat, maxLng, maxLat],
+              elevationGrid: processedElevationGrid,
+              gridSize,
+              minElevation: processedMinElevation,
+              maxElevation: processedMaxElevation,
+              vtDataSet: { 
+                ...convertToRustVtDataSet(currentLayer),
+                geometryDebugMode: true // Enable debug mode in WASM
+              },
+              useSameZOffset: true,
+              bbox_key: currentBboxHash,
+            };
+
+            const serializedInput = JSON.stringify(polygonGeometryInput);
+            
+            // Call the Rust implementation with debug mode
+            const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
+            const geometryData = JSON.parse(geometryJson) as {
+              vertices: number[];
+              normals: number[] | null;
+              colors: number[] | null;
+              indices: number[] | null;
+              uvs: number[] | null;
+              hasData: boolean;
+            };
+
+            // Convert the result to a Three.js buffer geometry
+            const geometry = new THREE.BufferGeometry();
+            
+            // Add position attribute (vertices)
+            if (geometryData.vertices && geometryData.vertices.length > 0) {
+              geometry.setAttribute(
+                "position", 
+                new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
+              );
+            }
+            
+            // Add color attribute if available
+            if (geometryData.colors && geometryData.colors.length > 0) {
+              geometry.setAttribute(
+                "color",
+                new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
+              );
+            }
+            
+            // For debug mode, we don't need normals or complex attributes
+            // Add index attribute if available
+            if (geometryData.indices && geometryData.indices.length > 0) {
+              geometry.setIndex(Array.from(geometryData.indices));
+            }
+            
+            layerGeometryPromise = Promise.resolve(geometry);
+            console.log(`✅ Debug geometry created for ${currentLayer.sourceLayer} with ${geometry.attributes.position?.count || 0} vertices`);
+          } catch (error) {
+            console.error(`Failed to create debug geometry for ${currentLayer.sourceLayer}:`, error);
+            // Fallback to empty geometry
+            layerGeometryPromise = Promise.resolve(new THREE.BufferGeometry());
+          }
+        } else {
+          // Normal mode: use the Rust implementation to create polygon geometry
+          // This will retrieve the cached features from WASM memory
+          console.log(`Creating polygon geometry for ${currentLayer.sourceLayer} using Rust implementation`);
         
-        try {
+          try {
           // Prepare the input for the Rust function
           const polygonGeometryInput = {
             terrainBaseHeight: terrainSettings.baseHeight,
@@ -556,60 +628,89 @@ export const GenerateMeshButton = function () {
           
           // Call the Rust implementation directly
           const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
-          const geometryData = JSON.parse(geometryJson) as {
+          const geometryDataArray = JSON.parse(geometryJson) as Array<{
             vertices: number[];
             normals: number[] | null;
             colors: number[] | null;
             indices: number[] | null;
             uvs: number[] | null;
             hasData: boolean;
-          };
+            properties?: Record<string, unknown>;
+          }>;
 
-          // Convert the result to a Three.js buffer geometry
-          const geometry = new THREE.BufferGeometry();
+          console.log(`WASM returned ${geometryDataArray.length} individual geometries`);
+
+          // Convert each geometry and merge them into a single Three.js buffer geometry
+          const geometries: THREE.BufferGeometry[] = [];
           
-          // Add position attribute (vertices)
-          if (geometryData.vertices && geometryData.vertices.length > 0) {
+          for (const geometryData of geometryDataArray) {
+            if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
+              continue;
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            
+            // Add position attribute (vertices)
             geometry.setAttribute(
               "position", 
               new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
             );
-          }
-          
-          // Add normal attribute if available
-          if (geometryData.normals && geometryData.normals.length > 0) {
-            geometry.setAttribute(
-              "normal",
-              new THREE.BufferAttribute(new Float32Array(geometryData.normals), 3)
-            );
-          } else {
-            // Compute normals if not provided
-            geometry.computeVertexNormals();
-          }
-          
-          // Add color attribute if available
-          if (geometryData.colors && geometryData.colors.length > 0) {
-            geometry.setAttribute(
-              "color",
-              new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
-            );
-          }
-          
-          // Add index attribute if available
-          if (geometryData.indices && geometryData.indices.length > 0) {
-            geometry.setIndex(Array.from(geometryData.indices));
-          }
-          
-          // Recompute normals to ensure proper lighting
-          geometry.computeVertexNormals();
+            
+            // Add normal attribute if available
+            if (geometryData.normals && geometryData.normals.length > 0) {
+              geometry.setAttribute(
+                "normal",
+                new THREE.BufferAttribute(new Float32Array(geometryData.normals), 3)
+              );
+            }
+            
+            // Add color attribute if available
+            if (geometryData.colors && geometryData.colors.length > 0) {
+              geometry.setAttribute(
+                "color",
+                new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
+              );
+            }
+            
+            // Add index attribute if available
+            if (geometryData.indices && geometryData.indices.length > 0) {
+              geometry.setIndex(Array.from(geometryData.indices));
+            }
 
-          console.log(`Successfully created ${currentLayer.sourceLayer} geometry with Rust: ${geometry.attributes.position?.count || 0} vertices`);
+            // Add properties to userData for hover interaction
+            if (geometryData.properties) {
+              geometry.userData = {
+                properties: geometryData.properties
+              };
+            }
+            
+            // Compute normals if not provided
+            if (!geometryData.normals) {
+              geometry.computeVertexNormals();
+            }
+
+            geometries.push(geometry);
+          }
+
+          console.log(`Created ${geometries.length} individual Three.js geometries`);
+
+          // Create a container geometry that holds individual geometries as userData
+          // This allows the system to expect a single geometry while preserving individual ones
+          const containerGeometry = new THREE.BufferGeometry();
+          containerGeometry.userData = {
+            isContainer: true,
+            individualGeometries: geometries,
+            geometryCount: geometries.length
+          };
           
-          // Use the created geometry as the promise result
-          layerGeometryPromise = Promise.resolve(geometry);
-        } catch (error) {
-          console.error(`Error creating ${currentLayer.sourceLayer} geometry with Rust:`, error);
-          // Keep the empty geometry as fallback
+          console.log(`Successfully created ${currentLayer.sourceLayer} container with ${geometries.length} individual geometries`);
+          
+          // Use the container geometry as the promise result
+          layerGeometryPromise = Promise.resolve(containerGeometry);
+          } catch (error) {
+            console.error(`Error creating ${currentLayer.sourceLayer} geometry with Rust:`, error);
+            // Keep the empty geometry as fallback
+          }
         }
 
         // Store the promise for later resolution

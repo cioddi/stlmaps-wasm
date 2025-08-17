@@ -1,6 +1,7 @@
 import { VectorTile } from "@mapbox/vector-tile";
 import Pbf from "pbf";
-import { Tile, GridSize, VtDataSet } from "./GenerateMeshButton";
+import { Tile, GridSize } from "@threegis/core";
+import { VtDataSet } from "../types/VtDataSet";
 import { hashBbox } from "../utils/configHashing";
 
 export interface BuildingData {
@@ -13,6 +14,7 @@ export interface GeometryData {
   type: string; // Geometry type (e.g., Polygon, LineString)
   height: number;
   baseElevation: number; // Elevation at geometry position
+  properties?: Record<string, unknown>; // MVT feature properties (class, subclass, etc.)
 }
 
 export interface LineStringData {
@@ -247,6 +249,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
             type: "Polygon",
             height: feature?.properties?.height || feature?.properties?.render_height, // Default height
             baseElevation,
+            properties: feature?.properties || {}, // Include all MVT feature properties
           });
         });
       } else if (feature.geometry.type === "MultiPolygon") {
@@ -267,6 +270,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
               type: "Polygon",
               height: feature?.properties?.height || feature?.properties?.render_height, // Default height
               baseElevation,
+              properties: feature?.properties || {}, // Include all MVT feature properties
             });
           });
         });
@@ -288,6 +292,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
           type: "LineString",
           height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
           baseElevation,
+          properties: feature?.properties || {}, // Include all MVT feature properties
         });
       } else if (feature.geometry.type === "Point") {
         const baseElevation = calculateBaseElevation(
@@ -305,6 +310,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
           type: "Point",
           height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
           baseElevation,
+          properties: feature?.properties || {}, // Include all MVT feature properties
         });
       } else if (feature.geometry.type === "MultiLineString") {
         //console.log("MultiLineString geometry detected", feature.geometry);
@@ -324,6 +330,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
             type: "LineString",
             height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
             baseElevation,
+            properties: feature?.properties || {}, // Include all MVT feature properties
           });
         });
       } else if (feature.geometry.type === "MultiPoint") {
@@ -343,6 +350,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
             type: "Point",
             height: feature?.properties?.height || feature?.properties?.render_height || 0, // Default height
             baseElevation,
+            properties: feature?.properties || {}, // Include all MVT feature properties
           });
         });
       }
@@ -429,8 +437,6 @@ export const fetchVtData = async (
 
       const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
       console.log(`Fetching geometry data from ${tiles.length} tiles`);
-
-      let vtData: { tile: Tile, data: VectorTile[] }[] = [];
 
       return (await Promise.all(
         tiles.map(async (tile) => {

@@ -307,6 +307,7 @@ impl ModuleState {
                                     height: Some(height),
                                     layer: Some(source_layer.to_string()),
                                     tags: None,
+                                    properties: Some(feature.properties.clone()),
                                 });
                             }
                         }

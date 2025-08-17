@@ -1,5 +1,5 @@
 [build]
-rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=2097152", "-C", "link-arg=--import-memory"]
+rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=2097152"]
 
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "link-arg=--initial-memory=65536", "-C", "link-arg=--max-memory=4294967296"]
+rustflags = ["-C", "link-arg=--initial-memory=2097152", "-C", "link-arg=--max-memory=4294967296"]

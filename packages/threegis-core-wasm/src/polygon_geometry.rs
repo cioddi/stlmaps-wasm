@@ -92,6 +92,7 @@ pub struct GeometryData {
     pub height: Option<f64>,
     pub layer: Option<String>,
     pub tags: Option<serde_json::Value>,
+    pub properties: Option<serde_json::Value>, // Original properties from MVT
 }
 
 // Struct to match GridSize from TypeScript
@@ -115,6 +116,7 @@ pub struct VtDataSet {
     pub zOffset: Option<f64>,
     pub alignVerticesToTerrain: Option<bool>,
     pub filter: Option<serde_json::Value>,
+    pub geometryDebugMode: Option<bool>, // Skip processing like linestring buffering and polygon extrusion
 }
 
 // Default color function for VtDataSet
@@ -150,6 +152,8 @@ pub struct BufferGeometry {
     pub uvs: Option<Vec<f32>>,
     #[serde(rename = "hasData")]
     pub hasData: bool,
+    // Add properties from MVT data for debugging and interaction
+    pub properties: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 // Sample a terrain elevation at a specific geographic point
@@ -725,7 +729,8 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
 fn create_extruded_shape(
     unique_shape_points: &[Vector2],
     height: f64,
-    z_offset: f64
+    z_offset: f64,
+    properties: Option<std::collections::HashMap<String, serde_json::Value>>
 ) -> BufferGeometry {
     // Basic validation
     if height < MIN_HEIGHT {
@@ -736,6 +741,7 @@ fn create_extruded_shape(
             indices: None,
             uvs: None,
             hasData: false,
+            properties,
         };
     }
     
@@ -755,7 +761,7 @@ fn create_extruded_shape(
                 Vector2 { x: pt.x + size, y: pt.y + size },
                 Vector2 { x: pt.x - size, y: pt.y + size },
             ];
-            return create_extruded_shape(&square_points, height, z_offset);
+            return create_extruded_shape(&square_points, height, z_offset, None);
         } else if unique_shape_points.len() == 2 {
             // For two points, create a thin rectangle along the line
             let p1 = unique_shape_points[0];
@@ -773,6 +779,7 @@ fn create_extruded_shape(
                     indices: None,
                     uvs: None,
                     hasData: false,
+                    properties: None,
                 };
             }
             
@@ -794,7 +801,7 @@ fn create_extruded_shape(
                 Vector2 { x: p2.x - px * width, y: p2.y - py * width },
                 Vector2 { x: p1.x - px * width, y: p1.y - py * width },
             ];
-            return create_extruded_shape(&rect_points, height, z_offset);
+            return create_extruded_shape(&rect_points, height, z_offset, None);
         }
         
         // If we somehow get here with no points, return empty geometry
@@ -805,6 +812,7 @@ fn create_extruded_shape(
             indices: None,
             uvs: None,
             hasData: false,
+            properties: None,
         };
     }
     
@@ -843,6 +851,7 @@ fn create_extruded_shape(
                 indices: None,
                 uvs: None,
                 hasData: false,
+                properties: None,
             };
         }
     };
@@ -858,6 +867,7 @@ fn create_extruded_shape(
                 indices: None,
                 uvs: None,
                 hasData: false,
+                properties: None,
             };
         }
     };
@@ -874,6 +884,7 @@ fn create_extruded_shape(
                 indices: None,
                 uvs: None,
                 hasData: false,
+                properties: None,
             };
         }
     };
@@ -891,6 +902,7 @@ fn create_extruded_shape(
                 indices: None,
                 uvs: None,
                 hasData: false,
+                properties: None,
             };
         }
         
@@ -961,6 +973,74 @@ fn create_extruded_shape(
         colors: None,
         uvs: if uvs.is_empty() { None } else { Some(uvs) },
         hasData: has_data,
+        properties,
+    }
+}
+
+// Create simple debug geometry without extrusion (flat wireframe)
+fn create_debug_geometry(
+    shape_points: &[Vector2], 
+    z_offset: f64,
+    properties: Option<std::collections::HashMap<String, serde_json::Value>>
+) -> BufferGeometry {
+    if shape_points.len() < 3 {
+        console_log!("Warning: Attempting to create debug geometry with fewer than 3 points: {}", shape_points.len());
+        return BufferGeometry {
+            vertices: Vec::new(),
+            normals: None,
+            indices: None,
+            colors: None,
+            uvs: None,
+            hasData: false,
+            properties,
+        };
+    }
+
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    
+    // Create vertices for the flat polygon at the specified z offset
+    for point in shape_points {
+        vertices.push(point.x as f32);
+        vertices.push(point.y as f32);
+        vertices.push((z_offset + 0.1) as f32); // Slightly elevated for visibility
+    }
+    
+    // Create line indices to form the polygon outline (wireframe)
+    for i in 0..shape_points.len() {
+        let next_i = (i + 1) % shape_points.len();
+        indices.push(i as u32);
+        indices.push(next_i as u32);
+    }
+    
+    // For polygons, also add a center point and connect it to all vertices for visualization
+    if shape_points.len() > 3 {
+        // Calculate center point
+        let center_x: f64 = shape_points.iter().map(|p| p.x).sum::<f64>() / shape_points.len() as f64;
+        let center_y: f64 = shape_points.iter().map(|p| p.y).sum::<f64>() / shape_points.len() as f64;
+        
+        // Add center vertex
+        vertices.push(center_x as f32);
+        vertices.push(center_y as f32);
+        vertices.push((z_offset + 0.2) as f32); // Slightly higher than the outline
+        
+        let center_index = shape_points.len() as u32;
+        
+        // Connect center to all outline vertices
+        for i in 0..shape_points.len() {
+            indices.push(center_index);
+            indices.push(i as u32);
+        }
+    }
+    
+    BufferGeometry {
+        vertices,
+        normals: None, // No normals needed for debug wireframe
+        indices: Some(indices),
+        colors: None,
+        uvs: None,
+        hasData: true,
+        properties,
     }
 }
 
@@ -1014,6 +1094,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             indices: None,
             uvs: None,
             hasData: false,
+            properties: None,
         }).unwrap());
     }
     
@@ -1024,6 +1105,9 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         if i % 1000 == 0 && i > 0 {
             console_log!("Processed {} out of {} polygons", i, input.polygons.len());
         }
+        
+        // Check if debug mode is enabled
+        let debug_mode = false; // Always disable debug mode special handling
         
         // Handle both Polygon and LineString geometries
         let points: Vec<Vector2> = if polygon_data.r#type.as_deref() == Some("LineString") {
@@ -1258,8 +1342,25 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         }
         // Base z offset: position bottom face at terrain surface minus submerge
         let z_offset = lowest_terrain_z + input.vtDataSet.zOffset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
-        // Create extruded shape with base aligned to terrain
-        let mut geometry = create_extruded_shape(&final_points, height, z_offset);
+        
+        // Create geometry based on debug mode
+        // Extract properties from polygon_data for attaching to geometry
+        let properties = if let Some(ref props) = polygon_data.properties {
+            // Convert serde_json::Value to HashMap<String, serde_json::Value>
+            if let serde_json::Value::Object(obj) = props {
+                let mut hashmap = std::collections::HashMap::new();
+                for (key, value) in obj.iter() {
+                    hashmap.insert(key.clone(), value.clone());
+                }
+                Some(hashmap)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        let geometry = create_extruded_shape(&final_points, height, z_offset, properties.clone());
         
         if geometry.hasData {
             all_geometries.push(geometry);
@@ -1268,67 +1369,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     
     console_log!("Created {} valid 3D geometries", all_geometries.len());
     
-    // Merge all geometries into one if we have any
+    // Return all individual geometries without merging
     if all_geometries.is_empty() {
         console_log!("No valid geometries were created");
-        return Ok(serde_json::to_string(&BufferGeometry {
-            vertices: Vec::new(),
-            normals: None,
-            colors: None,
-            indices: None,
-            uvs: None,
-            hasData: false,
-        }).unwrap());
+        return Ok(serde_json::to_string(&Vec::<BufferGeometry>::new()).unwrap());
     }
     
-    // If there's just one geometry, return it directly
-    if all_geometries.len() == 1 {
-        let result = all_geometries.remove(0);
-        console_log!("Returning a single geometry with {} vertices", result.vertices.len() / 3);
-        return Ok(serde_json::to_string(&result).unwrap());
-    }
+    console_log!("Returning {} individual geometries", all_geometries.len());
     
-    // Merge multiple geometries
-    let mut merged_vertices: Vec<f32> = Vec::new();
-    let mut merged_normals: Vec<f32> = Vec::new();
-    let mut merged_indices: Vec<u32> = Vec::new();
-    
-    let mut vertex_offset: u32 = 0;
-    
-    for geometry in all_geometries {
-        // Add vertices
-        merged_vertices.extend_from_slice(&geometry.vertices);
-        
-        // Add normals if present
-        if let Some(normals) = &geometry.normals {
-            merged_normals.extend_from_slice(normals);
-        }
-        
-        // Add indices with offset if present
-        if let Some(indices) = &geometry.indices {
-            for &index in indices {
-                merged_indices.push(index + vertex_offset);
-            }
-        }
-        
-        // Update vertex offset for next geometry
-        vertex_offset += (geometry.vertices.len() / 3) as u32;
-    }
-    
-    // Create the merged buffer geometry
-    let merged_geometry = BufferGeometry {
-        vertices: merged_vertices,
-        normals: if merged_normals.is_empty() { None } else { Some(merged_normals) },
-        indices: if merged_indices.is_empty() { None } else { Some(merged_indices) },
-        colors: None,
-        uvs: None,
-        hasData: true,
-    };
-    
-    console_log!("Returning merged geometry with {} vertices", merged_geometry.vertices.len() / 3);
-    
-    // Serialize the output to JSON
-    match serde_json::to_string(&merged_geometry) {
+    // Serialize all geometries as an array
+    match serde_json::to_string(&all_geometries) {
         Ok(json) => Ok(json),
         Err(e) => Err(format!("Failed to serialize output: {}", e)),
     }

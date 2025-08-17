@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GridSize, VtDataSet } from "../components/GenerateMeshButton";
 import { CSG } from "three-csg-ts";
-// @ts-expect-error
+// @ts-expect-error - BufferGeometryUtils not in types
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { sampleTerrainElevationAtPoint } from "./sampleTerrainElevationAtPoint";
 import { transformToMeshCoordinates } from "./transformToMeshCoordinates";
@@ -385,6 +385,21 @@ function createPolygonGeometry({
       geometry.deleteAttribute("uv");
     }
 
+    // Store individual polygon properties in userData for hover interaction
+    geometry.userData = {
+      properties: {
+        polygonIndex: polyIndex,
+        sourceLayer: vtDataSet.sourceLayer,
+        height: height,
+        extrusionDepth: vtDataSet.extrusionDepth,
+        zOffset: vtDataSet.zOffset,
+        baseElevation: poly.baseElevation,
+        geometryType: poly.type,
+        // Include MVT feature properties (class, subclass, etc.)
+        ...poly.properties
+      }
+    };
+
     // Clip the geometry before adding it to the list
     const clippedGeometry = clipGeometry(geometry);
 
@@ -449,7 +464,7 @@ function createPolygonGeometry({
     return normalizedGeometries[0];
   }
 
-  // Try to merge geometries
+  // Try to merge geometries - but preserve userData from individual geometries
   try {
     const mergedGeometry = BufferGeometryUtils.mergeGeometries(
       normalizedGeometries,
@@ -459,6 +474,13 @@ function createPolygonGeometry({
       console.warn("Merge operation returned null geometry");
       return new THREE.BufferGeometry();
     }
+    
+    // Store information about all individual features in userData for hover interaction
+    mergedGeometry.userData = {
+      individualFeatures: normalizedGeometries.map(geom => geom.userData?.properties || {}),
+      featureCount: normalizedGeometries.length
+    };
+    
     return mergedGeometry;
   } catch (error) {
     console.error("Error merging geometries:", error);

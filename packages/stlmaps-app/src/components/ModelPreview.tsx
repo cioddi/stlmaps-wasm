@@ -17,6 +17,7 @@ import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 import useLayerStore from "../stores/useLayerStore";
+import HoverTooltip from "./HoverTooltip";
 
 interface ModelPreviewProps {}
 
@@ -27,6 +28,12 @@ interface SceneData {
   controls: OrbitControls;
   modelGroup: THREE.Group;
   composer: EffectComposer;
+  raycaster: THREE.Raycaster;
+  mouse: THREE.Vector2;
+  hoveredMesh: THREE.Object3D | null;
+  originalMaterials: Map<THREE.Object3D, THREE.Material | THREE.Material[]>;
+  handleMouseMove?: (event: MouseEvent) => void;
+  handleMouseLeave?: () => void;
   animationFrameId?: number;
   initialized: boolean;
   buttons: HTMLButtonElement[];
@@ -174,7 +181,17 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
 
 const ModelPreview = ({}: ModelPreviewProps) => {
   // Get geometry data and settings from the Zustand store
-  const { geometryDataSets, terrainSettings, renderingSettings, setRenderingMode } = useLayerStore();
+  const { 
+    geometryDataSets, 
+    terrainSettings, 
+    renderingSettings, 
+    debugSettings, 
+    hoverState,
+    setRenderingMode,
+    setHoveredMesh,
+    setMousePosition,
+    clearHover
+  } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);
@@ -458,17 +475,160 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       frontButton.style.left = '60px';
       
       // Store all the scene data in the ref
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      const originalMaterials = new Map<THREE.Object3D, THREE.Material | THREE.Material[]>();
+
+      // Mouse interaction handlers for hover detection
+      const handleMouseMove = (event: MouseEvent) => {
+        if (!containerRef.current || !sceneDataRef.current) return;
+        
+        const rect = containerRef.current.getBoundingClientRect();
+        const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        
+        sceneDataRef.current.mouse.set(x, y);
+        setMousePosition({ x: event.clientX, y: event.clientY });
+        
+        // Perform raycasting
+        sceneDataRef.current.raycaster.setFromCamera(sceneDataRef.current.mouse, camera);
+        const intersects = sceneDataRef.current.raycaster.intersectObjects(modelGroup.children, true);
+        
+        if (intersects.length > 0) {
+          const intersectedObject = intersects[0].object;
+          
+          // Check if this is a different mesh than currently hovered
+          if (sceneDataRef.current.hoveredMesh !== intersectedObject) {
+            // Clear previous hover state
+            if (sceneDataRef.current.hoveredMesh) {
+              restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
+            }
+            
+            // Set new hover state
+            sceneDataRef.current.hoveredMesh = intersectedObject;
+            
+            // Store original material and apply hover effect
+            applyHoverMaterial(intersectedObject);
+            
+            // Extract properties directly from the intersected mesh
+            // Since we now create individual meshes for each feature, this is straightforward
+            let properties = null;
+            
+            // Check mesh userData first (most direct)
+            if (intersectedObject.userData && intersectedObject.userData.properties) {
+              properties = intersectedObject.userData.properties;
+              console.log('Found mesh properties:', properties);
+            } 
+            // Fallback to geometry userData
+            else if (intersectedObject.geometry && intersectedObject.geometry.userData && intersectedObject.geometry.userData.properties) {
+              properties = intersectedObject.geometry.userData.properties;
+              console.log('Found geometry properties:', properties);
+            } else {
+              console.log('No properties found on geometry or mesh');
+            }
+            
+            setHoveredMesh(intersectedObject, properties);
+          }
+        } else {
+          // No intersection, clear hover state
+          if (sceneDataRef.current.hoveredMesh) {
+            restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
+            sceneDataRef.current.hoveredMesh = null;
+            clearHover();
+          }
+        }
+      };
+
+      const handleMouseLeave = () => {
+        if (sceneDataRef.current?.hoveredMesh) {
+          restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
+          sceneDataRef.current.hoveredMesh = null;
+        }
+        clearHover();
+      };
+
+      // Material manipulation functions
+      const applyHoverMaterial = (object: THREE.Object3D) => {
+        if (!sceneDataRef.current) return;
+        
+        const mesh = object as THREE.Mesh;
+        if (!mesh.material) return;
+        
+        // Store original material
+        sceneDataRef.current.originalMaterials.set(object, mesh.material);
+        
+        // Create highlight material
+        const isArray = Array.isArray(mesh.material);
+        if (isArray) {
+          const materials = mesh.material as THREE.Material[];
+          const highlightMaterials = materials.map(material => {
+            if (material instanceof THREE.LineBasicMaterial) {
+              return new THREE.LineBasicMaterial({
+                color: 0xffff00,
+                linewidth: 4
+              });
+            } else {
+              return new THREE.MeshStandardMaterial({
+                color: 0xffff00,
+                emissive: 0x444400,
+                transparent: true,
+                opacity: 0.8
+              });
+            }
+          });
+          mesh.material = highlightMaterials;
+        } else {
+          const material = mesh.material as THREE.Material;
+          if (material instanceof THREE.LineBasicMaterial) {
+            mesh.material = new THREE.LineBasicMaterial({
+              color: 0xffff00,
+              linewidth: 4
+            });
+          } else {
+            mesh.material = new THREE.MeshStandardMaterial({
+              color: 0xffff00,
+              emissive: 0x444400,
+              transparent: true,
+              opacity: 0.8
+            });
+          }
+        }
+      };
+
+      const restoreOriginalMaterial = (object: THREE.Object3D) => {
+        if (!sceneDataRef.current) return;
+        
+        const originalMaterial = sceneDataRef.current.originalMaterials.get(object);
+        if (originalMaterial) {
+          const mesh = object as THREE.Mesh;
+          mesh.material = originalMaterial;
+          sceneDataRef.current.originalMaterials.delete(object);
+        }
+      };
+
       sceneDataRef.current = {
         scene,
         camera,
         controls,
         modelGroup,
         composer,
+        raycaster,
+        mouse,
+        hoveredMesh: null,
+        originalMaterials,
         initialized: true,
         buttons,
         isFirstRender: true,
-        renderingMode // Store the current rendering mode to detect changes
+        // Store event handlers for cleanup
+        handleMouseMove,
+        handleMouseLeave
       };
+
+      // Add event listeners
+      if (containerRef.current) {
+        containerRef.current.addEventListener('mousemove', handleMouseMove);
+        containerRef.current.addEventListener('mouseleave', handleMouseLeave);
+      }
       
       // Animation loop
       const animate = () => {
@@ -596,9 +756,84 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       // Process polygon geometries
       if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
         geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
+          if (!geometry) return; // Skip if geometry is undefined
+          
+          // Check if this is a container geometry with individual geometries
+          if (geometry.userData?.isContainer && geometry.userData?.individualGeometries) {
+            console.log(`Processing container with ${geometry.userData.geometryCount} individual geometries for ${vtDataset.sourceLayer}`);
+            
+            // Process each individual geometry as a separate mesh
+            const individualGeometries = geometry.userData.individualGeometries as THREE.BufferGeometry[];
+            
+            individualGeometries.forEach((individualGeometry, index) => {
+              if (!individualGeometry.attributes.position || individualGeometry.attributes.position.count === 0) {
+                return; // Skip empty geometries
+              }
+              
+              // Create color for polygon
+              const baseColor = vtDataset.color || new THREE.Color(0x81ecec);
+              
+              // Always render as solid mesh
+              const enhancedColor = new THREE.Color().copy(baseColor).convertSRGBToLinear();
+              enhancedColor.r = Math.min(1, enhancedColor.r * 1.2);
+              enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
+              enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
+              
+              // Create material based on rendering mode
+              let polygonMaterial;
+              if (renderingMode === 'quality') {
+                polygonMaterial = new THREE.MeshPhysicalMaterial({
+                  color: enhancedColor,
+                  roughness: 0.35,
+                  metalness: 0.01,
+                  clearcoat: 0.06,
+                  clearcoatRoughness: 2,
+                  side: THREE.DoubleSide
+                });
+              } else {
+                polygonMaterial = new THREE.MeshStandardMaterial({
+                  color: enhancedColor,
+                  roughness: 0.35,
+                  metalness: 0,
+                  flatShading: true,
+                  side: THREE.DoubleSide
+                });
+              }
+              
+              // Create mesh
+              const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
+              polygonMesh.castShadow = renderingMode === 'quality';
+              polygonMesh.receiveShadow = renderingMode === 'quality';
+              polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
+              
+              // Preserve individual properties for hover interaction
+              const properties = {
+                sourceLayer: vtDataset.sourceLayer,
+                layerType: "solid",
+                color: enhancedColor.getHexString(),
+                extrusionDepth: vtDataset.extrusionDepth,
+                minExtrusionDepth: vtDataset.minExtrusionDepth,
+                zOffset: vtDataset.zOffset,
+                heightScaleFactor: vtDataset.heightScaleFactor,
+                geometryIndex: index,
+                // Include MVT feature properties that were added from WASM
+                ...(individualGeometry.userData?.properties || {})
+              };
+              
+              individualGeometry.userData = { properties };
+              polygonMesh.userData = { properties };
+              
+              modelGroup.add(polygonMesh);
+            });
+            
+            return; // Skip the original processing for container geometries
+          }
+          
+          // Original processing for non-container geometries
           // Create color for polygon
           const baseColor = vtDataset.color || new THREE.Color(0x81ecec);
           
+          // Always render as solid mesh
           // Create slightly brightened color
           const enhancedColor = new THREE.Color().copy(baseColor).convertSRGBToLinear();
           enhancedColor.r = Math.min(1, enhancedColor.r * 1.2);
@@ -635,6 +870,26 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
           polygonMesh.castShadow = renderingMode === 'quality';
           polygonMesh.receiveShadow = renderingMode === 'quality';
+          
+          // Attach properties to the geometry and mesh for hover interaction  
+          const existingProperties = geometry.userData?.properties || {};
+          console.log('Existing geometry properties from userData:', existingProperties);
+          
+          const properties = {
+            sourceLayer: vtDataset.sourceLayer,
+            layerType: "solid",
+            color: enhancedColor.getHexString(),
+            extrusionDepth: vtDataset.extrusionDepth,
+            minExtrusionDepth: vtDataset.minExtrusionDepth,
+            zOffset: vtDataset.zOffset,
+            heightScaleFactor: vtDataset.heightScaleFactor,
+            // Include MVT feature properties that were added in createPolygonGeometry
+            ...existingProperties
+          };
+          
+          geometry.userData = { properties };
+          polygonMesh.userData = { properties };
+          
           modelGroup.add(polygonMesh);
         });
       }
@@ -715,7 +970,16 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           }
         });
       }
-      
+
+      // Remove event listeners
+      if (sceneDataRef.current?.handleMouseMove && sceneDataRef.current?.handleMouseLeave) {
+        const container = containerRef.current;
+        if (container) {
+          container.removeEventListener('mousemove', sceneDataRef.current.handleMouseMove);
+          container.removeEventListener('mouseleave', sceneDataRef.current.handleMouseLeave);
+        }
+      }
+
       // Dispose of ThreeJS resources
       if (sceneDataRef.current) {
         const { scene, modelGroup } = sceneDataRef.current;
@@ -799,6 +1063,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           {error}
         </div>
       )}
+      <HoverTooltip />
     </div>
   );
 };
