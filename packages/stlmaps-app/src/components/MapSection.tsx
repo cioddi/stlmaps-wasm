@@ -10,13 +10,12 @@ interface MapSectionProps {
   bboxSelectorRef?: React.RefObject<{ updateBbox: () => void }>;
 }
 
-const MapSection: React.FC<MapSectionProps> = ({
+const MapSection: React.FC<MapSectionProps> = React.memo(({
   mapCenter,
   flex,
   display,
   bboxSelectorRef,
 }) => {
-  console.log('render MapSection')
   return (
     <Box
       sx={{
@@ -69,6 +68,6 @@ const MapSection: React.FC<MapSectionProps> = ({
       )}
     </Box>
   );
-};
+});
 
 export default MapSection;

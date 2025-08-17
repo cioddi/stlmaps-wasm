@@ -6,29 +6,41 @@ interface DynamicVectorLayersProps {
   mapId?: string;
 }
 
-const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = () => {
+const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() => {
   const vtLayers = useLayerStore((state) => state.vtLayers);
+
+  // Create a stable dependency array
+  const layerDeps = useMemo(() => 
+    vtLayers.map(layer => ({
+      sourceLayer: layer.sourceLayer,
+      enabled: layer.enabled,
+      colorHex: layer.color?.getHexString(),
+      filter: JSON.stringify(layer.filter) // Stringify filter for stable comparison
+    }))
+  , [vtLayers]);
 
   // Generate layers configuration for MlVectorTileLayer
   const vectorTileLayers = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layers: any[] = [];
 
-    for (const config of vtLayers) {
-      if (!config.enabled) {
+    for (const layerDep of layerDeps) {
+      if (!layerDep.enabled) {
         continue;
       }
 
-      const hexColor = `#${config.color?.getHexString() || "ff0000"}`;
+      // Use cached hex color from layerDeps
+      const hexColor = layerDep.colorHex ? `#${layerDep.colorHex}` : "#ff0000";
+      const filter = layerDep.filter ? JSON.parse(layerDep.filter) : undefined;
 
       // Create layer configuration based on source layer type
-      if (config.sourceLayer === "transportation") {
+      if (layerDep.sourceLayer === "transportation") {
         // Style roads
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const layer: any = {
-          id: `${config.sourceLayer}-line`,
+          id: `${layerDep.sourceLayer}-line`,
           type: "line",
-          "source-layer": config.sourceLayer,
+          "source-layer": layerDep.sourceLayer,
           layout: {},
           paint: {
             "line-color": hexColor,
@@ -36,18 +48,17 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = () => {
           },
           maxzoom: 20,
         };
-        if (config.filter) {
-          layer.filter = config.filter;
+        if (filter) {
+          layer.filter = filter;
         }
         layers.push(layer);
-      } else if (config.sourceLayer === "building") {
+      } else if (layerDep.sourceLayer === "building") {
         // Style buildings
-        console.log(`🏗️ Adding building fill layer with color: ${hexColor}`);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const layer: any = {
-          id: `${config.sourceLayer}-fill`,
+          id: `${layerDep.sourceLayer}-fill`,
           type: "fill",
-          "source-layer": config.sourceLayer,
+          "source-layer": layerDep.sourceLayer,
           layout: {},
           paint: {
             "fill-color": hexColor,
@@ -57,17 +68,17 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = () => {
           minzoom: 5, // Lower minzoom to show at all zoom levels
           maxzoom: 20,
         };
-        if (config.filter) {
-          layer.filter = config.filter;
+        if (filter) {
+          layer.filter = filter;
         }
         layers.push(layer);
       } else {
         // Style other layers (water, landuse, etc.)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const layer: any = {
-          id: `${config.sourceLayer}-fill`,
+          id: `${layerDep.sourceLayer}-fill`,
           type: "fill",
-          "source-layer": config.sourceLayer,
+          "source-layer": layerDep.sourceLayer,
           layout: {},
           paint: {
             "fill-color": hexColor,
@@ -75,19 +86,16 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = () => {
           },
           maxzoom: 20,
         };
-        if (config.filter) {
-          layer.filter = config.filter;
+        if (filter) {
+          layer.filter = filter;
         }
         layers.push(layer);
       }
     }
 
-    console.log("🎨 Generated vector tile layers:", layers);
-    console.log("🎨 Layer details:", layers.map(l => `${l.id} (${l.type}) from ${l['source-layer']}`));
     return layers;
-  }, [vtLayers]);
+  }, [layerDeps]);
 
-  console.log('render DynamicVectorLayers')
   return (
     <MlVectorTileLayer
       url="https://wms.wheregroup.com/tileserver/tile/tileserver.php?/europe-0-14/index.json?/europe-0-14/{z}/{x}/{y}.pbf"
@@ -99,6 +107,6 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = () => {
       }}
     />
   );
-};
+});
 
 export default DynamicVectorLayers;
