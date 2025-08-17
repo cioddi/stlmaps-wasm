@@ -1106,6 +1106,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             console_log!("Processed {} out of {} polygons", i, input.polygons.len());
         }
         
+        // Debug: log the first few polygon properties to see what's available
+        if i < 3 {
+            console_log!("🔍 Polygon {} data: properties = {:?}, type = {:?}", 
+                i, polygon_data.properties, polygon_data.r#type);
+        }
+        
         // Check if debug mode is enabled
         let debug_mode = false; // Always disable debug mode special handling
         
@@ -1346,17 +1352,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Create geometry based on debug mode
         // Extract properties from polygon_data for attaching to geometry
         let properties = if let Some(ref props) = polygon_data.properties {
+            console_log!("🔍 Found properties in polygon_data: {:?}", props);
             // Convert serde_json::Value to HashMap<String, serde_json::Value>
             if let serde_json::Value::Object(obj) = props {
                 let mut hashmap = std::collections::HashMap::new();
                 for (key, value) in obj.iter() {
                     hashmap.insert(key.clone(), value.clone());
                 }
+                console_log!("🔍 Converted properties to hashmap: {:?}", hashmap);
                 Some(hashmap)
             } else {
+                console_log!("🔍 Properties not an object: {:?}", props);
                 None
             }
         } else {
+            console_log!("🔍 No properties found in polygon_data");
             None
         };
         

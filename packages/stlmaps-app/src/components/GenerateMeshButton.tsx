@@ -564,42 +564,69 @@ export const GenerateMeshButton = function () {
             
             // Call the Rust implementation with debug mode
             const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
-            const geometryData = JSON.parse(geometryJson) as {
+            const geometryDataArray = JSON.parse(geometryJson) as Array<{
               vertices: number[];
               normals: number[] | null;
               colors: number[] | null;
               indices: number[] | null;
               uvs: number[] | null;
               hasData: boolean;
-            };
+              properties?: Record<string, unknown>;
+            }>;
 
-            // Convert the result to a Three.js buffer geometry
-            const geometry = new THREE.BufferGeometry();
+            // For debug mode, we still need to handle individual geometries
+            // Create a container geometry similar to normal mode
+            const geometries: THREE.BufferGeometry[] = [];
             
-            // Add position attribute (vertices)
-            if (geometryData.vertices && geometryData.vertices.length > 0) {
+            for (const geometryData of geometryDataArray) {
+              if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
+                continue;
+              }
+
+              const geometry = new THREE.BufferGeometry();
+              
+              // Add position attribute (vertices)
               geometry.setAttribute(
                 "position", 
                 new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
               );
+              
+              // Add color attribute if available
+              if (geometryData.colors && geometryData.colors.length > 0) {
+                geometry.setAttribute(
+                  "color",
+                  new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
+                );
+              }
+              
+              // Add index attribute if available
+              if (geometryData.indices && geometryData.indices.length > 0) {
+                geometry.setIndex(Array.from(geometryData.indices));
+              }
+
+              // Add properties to userData for hover interaction
+              if (geometryData.properties) {
+                console.log(`Debug geometry ${geometries.length} properties:`, geometryData.properties);
+                geometry.userData = {
+                  properties: geometryData.properties
+                };
+              } else {
+                console.log(`Debug geometry ${geometries.length} has NO properties`);
+              }
+              
+              geometries.push(geometry);
             }
-            
-            // Add color attribute if available
-            if (geometryData.colors && geometryData.colors.length > 0) {
-              geometry.setAttribute(
-                "color",
-                new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
-              );
-            }
-            
-            // For debug mode, we don't need normals or complex attributes
-            // Add index attribute if available
-            if (geometryData.indices && geometryData.indices.length > 0) {
-              geometry.setIndex(Array.from(geometryData.indices));
-            }
-            
-            layerGeometryPromise = Promise.resolve(geometry);
-            console.log(`✅ Debug geometry created for ${currentLayer.sourceLayer} with ${geometry.attributes.position?.count || 0} vertices`);
+
+            // Create a container geometry that holds individual geometries as userData
+            const containerGeometry = new THREE.BufferGeometry();
+            containerGeometry.userData = {
+              isContainer: true,
+              individualGeometries: geometries,
+              geometryCount: geometries.length
+            };
+
+            layerGeometryPromise = Promise.resolve(containerGeometry);
+            console.log(`✅ Debug geometry created for ${currentLayer.sourceLayer} with ${geometries.length} individual meshes`);
           } catch (error) {
             console.error(`Failed to create debug geometry for ${currentLayer.sourceLayer}:`, error);
             // Fallback to empty geometry
@@ -679,9 +706,12 @@ export const GenerateMeshButton = function () {
 
             // Add properties to userData for hover interaction
             if (geometryData.properties) {
+              console.log(`WASM geometry ${geometries.length} properties:`, geometryData.properties);
               geometry.userData = {
                 properties: geometryData.properties
               };
+            } else {
+              console.log(`WASM geometry ${geometries.length} has NO properties`);
             }
             
             // Compute normals if not provided

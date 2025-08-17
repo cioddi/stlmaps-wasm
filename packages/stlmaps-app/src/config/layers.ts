@@ -63,7 +63,6 @@ export const vtGeometries: VtDataSet[] = [
       "minor",
       "track",
       "raceway",
-      "path",
     ],
     csgClipping: false,
   },

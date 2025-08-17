@@ -46,9 +46,11 @@ pub struct VectorTileResult {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GeometryData {
     pub geometry: Vec<Vec<f64>>, // Represents a geometry's coordinates
-    pub r#type: String,          // Geometry type (e.g., "Polygon", "LineString")
-    pub height: f64,             // Feature height
-    pub base_elevation: f64,     // Elevation at geometry position
+    pub r#type: Option<String>,  // Geometry type (e.g., "Polygon", "LineString")
+    pub height: Option<f64>,     // Feature height
+    pub layer: Option<String>,   // Source layer name
+    pub tags: Option<serde_json::Value>, // Tags/attributes from the tile
+    pub properties: Option<serde_json::Value>, // Feature properties from MVT
 }
 
 // Input for extracting features from vector tiles
@@ -855,9 +857,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_ring, // Store transformed coords
-                                r#type: "Polygon".to_string(),
-                                height,
-                                base_elevation,
+                                r#type: Some("Polygon".to_string()),
+                                height: Some(height),
+                                layer: Some(vt_dataset.sourceLayer.clone()),
+                                tags: None,
+                                properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
                         }
                     }
@@ -897,9 +901,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_line,
-                                r#type: "LineString".to_string(),
-                                height, // Height might not be typical for lines, but include if present
-                                base_elevation,
+                                r#type: Some("LineString".to_string()),
+                                height: Some(height), // Height might not be typical for lines, but include if present
+                                layer: Some(vt_dataset.sourceLayer.clone()),
+                                tags: None,
+                                properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
                         }
                     }
@@ -935,9 +941,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                                 transformed_geometry_parts.push(GeometryData {
                                     geometry: vec![transformed_point], // Store as [[lng, lat]]
-                                    r#type: "Point".to_string(),
-                                    height, // Height might represent magnitude for points
-                                    base_elevation,
+                                    r#type: Some("Point".to_string()),
+                                    height: Some(height), // Height might represent magnitude for points
+                                    layer: Some(vt_dataset.sourceLayer.clone()),
+                                    tags: None,
+                                    properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                                 });
                             }
                         }
@@ -958,7 +966,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                 .into_iter()
                 .filter(|geom| {
                     let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
-                        if geom.r#type == "LineString" || vt_dataset.sourceLayer == "transportation" {
+                        if geom.r#type.as_ref().map_or(false, |t| t == "LineString") || vt_dataset.sourceLayer == "transportation" {
                             // Use buffered bbox for LineStrings (roads) and all transportation features
                             (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
                         } else {

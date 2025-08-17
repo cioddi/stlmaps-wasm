@@ -196,6 +196,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const lastMouseMoveTime = useRef<number>(0); // For throttling hover performance
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [hasSetInitialMode, setHasSetInitialMode] = useState<boolean>(false);
@@ -479,67 +480,76 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       const mouse = new THREE.Vector2();
       const originalMaterials = new Map<THREE.Object3D, THREE.Material | THREE.Material[]>();
 
-      // Mouse interaction handlers for hover detection
-      const handleMouseMove = (event: MouseEvent) => {
-        if (!containerRef.current || !sceneDataRef.current) return;
-        
-        const rect = containerRef.current.getBoundingClientRect();
-        const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-        
-        sceneDataRef.current.mouse.set(x, y);
-        setMousePosition({ x: event.clientX, y: event.clientY });
-        
-        // Perform raycasting
-        sceneDataRef.current.raycaster.setFromCamera(sceneDataRef.current.mouse, camera);
-        const intersects = sceneDataRef.current.raycaster.intersectObjects(modelGroup.children, true);
-        
-        if (intersects.length > 0) {
-          const intersectedObject = intersects[0].object;
-          
-          // Check if this is a different mesh than currently hovered
-          if (sceneDataRef.current.hoveredMesh !== intersectedObject) {
-            // Clear previous hover state
-            if (sceneDataRef.current.hoveredMesh) {
-              restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
-            }
-            
-            // Set new hover state
-            sceneDataRef.current.hoveredMesh = intersectedObject;
-            
-            // Store original material and apply hover effect
-            applyHoverMaterial(intersectedObject);
-            
-            // Extract properties directly from the intersected mesh
-            // Since we now create individual meshes for each feature, this is straightforward
-            let properties = null;
-            
-            // Check mesh userData first (most direct)
-            if (intersectedObject.userData && intersectedObject.userData.properties) {
-              properties = intersectedObject.userData.properties;
-              console.log('Found mesh properties:', properties);
-            } 
-            // Fallback to geometry userData
-            else if (intersectedObject.geometry && intersectedObject.geometry.userData && intersectedObject.geometry.userData.properties) {
-              properties = intersectedObject.geometry.userData.properties;
-              console.log('Found geometry properties:', properties);
-            } else {
-              console.log('No properties found on geometry or mesh');
-            }
-            
-            setHoveredMesh(intersectedObject, properties);
-          }
-        } else {
-          // No intersection, clear hover state
-          if (sceneDataRef.current.hoveredMesh) {
-            restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
-            sceneDataRef.current.hoveredMesh = null;
-            clearHover();
-          }
+  // Mouse interaction handlers for hover detection
+  const handleMouseMove = (event: MouseEvent) => {
+    const now = Date.now();
+    if (now - lastMouseMoveTime.current < 16) {
+      return; // Skip if called too frequently
+    }
+    lastMouseMoveTime.current = now;
+    
+    if (!containerRef.current || !sceneDataRef.current) return;
+    
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    
+    sceneDataRef.current.mouse.set(x, y);
+    setMousePosition({ x: event.clientX, y: event.clientY });
+    
+    // Perform raycasting with performance optimization
+    sceneDataRef.current.raycaster.setFromCamera(sceneDataRef.current.mouse, camera);
+    
+    // Only intersect with visible objects and limit depth for performance
+    const visibleObjects = modelGroup.children.filter(child => child.visible);
+    const intersects = sceneDataRef.current.raycaster.intersectObjects(visibleObjects, false); // Don't recurse for performance
+    
+    if (intersects.length > 0) {
+      const intersectedObject = intersects[0].object;
+      
+      // Check if this is a different mesh than currently hovered
+      if (sceneDataRef.current.hoveredMesh !== intersectedObject) {
+        // Clear previous hover state
+        if (sceneDataRef.current.hoveredMesh) {
+          restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
         }
-      };
-
-      const handleMouseLeave = () => {
+        
+        // Set new hover state
+        sceneDataRef.current.hoveredMesh = intersectedObject;
+        
+        // Store original material and apply hover effect
+        applyHoverMaterial(intersectedObject);
+        
+        // Extract properties directly from the intersected mesh
+        // Since we now create individual meshes for each feature, this is straightforward
+        let properties = null;
+        
+        // Check mesh userData first (most direct)
+        if (intersectedObject.userData && intersectedObject.userData.properties) {
+          properties = intersectedObject.userData.properties;
+          console.log('✅ Found mesh properties:', properties);
+        } 
+        // Fallback to geometry userData (cast to Mesh for type safety)
+        else if ((intersectedObject as THREE.Mesh).geometry?.userData?.properties) {
+          properties = (intersectedObject as THREE.Mesh).geometry.userData.properties;
+          console.log('✅ Found geometry properties:', properties);
+        } else {
+          console.log('❌ No properties found on geometry or mesh. Checking available data:');
+          console.log('  - intersectedObject.userData:', intersectedObject.userData);
+          console.log('  - geometry.userData:', (intersectedObject as THREE.Mesh).geometry?.userData);
+        }
+        
+        setHoveredMesh(intersectedObject, properties);
+      }
+    } else {
+      // No intersection, clear hover state
+      if (sceneDataRef.current.hoveredMesh) {
+        restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
+        sceneDataRef.current.hoveredMesh = null;
+        clearHover();
+      }
+    }
+  };      const handleMouseLeave = () => {
         if (sceneDataRef.current?.hoveredMesh) {
           restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
           sceneDataRef.current.hoveredMesh = null;
@@ -652,7 +662,9 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               sceneDataRef.current.cameraUpdateTimeoutId = setTimeout(() => {
                 setCameraPosition(camera.position.clone());
                 setCameraTarget(controls.target.clone());
-                sceneDataRef.current.cameraUpdateTimeoutId = null;
+                if (sceneDataRef.current) {
+                  sceneDataRef.current.cameraUpdateTimeoutId = null;
+                }
               }, 500); // Update state after 500ms of no camera movement
             }
           }
@@ -665,7 +677,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         composer.render();
       };
       
-      // @ts-expect-error
+      // @ts-expect-error Debug camera exposure to global scope
       document.debug_camera = camera; // Expose camera to global scope for debugging
       
       animate();
@@ -695,7 +707,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         hasPolygonGeometries: !!geometryDataSets.polygonGeometries?.length,
         renderingMode
       });
-      const { scene, modelGroup } = sceneDataRef.current;
+      const { modelGroup } = sceneDataRef.current;
       
       // Clear existing geometry
       while (modelGroup.children.length > 0) {
@@ -807,17 +819,15 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
               
               // Preserve individual properties for hover interaction
+              // Prioritize MVT feature properties over layer configuration
+              const mvtProperties = individualGeometry.userData?.properties || {};
               const properties = {
-                sourceLayer: vtDataset.sourceLayer,
-                layerType: "solid",
-                color: enhancedColor.getHexString(),
-                extrusionDepth: vtDataset.extrusionDepth,
-                minExtrusionDepth: vtDataset.minExtrusionDepth,
-                zOffset: vtDataset.zOffset,
-                heightScaleFactor: vtDataset.heightScaleFactor,
-                geometryIndex: index,
-                // Include MVT feature properties that were added from WASM
-                ...(individualGeometry.userData?.properties || {})
+                // First add MVT feature properties (these are what we want to show)
+                ...mvtProperties,
+                // Then add only essential layer info (but don't override MVT properties)
+                _sourceLayer: vtDataset.sourceLayer,
+                _layerType: "solid",
+                _geometryIndex: index,
               };
               
               individualGeometry.userData = { properties };
@@ -872,19 +882,16 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           polygonMesh.receiveShadow = renderingMode === 'quality';
           
           // Attach properties to the geometry and mesh for hover interaction  
-          const existingProperties = geometry.userData?.properties || {};
-          console.log('Existing geometry properties from userData:', existingProperties);
+          const mvtProperties = geometry.userData?.properties || {};
+          console.log('Existing geometry properties from userData:', mvtProperties);
           
+          // Prioritize MVT feature properties over layer configuration
           const properties = {
-            sourceLayer: vtDataset.sourceLayer,
-            layerType: "solid",
-            color: enhancedColor.getHexString(),
-            extrusionDepth: vtDataset.extrusionDepth,
-            minExtrusionDepth: vtDataset.minExtrusionDepth,
-            zOffset: vtDataset.zOffset,
-            heightScaleFactor: vtDataset.heightScaleFactor,
-            // Include MVT feature properties that were added in createPolygonGeometry
-            ...existingProperties
+            // First add MVT feature properties (these are what we want to show)
+            ...mvtProperties,
+            // Then add only essential layer info (but don't override MVT properties)
+            _sourceLayer: vtDataset.sourceLayer,
+            _layerType: "solid",
           };
           
           geometry.userData = { properties };
