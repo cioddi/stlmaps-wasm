@@ -178,7 +178,7 @@ const useLayerStore = create<LayerState>((set) => ({
     scaleFactor: 0.5
   },
   renderingSettings: {
-    mode: 'quality'
+    mode: 'performance'
   },
   debugSettings: {
     geometryDebugMode: false

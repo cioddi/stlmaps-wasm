@@ -7,17 +7,15 @@ import {
   FormControlLabel, 
   FormControl, 
   FormLabel,
-  Switch,
-  Paper,
-  Divider 
+  Paper
 } from '@mui/material';
 import useLayerStore from '../stores/useLayerStore';
 
 /**
- * Component that provides controls for adjusting the rendering quality/performance mode and debug settings
+ * Component that provides controls for adjusting the rendering quality/performance mode
  */
 const RenderingControls: React.FC = () => {
-  const { renderingSettings, debugSettings, setRenderingMode, toggleGeometryDebugMode } = useLayerStore();
+  const { renderingSettings, setRenderingMode } = useLayerStore();
   
   const handleModeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setRenderingMode(event.target.value as 'quality' | 'performance');
@@ -62,30 +60,6 @@ const RenderingControls: React.FC = () => {
           />
         </RadioGroup>
       </FormControl>
-
-      <Divider sx={{ my: 2 }} />
-
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="h6">Debug Settings</Typography>
-      </Box>
-
-      <FormControlLabel
-        control={
-          <Switch
-            checked={debugSettings.geometryDebugMode}
-            onChange={toggleGeometryDebugMode}
-            name="geometryDebugMode"
-          />
-        }
-        label={
-          <Box>
-            <Typography variant="body1">Geometry Debug Mode</Typography>
-            <Typography variant="caption" color="text.secondary">
-              Skip processing like linestring buffering and polygon extrusion. Renders raw features for debugging.
-            </Typography>
-          </Box>
-        }
-      />
     </Paper>
   );
 };
