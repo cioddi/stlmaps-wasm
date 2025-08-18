@@ -21,6 +21,7 @@ import MapSection from "./components/MapSection";
 import ModelSection from "./components/ModelSection";
 import { useWasm } from "@threegis/core";
 import DynamicVectorLayers from "./components/DynamicVectorLayers";
+import { MlOrderLayers } from "@mapcomponents/react-maplibre";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 340;
@@ -196,6 +197,7 @@ const App: React.FC = () => {
         setBbox(geojson);
       }}
     />
+    <MlOrderLayers layerIds={['controls-order-layer','data-order-layer']} />
   </>
   );
 };

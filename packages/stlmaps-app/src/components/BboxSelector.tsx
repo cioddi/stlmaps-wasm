@@ -162,6 +162,7 @@ const BboxSelector = forwardRef((props: Props, ref) => {
     return (
       <>
         <MlGeoJsonLayer
+          insertBeforeLayer="controls-order-layer"
           geojson={bbox}
           layerId="bbox-selector-layer"
           mapId={props.mapId}
@@ -170,13 +171,14 @@ const BboxSelector = forwardRef((props: Props, ref) => {
           labelProp="description"
           options={{
             paint: {
-              "fill-color": "rgb(200, 200, 200)",
-              "fill-opacity": 0.4,
-              "fill-outline-color": "rgb(81, 132, 190)",
+              "fill-color": "rgba(200, 200, 200, 0.6)",
+              "fill-opacity": 0.8,
+              "fill-outline-color": "rgba(45, 139, 246, 1)",
             },
           }}
         />
         <MlGeoJsonLayer
+          insertBeforeLayer="controls-order-layer"
           geojson={bbox}
           layerId="bbox-selector-layer-circles"
           mapId={props.mapId}
