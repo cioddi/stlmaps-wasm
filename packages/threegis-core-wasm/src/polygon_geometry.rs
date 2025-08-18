@@ -675,7 +675,14 @@ fn create_extruded_shape(
     unique_shape_points: &[Vector2],
     height: f64,
     z_offset: f64,
-    properties: Option<std::collections::HashMap<String, serde_json::Value>>
+    properties: Option<std::collections::HashMap<String, serde_json::Value>>,
+    align_vertices_to_terrain: bool,
+    elevation_grid: Option<&[Vec<f64>]>,
+    grid_size: Option<&GridSize>,
+    bbox: Option<&[f64]>,
+    min_elevation: Option<f64>,
+    max_elevation: Option<f64>,
+    source_layer: Option<&str>
 ) -> BufferGeometry {
     // Basic validation
     if height < MIN_HEIGHT {
@@ -706,7 +713,7 @@ fn create_extruded_shape(
                 Vector2 { x: pt.x + size, y: pt.y + size },
                 Vector2 { x: pt.x - size, y: pt.y + size },
             ];
-            return create_extruded_shape(&square_points, height, z_offset, None);
+            return create_extruded_shape(&square_points, height, z_offset, None, false, None, None, None, None, None, None);
         } else if unique_shape_points.len() == 2 {
             // For two points, create a thin rectangle along the line
             let p1 = unique_shape_points[0];
@@ -746,7 +753,7 @@ fn create_extruded_shape(
                 Vector2 { x: p2.x - px * width, y: p2.y - py * width },
                 Vector2 { x: p1.x - px * width, y: p1.y - py * width },
             ];
-            return create_extruded_shape(&rect_points, height, z_offset, None);
+            return create_extruded_shape(&rect_points, height, z_offset, None, false, None, None, None, None, None, None);
         }
         
         // If we somehow get here with no points, return empty geometry
@@ -905,6 +912,51 @@ fn create_extruded_shape(
         let uv_array = Float32Array::from(uv_js);
         uvs = vec![0.0; uv_array.length() as usize];
         uv_array.copy_to(&mut uvs);
+    }
+    
+    // Apply terrain alignment if enabled
+    if align_vertices_to_terrain {
+        if let (Some(elev_grid), Some(grid_sz), Some(bbox_arr), Some(min_elev), Some(max_elev)) = 
+            (elevation_grid, grid_size, bbox, min_elevation, max_elevation) {
+            
+            // Check if this is a transportation layer (roads)
+            let is_transportation = source_layer == Some("transportation");
+            
+            // Apply terrain alignment to vertices
+            for i in (0..vertices.len()).step_by(3) {
+                // Get x, y coordinates in mesh space
+                let mesh_x = vertices[i] as f64;
+                let mesh_y = vertices[i + 1] as f64;
+                
+                // Convert mesh coordinates back to geographic coordinates
+                let mesh_size = 200.0; // TERRAIN_SIZE constant
+                let half_size = mesh_size / 2.0;
+                
+                // Convert from mesh coordinates (-100 to +100) to normalized 0-1 space
+                let normalized_x = (mesh_x + half_size) / mesh_size;
+                let normalized_y = (mesh_y + half_size) / mesh_size;
+                
+                // Convert from normalized space to geographic coordinates
+                let lng = bbox_arr[0] + (bbox_arr[2] - bbox_arr[0]) * normalized_x;
+                let lat = bbox_arr[1] + (bbox_arr[3] - bbox_arr[1]) * normalized_y;
+                
+                // Sample terrain elevation at this position
+                let terrain_height = sample_terrain_elevation_at_point(
+                    lng, lat, elev_grid, grid_sz, bbox_arr, min_elev, max_elev
+                );
+                
+                if is_transportation {
+                    // For transportation (roads), set the vertex to terrain height
+                    // Don't add terrain height since z_offset already includes it
+                    // Instead, adjust to the exact terrain height at this position
+                    let current_base_z = vertices[i + 2] as f64 - z_offset;
+                    vertices[i + 2] = (terrain_height + current_base_z) as f32;
+                } else {
+                    // For buildings and other features, add terrain height to elevate above terrain
+                    vertices[i + 2] += terrain_height as f32;
+                }
+            }
+        }
     }
     
     // Check if we have any vertices before constructing the result
@@ -1434,7 +1486,19 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             None
         };
         
-        let geometry = create_extruded_shape(&final_points, height, z_offset, properties.clone());
+        let geometry = create_extruded_shape(
+            &final_points, 
+            height, 
+            z_offset, 
+            properties.clone(),
+            input.vtDataSet.alignVerticesToTerrain.unwrap_or(false),
+            Some(&input.elevationGrid),
+            Some(&input.gridSize),
+            Some(&input.bbox),
+            Some(input.minElevation),
+            Some(input.maxElevation),
+            Some(&input.vtDataSet.sourceLayer)
+        );
         
         if geometry.hasData {
             all_geometries.push(geometry);

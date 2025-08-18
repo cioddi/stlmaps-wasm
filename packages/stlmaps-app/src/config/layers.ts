@@ -19,7 +19,7 @@ export const vtGeometries: VtDataSet[] = [
     zOffset: -0.3,
     bufferSize: 2,
     enabled: true,
-    alignVerticesToTerrain: false,
+    alignVerticesToTerrain: true,
     csgClipping: false,
   },
   {
@@ -29,7 +29,7 @@ export const vtGeometries: VtDataSet[] = [
     zOffset: -0.4,
     bufferSize: 2,
     enabled: true,
-    alignVerticesToTerrain: false,
+    alignVerticesToTerrain: true,
     // Filter to include green areas
     filter: ["in", "class", "commercial", "residential"],
     csgClipping: false,
@@ -37,12 +37,11 @@ export const vtGeometries: VtDataSet[] = [
   {
     sourceLayer: "transportation",
     color: new THREE.Color(0x989898), // Gray color for streets
-    extrusionDepth: 2.8, // Thin extrusion for landuse
+    extrusionDepth: 1.4,
     zOffset: -0.2,
-    bufferSize: 2.4,
+    bufferSize: 2,
     enabled: true,
-    alignVerticesToTerrain: false,
-    // NO FILTER - Include ALL transportation features to debug missing geometries
+    alignVerticesToTerrain: true,
     filter: [
       "in",
       "class",
@@ -64,6 +63,7 @@ export const vtGeometries: VtDataSet[] = [
     extrusionDepth: 1, // Thin extrusion for water
     zOffset: -0.5,
     enabled: true,
+    alignVerticesToTerrain: true,
     csgClipping: false,
   },
   {
@@ -71,6 +71,7 @@ export const vtGeometries: VtDataSet[] = [
     color: new THREE.Color(0xafafaf), // Gray color for buildings
     zOffset: -0.1,
     useAdaptiveScaleFactor: true,
+    alignVerticesToTerrain: false,
     heightScaleFactor: 0.8,
     enabled: true,
     csgClipping: false,
