@@ -1136,9 +1136,9 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     
                     // Use appropriate buffer distance based on road class
                     let buffer_distance = if is_major_road {
-                        0.00003 // ~3 meters for major roads
+                        0.00002 // ~2 meters for major roads
                     } else {
-                        0.00002 // ~2 meters for minor roads  
+                        0.000015 // ~1.5 meters for minor roads  
                     };
                     
                     // Call the WASM buffer_line_string function
