@@ -600,6 +600,17 @@ const ModelPreview = ({}: ModelPreviewProps) => {
     if (intersects.length > 0) {
       const intersectedObject = intersects[0].object;
       
+      // Skip hover effects for terrain meshes
+      if (intersectedObject.name === 'terrain') {
+        // Clear any existing hover state and return early
+        if (sceneDataRef.current.hoveredMesh) {
+          restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
+          sceneDataRef.current.hoveredMesh = null;
+          clearHover();
+        }
+        return;
+      }
+      
       // Check if this is a different mesh than currently hovered
       if (sceneDataRef.current.hoveredMesh !== intersectedObject) {
         // Clear previous hover state
@@ -853,6 +864,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           geometryDataSets.terrainGeometry,
           terrainMaterial
         );
+        geometryMesh.name = 'terrain'; // Identify this as terrain mesh
         geometryMesh.castShadow = renderingMode === 'quality';
         geometryMesh.receiveShadow = renderingMode === 'quality';
         modelGroup.add(geometryMesh);
