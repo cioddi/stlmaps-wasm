@@ -492,174 +492,183 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
         return Vec::new();
     }
     
-    // Check if the polygon intersects with the bbox at all
-    let mut bbox_intersected = false;
+    // Convert Vector2 points to format expected by polygon_intersects_bbox
+    let polygon_coords: Vec<Vec<f64>> = points.iter()
+        .map(|p| vec![p.x, p.y])
+        .collect();
     
-    // Check if any point is inside the bbox
-    for pt in points {
-        if pt.x >= min_x && pt.x <= max_x && pt.y >= min_y && pt.y <= max_y {
-            bbox_intersected = true;
-            break;
-        }
-    }
+    let bbox_array = [min_x, min_y, max_x, max_y];
     
-    // If no points are inside, check if any edges intersect the bbox
-    if !bbox_intersected {
-        for i in 0..points.len() {
-            let p1 = points[i];
-            let p2 = points[(i + 1) % points.len()];
-            
-            // Check all 4 bbox edges for intersections
-            if (p1.x < min_x && p2.x > min_x) || (p1.x > min_x && p2.x < min_x) ||
-               (p1.x < max_x && p2.x > max_x) || (p1.x > max_x && p2.x < max_x) ||
-               (p1.y < min_y && p2.y > min_y) || (p1.y > min_y && p2.y < min_y) ||
-               (p1.y < max_y && p2.y > max_y) || (p1.y > max_y && p2.y < max_y) {
-                bbox_intersected = true;
-                break;
-            }
-        }
-    }
-    
-    // If there's no intersection at all, return empty
-    if !bbox_intersected {
+    // Use the robust polygon-bbox intersection check
+    if !polygon_intersects_bbox(&polygon_coords, &bbox_array) {
         return Vec::new();
     }
     
-    let mut clipped = Vec::new();
+    // Sutherland-Hodgman polygon clipping algorithm
+    let mut clipped = points.to_vec();
     
-    // Simple clipping - just keep points inside the bbox
-    // and add intersection points with the bbox edges
-    for i in 0..points.len() {
-        let p1 = points[i];
-        let p2 = points[(i + 1) % points.len()];
-        
-        // Add p1 if inside
-        if p1.x >= min_x && p1.x <= max_x && p1.y >= min_y && p1.y <= max_y {
-            clipped.push(p1);
-        }
-        
-        // Check if line segment crosses any bbox edge and add intersection points
-        // Left edge
-        if (p1.x < min_x && p2.x >= min_x) || (p1.x >= min_x && p2.x < min_x) {
-            let t = (min_x - p1.x) / (p2.x - p1.x);
-            if t >= 0.0 && t <= 1.0 {
-                let y = p1.y + t * (p2.y - p1.y);
-                if y >= min_y && y <= max_y {
-                    clipped.push(Vector2 { x: min_x, y });
-                }
-            }
-        }
-        
-        // Right edge
-        if (p1.x < max_x && p2.x >= max_x) || (p1.x >= max_x && p2.x < max_x) {
-            let t = (max_x - p1.x) / (p2.x - p1.x);
-            if t >= 0.0 && t <= 1.0 {
-                let y = p1.y + t * (p2.y - p1.y);
-                if y >= min_y && y <= max_y {
-                    clipped.push(Vector2 { x: max_x, y });
-                }
-            }
-        }
-        
-        // Bottom edge
-        if (p1.y < min_y && p2.y >= min_y) || (p1.y >= min_y && p2.y < min_y) {
-            let t = (min_y - p1.y) / (p2.y - p1.y);
-            if t >= 0.0 && t <= 1.0 {
-                let x = p1.x + t * (p2.x - p1.x);
-                if x >= min_x && x <= max_x {
-                    clipped.push(Vector2 { x, y: min_y });
-                }
-            }
-        }
-        
-        // Top edge
-        if (p1.y < max_y && p2.y >= max_y) || (p1.y >= max_y && p2.y < max_y) {
-            let t = (max_y - p1.y) / (p2.y - p1.y);
-            if t >= 0.0 && t <= 1.0 {
-                let x = p1.x + t * (p2.x - p1.x);
-                if x >= min_x && x <= max_x {
-                    clipped.push(Vector2 { x, y: max_y });
-                }
-            }
-        }
-    }
+    // Clip against each edge of the bounding box
+    let clip_edges = [
+        (min_x, 0), // Left edge
+        (max_x, 1), // Right edge  
+        (min_y, 2), // Bottom edge
+        (max_y, 3), // Top edge
+    ];
     
-    // Special handling for empty results or cases with just 1-2 points
-    if clipped.len() < 3 {
-        // Check if the polygon overlaps the bbox corners
-        let corner_points = vec![
-            Vector2 { x: min_x, y: min_y },
-            Vector2 { x: max_x, y: min_y },
-            Vector2 { x: max_x, y: max_y },
-            Vector2 { x: min_x, y: max_y }
-        ];
+    for (clip_value, edge_type) in clip_edges {
+        if clipped.is_empty() {
+            break;
+        }
         
-        // Add bbox corners that are inside the original polygon
-        // This handles the case where the polygon completely contains the bbox
-        for corner in &corner_points {
-            let mut inside = false;
-            let mut j = points.len() - 1;
+        let mut new_clipped = Vec::new();
+        
+        if !clipped.is_empty() {
+            let mut prev = clipped[clipped.len() - 1];
             
-            for i in 0..points.len() {
-                let pi = points[i];
-                let pj = points[j];
+            for &curr in &clipped {
+                let prev_inside = match edge_type {
+                    0 => prev.x >= clip_value, // Left
+                    1 => prev.x <= clip_value, // Right
+                    2 => prev.y >= clip_value, // Bottom
+                    3 => prev.y <= clip_value, // Top
+                    _ => false,
+                };
                 
-                if ((pi.y > corner.y) != (pj.y > corner.y)) &&
-                   (corner.x < (pj.x - pi.x) * (corner.y - pi.y) / (pj.y - pi.y) + pi.x) {
-                    inside = !inside;
+                let curr_inside = match edge_type {
+                    0 => curr.x >= clip_value, // Left
+                    1 => curr.x <= clip_value, // Right
+                    2 => curr.y >= clip_value, // Bottom
+                    3 => curr.y <= clip_value, // Top
+                    _ => false,
+                };
+                
+                if curr_inside {
+                    if !prev_inside {
+                        // Entering the clipping area - add intersection point
+                        if let Some(intersection) = compute_intersection(prev, curr, clip_value, edge_type) {
+                            new_clipped.push(intersection);
+                        }
+                    }
+                    // Add current point
+                    new_clipped.push(curr);
+                } else if prev_inside {
+                    // Leaving the clipping area - add intersection point
+                    if let Some(intersection) = compute_intersection(prev, curr, clip_value, edge_type) {
+                        new_clipped.push(intersection);
+                    }
                 }
                 
-                j = i;
-            }
-            
-            if inside {
-                clipped.push(*corner);
+                prev = curr;
             }
         }
         
-        // If we've added corners, add the first corner again to close the polygon
-        if clipped.len() >= 3 && clipped.len() <= 4 {
-            clipped.push(clipped[0]);
-        }
+        clipped = new_clipped;
     }
     
     // Clean up the clipped points and ensure they form a valid polygon
     let cleaned = clean_polygon_footprint(&clipped);
     
-    // If we still don't have a valid polygon after all this, try to return a minimal
-    // valid polygon that represents the clipped area
+    // If we still don't have enough points, but the original polygon intersects the bbox,
+    // create a minimal representation
     if cleaned.len() < 3 && clipped.len() > 0 {
-        // Create a minimal valid polygon from the points we have
-        let mut fallback = clipped.clone();
+        // Check if the bbox is completely inside the polygon
+        let bbox_corners = vec![
+            Vector2 { x: min_x, y: min_y },
+            Vector2 { x: max_x, y: min_y },
+            Vector2 { x: max_x, y: max_y },
+            Vector2 { x: min_x, y: max_y },
+        ];
         
-        // Add necessary points to form a triangle at minimum
-        if fallback.len() == 1 {
-            // If we have just one point, add two more to make a small triangle
-            let pt = fallback[0];
-            let epsilon = 0.01; // Small offset
-            fallback.push(Vector2 { x: pt.x + epsilon, y: pt.y });
-            fallback.push(Vector2 { x: pt.x, y: pt.y + epsilon });
-        } else if fallback.len() == 2 {
-            // If we have two points, add a third to make a triangle
-            let p1 = fallback[0];
-            let p2 = fallback[1];
-            let mid_x = (p1.x + p2.x) / 2.0;
-            let mid_y = (p1.y + p2.y) / 2.0;
-            let dx = p2.x - p1.x;
-            let dy = p2.y - p1.y;
-            // Create a point perpendicular to the line
-            fallback.push(Vector2 { 
-                x: mid_x - dy * 0.01, 
-                y: mid_y + dx * 0.01 
-            });
+        // Use ray casting to check if bbox corners are inside the polygon
+        let mut inside_corners = Vec::new();
+        for corner in &bbox_corners {
+            if is_point_inside_polygon(*corner, points) {
+                inside_corners.push(*corner);
+            }
         }
         
-        return fallback;
+        if inside_corners.len() >= 3 {
+            // The bbox is (mostly) inside the polygon
+            return inside_corners;
+        }
+        
+        // Fallback: create a minimal triangle if we have any valid points
+        if clipped.len() >= 1 {
+            let mut fallback = clipped.clone();
+            
+            // Ensure we have at least 3 points for a valid polygon
+            while fallback.len() < 3 && fallback.len() > 0 {
+                let last_point = fallback[fallback.len() - 1];
+                let epsilon = 0.001;
+                fallback.push(Vector2 {
+                    x: (last_point.x + epsilon).clamp(min_x, max_x),
+                    y: (last_point.y + epsilon).clamp(min_y, max_y),
+                });
+            }
+            
+            return clean_polygon_footprint(&fallback);
+        }
     }
     
     cleaned
 }
 
+// Helper function to compute intersection point for Sutherland-Hodgman clipping
+fn compute_intersection(p1: Vector2, p2: Vector2, clip_value: f64, edge_type: i32) -> Option<Vector2> {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    
+    match edge_type {
+        0 | 1 => { // Left or Right edge (vertical)
+            if dx.abs() < 1e-10 {
+                return None; // Line is parallel to clip edge
+            }
+            let t = (clip_value - p1.x) / dx;
+            if t >= 0.0 && t <= 1.0 {
+                Some(Vector2 {
+                    x: clip_value,
+                    y: p1.y + t * dy,
+                })
+            } else {
+                None
+            }
+        }
+        2 | 3 => { // Bottom or Top edge (horizontal)
+            if dy.abs() < 1e-10 {
+                return None; // Line is parallel to clip edge
+            }
+            let t = (clip_value - p1.y) / dy;
+            if t >= 0.0 && t <= 1.0 {
+                Some(Vector2 {
+                    x: p1.x + t * dx,
+                    y: clip_value,
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+// Helper function to check if a point is inside a polygon using ray casting
+fn is_point_inside_polygon(point: Vector2, polygon: &[Vector2]) -> bool {
+    let mut inside = false;
+    let n = polygon.len();
+    
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let pi = polygon[i];
+        let pj = polygon[j];
+        
+        if ((pi.y > point.y) != (pj.y > point.y)) &&
+           (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x) {
+            inside = !inside;
+        }
+    }
+    
+    inside
+}
 
 // REVISED: Improved implementation of an extruded shape using the extrude_geometry function
 fn create_extruded_shape(
@@ -1050,6 +1059,13 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     for (i, polygon_data) in input.polygons.iter().enumerate() {
         if i % 1000 == 0 && i > 0 {
             console_log!("Processed {} out of {} polygons", i, input.polygons.len());
+        }
+        
+        // First, check if this polygon intersects with the bbox at all
+        // This ensures any feature with at least one vertex inside the bbox is processed
+        if !polygon_intersects_bbox(&polygon_data.geometry, &input.bbox) {
+            // Skip polygons that don't intersect with the bbox
+            continue;
         }
         
         // Debug: log the first few polygon properties to see what's available

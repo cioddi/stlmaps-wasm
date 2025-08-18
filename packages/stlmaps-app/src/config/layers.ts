@@ -3,20 +3,12 @@ import { VtDataSet } from "../types/VtDataSet";
 
 export const vtGeometries: VtDataSet[] = [
   {
-    sourceLayer: "water",
-    color: new THREE.Color(0x76bcff), // Lighter blue color for water
-    extrusionDepth: 1, // Thin extrusion for water
-    zOffset: -0.5,
-    enabled: false,
-    csgClipping: false,
-  },
-  {
     sourceLayer: "landcover",
     color: new THREE.Color(0x74e010), // Green color for landuse
     extrusionDepth: 1.2, // Thin extrusion for landuse
     zOffset: -0.3,
     bufferSize: 2,
-    enabled: false,
+    enabled: true,
     alignVerticesToTerrain: false,
     csgClipping: false,
   },
@@ -26,7 +18,7 @@ export const vtGeometries: VtDataSet[] = [
     extrusionDepth: 0.8, // Thin extrusion for landuse
     zOffset: -0.3,
     bufferSize: 2,
-    enabled: false,
+    enabled: true,
     alignVerticesToTerrain: false,
     csgClipping: false,
   },
@@ -36,7 +28,7 @@ export const vtGeometries: VtDataSet[] = [
     extrusionDepth: 0.8, // Thin extrusion for landuse
     zOffset: -0.4,
     bufferSize: 2,
-    enabled: false,
+    enabled: true,
     alignVerticesToTerrain: false,
     // Filter to include green areas
     filter: ["in", "class", "commercial", "residential"],
@@ -54,16 +46,24 @@ export const vtGeometries: VtDataSet[] = [
     filter: [
       "in",
       "class",
-    //   "motorway",
+      "motorway",
       "trunk",
       "primary",
       "secondary",
       "tertiary",
       "service",
-    //   "minor",
-    //   "track",
-    //   "raceway",
+      "minor",
+      "track",
+      "raceway",
     ],
+    csgClipping: false,
+  },
+  {
+    sourceLayer: "water",
+    color: new THREE.Color(0x76bcff), // Lighter blue color for water
+    extrusionDepth: 1, // Thin extrusion for water
+    zOffset: -0.5,
+    enabled: true,
     csgClipping: false,
   },
   {
