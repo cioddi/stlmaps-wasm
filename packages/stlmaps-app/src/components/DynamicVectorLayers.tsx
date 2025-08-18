@@ -25,13 +25,12 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
     const layers: any[] = [];
 
     for (const layerDep of layerDeps) {
-      if (!layerDep.enabled) {
-        continue;
-      }
-
       // Use cached hex color from layerDeps
       const hexColor = layerDep.colorHex ? `#${layerDep.colorHex}` : "#ff0000";
       const filter = layerDep.filter ? JSON.parse(layerDep.filter) : undefined;
+      
+      // Set visibility based on enabled state
+      const visibility = layerDep.enabled ? "visible" : "none";
 
       // Create layer configuration based on source layer type
       if (layerDep.sourceLayer === "transportation") {
@@ -41,7 +40,9 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
           id: `${layerDep.sourceLayer}-line`,
           type: "line",
           "source-layer": layerDep.sourceLayer,
-          layout: {},
+          layout: {
+            visibility: visibility,
+          },
           paint: {
             "line-color": hexColor,
             "line-width": 2,
@@ -59,7 +60,9 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
           id: `${layerDep.sourceLayer}-fill`,
           type: "fill",
           "source-layer": layerDep.sourceLayer,
-          layout: {},
+          layout: {
+            visibility: visibility,
+          },
           paint: {
             "fill-color": hexColor,
             "fill-opacity": 1.0, // Full opacity
@@ -79,7 +82,9 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
           id: `${layerDep.sourceLayer}-fill`,
           type: "fill",
           "source-layer": layerDep.sourceLayer,
-          layout: {},
+          layout: {
+            visibility: visibility,
+          },
           paint: {
             "fill-color": hexColor,
             "fill-opacity": 0.6,

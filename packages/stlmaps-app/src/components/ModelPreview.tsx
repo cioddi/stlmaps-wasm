@@ -44,137 +44,230 @@ interface SceneData {
 }
 
 /**
+ * Checks battery status synchronously if available
+ */
+const getBatteryPenalty = (): number => {
+  try {
+    // @ts-expect-error - Some browsers expose battery directly (deprecated but still used)
+    const battery = navigator.battery;
+    if (battery && battery.charging === false && battery.level < 0.3) {
+      return -1; // Small penalty for low battery
+    }
+  } catch {
+    // Ignore errors - battery API not available or failed
+  }
+  return 0;
+};
+
+/**
  * Detects device capabilities and recommends the appropriate rendering mode
+ * Improved algorithm that better distinguishes between capable and less capable devices
  */
 const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   console.log("Detecting device capabilities for optimal rendering mode");
   
-  // Check for mobile devices first - they generally need performance mode
-  const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  // Device classification
+  const userAgent = navigator.userAgent.toLowerCase();
+  const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent);
+  const isTablet = /ipad|android(?!.*mobile)/i.test(navigator.userAgent);
+  const isDesktop = !isMobile && !isTablet;
   
-  // Get device memory (available in Chrome)
+  // Get device specs
   // @ts-expect-error - navigator.deviceMemory is not in TypeScript defs
-  const deviceMemory = navigator.deviceMemory || 4; // Default to 4GB if not available
+  const deviceMemory = navigator.deviceMemory || (isMobile ? 3 : 8); // Better defaults based on device type
+  const cpuCores = navigator.hardwareConcurrency || (isMobile ? 4 : 8);
   
-  // Check for hardware concurrency (CPU cores)
-  const cpuCores = navigator.hardwareConcurrency || 4; // Default to 4 cores
-  
-  // Check screen resolution
+  // Screen metrics
   const pixelCount = window.screen.width * window.screen.height;
-  const isHighResolution = pixelCount > (1920 * 1080);
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  const effectivePixels = pixelCount * devicePixelRatio;
   
-  // Try to detect GPU performance using canvas
-  let gpuPowerScore = 0;
+  console.log(`Device info: ${isMobile ? 'Mobile' : isTablet ? 'Tablet' : 'Desktop'}, RAM: ${deviceMemory}GB, Cores: ${cpuCores}, Resolution: ${window.screen.width}x${window.screen.height}, DPR: ${devicePixelRatio}`);
+  
+  // GPU Performance Assessment
+  let gpuCapabilityScore = 0;
+  let gpuRenderer = '';
+  
   try {
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
     
     if (gl) {
+      // Get GPU renderer info
       // @ts-expect-error - This property exists on WebGL contexts
       const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
       if (debugInfo) {
         // @ts-expect-error - This constant exists when the extension is available
-        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+        gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
+        console.log("Detected GPU:", gpuRenderer);
         
-        // Check for keywords indicating powerful GPUs
-        const knownHighPerformanceGPUs = [
-          'NVIDIA', 'RTX', 'GTX', 'Quadro',
-          'AMD', 'Radeon', 'FirePro',
-          'Intel Iris', 'Apple M1', 'Apple M2', 'Apple M3'
+        // High-end desktop GPUs
+        const highEndDesktopGPUs = [
+          // NVIDIA
+          'rtx 4090', 'rtx 4080', 'rtx 4070', 'rtx 4060',
+          'rtx 3090', 'rtx 3080', 'rtx 3070', 'rtx 3060',
+          'rtx 2080', 'rtx 2070', 'rtx 2060',
+          'gtx 1080', 'gtx 1070', 'gtx 1660',
+          // AMD
+          'rx 7900', 'rx 7800', 'rx 7700', 'rx 7600',
+          'rx 6900', 'rx 6800', 'rx 6700', 'rx 6600',
+          'rx 5700', 'rx 5600', 'rx 580', 'rx 570'
         ];
         
-        for (const gpu of knownHighPerformanceGPUs) {
-          if (renderer && renderer.indexOf(gpu) !== -1) {
-            gpuPowerScore += 1;
-          }
-        }
+        // Mid-range desktop GPUs
+        const midRangeDesktopGPUs = [
+          'gtx 1650', 'gtx 1050', 'gtx 960', 'gtx 950',
+          'rx 560', 'rx 550', 'intel iris xe', 'intel arc'
+        ];
         
-        // Mobile GPUs typically have 'Mali', 'Adreno', 'PowerVR' in their name
-        const mobileGPUs = ['Mali', 'Adreno', 'PowerVR', 'Apple GPU'];
-        for (const gpu of mobileGPUs) {
-          if (renderer && renderer.indexOf(gpu) !== -1) {
-            gpuPowerScore -= 1; // Reduce score for mobile GPUs
-          }
-        }
+        // Modern mobile GPUs (capable of quality rendering)
+        const capableMobileGPUs = [
+          // Apple
+          'apple m3', 'apple m2', 'apple m1',
+          'apple a17', 'apple a16', 'apple a15', 'apple a14',
+          // Qualcomm Adreno (newer generations)
+          'adreno 740', 'adreno 730', 'adreno 725', 'adreno 720',
+          'adreno 660', 'adreno 650', 'adreno 640', 'adreno 630',
+          // ARM Mali (newer generations)
+          'mali-g720', 'mali-g715', 'mali-g710', 'mali-g78', 'mali-g77',
+          'mali-g76', 'mali-g72',
+          // Samsung Xclipse
+          'xclipse 940', 'xclipse 920'
+        ];
         
-        console.log("Detected GPU:", renderer);
+        // Lower-end mobile GPUs
+        const basicMobileGPUs = [
+          'adreno 610', 'adreno 530', 'adreno 520', 'adreno 510',
+          'mali-g57', 'mali-g52', 'mali-g51', 'mali-g31',
+          'powervr'
+        ];
+        
+        const rendererLower = gpuRenderer.toLowerCase();
+        
+        // Score based on GPU tier
+        if (highEndDesktopGPUs.some(gpu => rendererLower.includes(gpu))) {
+          gpuCapabilityScore = 8; // Excellent
+        } else if (midRangeDesktopGPUs.some(gpu => rendererLower.includes(gpu))) {
+          gpuCapabilityScore = 6; // Good
+        } else if (capableMobileGPUs.some(gpu => rendererLower.includes(gpu))) {
+          gpuCapabilityScore = 5; // Capable mobile
+        } else if (basicMobileGPUs.some(gpu => rendererLower.includes(gpu))) {
+          gpuCapabilityScore = 2; // Basic mobile
+        } else if (rendererLower.includes('intel') && !rendererLower.includes('iris')) {
+          gpuCapabilityScore = 3; // Integrated Intel (older)
+        } else {
+          gpuCapabilityScore = 4; // Unknown/generic
+        }
       }
       
-      // Check supported extensions as another indicator
+      // WebGL capabilities test
       const extensions = gl.getSupportedExtensions() || [];
-      const advancedExtensions = [
+      const modernExtensions = [
         'EXT_color_buffer_float',
         'OES_texture_float',
         'WEBGL_color_buffer_float',
         'WEBGL_compressed_texture_s3tc',
-        'WEBGL_depth_texture'
+        'WEBGL_depth_texture',
+        'EXT_texture_filter_anisotropic'
       ];
       
-      for (const ext of advancedExtensions) {
-        if (extensions.includes(ext)) {
-          gpuPowerScore += 0.5;
-        }
-      }
+      const supportedModernExtensions = modernExtensions.filter(ext => extensions.includes(ext));
+      const extensionScore = Math.min(supportedModernExtensions.length * 0.3, 2);
+      gpuCapabilityScore += extensionScore;
       
-      // Test draw call performance with a basic benchmark
+      // Performance benchmark (quick test)
       const startTime = performance.now();
-      let testIterations = 0;
-      const testDrawCalls = () => {
+      let drawCalls = 0;
+      while (performance.now() - startTime < 16) { // 16ms = one frame at 60fps
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.flush();
-        testIterations++;
-        
-        if (performance.now() - startTime < 50) { // 50ms test
-          testDrawCalls();
-        }
-      };
-      testDrawCalls();
-      
-      // Higher iterations = better performance
-      if (testIterations > 1000) {
-        gpuPowerScore += 2;
-      } else if (testIterations > 500) {
-        gpuPowerScore += 1;
+        drawCalls++;
       }
+      
+      if (drawCalls > 200) {
+        gpuCapabilityScore += 1;
+      } else if (drawCalls > 100) {
+        gpuCapabilityScore += 0.5;
+      }
+      
+      console.log(`GPU benchmark: ${drawCalls} draw calls in 16ms, extensions: ${supportedModernExtensions.length}/${modernExtensions.length}`);
     }
   } catch (e) {
     console.warn("Error during GPU capability detection:", e);
+    gpuCapabilityScore = isMobile ? 3 : 5; // Conservative fallback
   }
-
-  // Combine factors to make decision
-  let useQualityMode = true;
   
-  // Score-based decision
+  // Calculate total capability score
   let totalScore = 0;
   
-  // Device factors
-  totalScore -= isMobileDevice ? 3 : 2;
-  totalScore += Math.min(deviceMemory / 2, 4); // Up to 4 points for 8GB+ RAM
-  totalScore += Math.min(cpuCores / 2, 4);     // Up to 4 points for 8+ cores
-  totalScore -= isHighResolution ? 1 : 0;      // High resolution is demanding
-  totalScore += gpuPowerScore;                 // Add GPU power score
+  // Base scores by device type
+  if (isDesktop) {
+    totalScore += 3; // Desktop base advantage
+  } else if (isTablet) {
+    totalScore += 1; // Tablets are middle ground
+  }
+  // Mobile gets no base bonus/penalty - judge by specs
   
-  // Check for battery status if available
-  // @ts-expect-error - navigator.getBattery is not in all TypeScript defs
-  if (navigator.getBattery) {
-    // @ts-expect-error - navigator.getBattery is not in all TypeScript defs
-    navigator.getBattery().then(battery => {
-      if (battery.charging === false && battery.level < 0.5) {
-        // If on battery and below 50%, prefer performance mode
-        totalScore -= 2;
-      }
-    }).catch(() => {
-      // Ignore errors from battery API
-    });
+  // Memory score (more nuanced)
+  if (deviceMemory >= 8) {
+    totalScore += 3;
+  } else if (deviceMemory >= 6) {
+    totalScore += 2;
+  } else if (deviceMemory >= 4) {
+    totalScore += 1;
+  }
+  // Below 4GB gets no bonus
+  
+  // CPU score
+  if (cpuCores >= 8) {
+    totalScore += 2;
+  } else if (cpuCores >= 6) {
+    totalScore += 1;
+  } else if (cpuCores >= 4) {
+    totalScore += 0.5;
   }
   
-  console.log("Device capability score:", totalScore);
+  // GPU score (most important factor)
+  totalScore += gpuCapabilityScore;
   
-  // Set threshold for quality mode
-  useQualityMode = totalScore >= 2;
+  // Resolution penalty (only for very high resolutions)
+  if (effectivePixels > 4000000) { // ~4K territory
+    totalScore -= 1;
+  } else if (effectivePixels > 8000000) { // 4K+
+    totalScore -= 2;
+  }
+  
+  // Battery status penalty (if available)
+  const batteryPenalty = getBatteryPenalty();
+  totalScore += batteryPenalty;
+  
+  // Device age estimation (very rough)
+  const currentYear = new Date().getFullYear();
+  if (userAgent.includes('chrome/')) {
+    const chromeVersion = parseInt(userAgent.match(/chrome\/(\d+)/)?.[1] || '0');
+    const estimatedAge = Math.max(0, currentYear - 2008 - Math.floor(chromeVersion / 6));
+    if (estimatedAge > 8) { // Very old device
+      totalScore -= 2;
+    } else if (estimatedAge > 5) {
+      totalScore -= 1;
+    }
+  }
+  
+  console.log(`Capability scores - Base: ${isDesktop ? 3 : isTablet ? 1 : 0}, Memory: ${deviceMemory >= 8 ? 3 : deviceMemory >= 6 ? 2 : deviceMemory >= 4 ? 1 : 0}, CPU: ${cpuCores >= 8 ? 2 : cpuCores >= 6 ? 1 : cpuCores >= 4 ? 0.5 : 0}, GPU: ${gpuCapabilityScore}, Battery: ${batteryPenalty}, Total: ${totalScore}`);
+  
+  // Special rule: Non-mobile devices with limited specs always get performance mode
+  // This ensures older desktops/laptops with 4 cores and ≤8GB RAM don't get quality mode
+  if (!isMobile && cpuCores <= 4 && deviceMemory <= 8) {
+    console.log("Forcing performance mode for non-mobile device with limited specs (≤4 cores, ≤8GB RAM)");
+    return 'performance';
+  }
+  
+  // Decision threshold - adjusted for better balance
+  const qualityThreshold = isMobile ? 6 : 7; // Slightly higher bar for desktop
+  const useQualityMode = totalScore >= qualityThreshold;
   
   const recommendedMode = useQualityMode ? 'quality' : 'performance';
-  console.log("Recommended rendering mode:", recommendedMode);
+  console.log(`Recommended rendering mode: ${recommendedMode} (score: ${totalScore}/${qualityThreshold})`);
   
   return recommendedMode;
 };
