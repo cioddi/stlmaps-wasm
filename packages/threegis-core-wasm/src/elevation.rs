@@ -77,7 +77,6 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
     // Using Mapbox Terrain-RGB v2 format (WebP format)
     let url = format!("https://wms.wheregroup.com/dem_tileserver/raster_dem/{}/{}/{}.webp", z, x, y);
     
-    console_log!("Fetching WebP elevation data from: {}", url);
     
     // Call the JavaScript helper to fetch the tile
     let promise_result = fetch(&url);
@@ -115,7 +114,6 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
             .map(|b| format!("{:02x}", b))
             .collect::<Vec<String>>()
             .join(" ");
-        console_log!("First 20 bytes of pixel data: {}", bytes_str);
     }
     
     // Create our TileData struct
@@ -145,7 +143,6 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
 // The main elevation processing function that uses cached tiles when available
 #[wasm_bindgen]
 pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, JsValue> {
-    console_log!("WASM: Processing elevation data with cached tiles...");
     
     // Parse the input JSON
     let input: ElevationProcessingInput = serde_json::from_str(input_json)
@@ -184,11 +181,9 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
                 // We found the tile in cache
                 tile_data_array.push(tile_data.clone());
                 cache_hits += 1;
-                console_log!("Using cached tile {}/{}/{}", tile_request.z, tile_request.x, tile_request.y);
             } else {
                 // Not in cache, add to missing tiles list
                 cache_misses += 1;
-                console_log!("Missing tile {}/{}/{} in cache", tile_request.z, tile_request.x, tile_request.y);
                 missing_tiles.push((tile_request.z, tile_request.x, tile_request.y));
             }
         }
@@ -196,16 +191,13 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     
     // Second pass: Fetch missing tiles
     if !missing_tiles.is_empty() {
-        console_log!("Fetching {} missing tiles...", missing_tiles.len());
         
         for (z, x, y) in missing_tiles {
             match fetch_raster_tile(x, y, z).await {
                 Ok(tile_data) => {
-                    console_log!("Successfully fetched and cached tile {}/{}/{}", z, x, y);
                     tile_data_array.push(tile_data);
                 },
                 Err(e) => {
-                    console_log!("Failed to fetch tile {}/{}/{}: {:?}", z, x, y, e);
                     // Continue with available tiles
                 }
             }
@@ -214,7 +206,6 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     
     // Replace previous per-tile pixel loop with grid-based accumulation
 	
-	console_log!("Starting elevation processing with {} tiles", tile_data_array.len());
 	
 	// Calculate overall min/max elevation from all tiles (preprocessing)
 	let mut min_elevation_found = f64::INFINITY;
@@ -234,7 +225,6 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
 			}
 		}
 	}
-	console_log!("Elevation range: {} - {}", min_elevation_found, max_elevation_found);
 	
 	// Initialize accumulation grids matching the output grid size
 	let grid_width = grid_size.width as usize;
@@ -336,39 +326,28 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         let state = ModuleState::global();
         let mut state = state.lock().unwrap();
         
-        console_log!("📦 [Cache] Preparing to store elevation data...");
-        console_log!("📦 [Cache] Using bbox_key: {}", bbox_key);
-        console_log!("📦 [Cache] Grid dimensions: {}x{}", grid_width, grid_height);
         
         // Store the processed result in cache using the bbox key
         state.store_elevation_grid(bbox_key.clone(), elevation_grid.clone());
-        console_log!("📦 [Cache] Stored elevation grid with bbox_key");
         
         // Debug current cache state
-        console_log!("📦 [Cache] Current elevation cache size: {} entries", state.elevation_grids.len());
         
         // If a bbox_key is provided, store the elevation grid with that ID directly
         // This ensures the terrain generation can find it using just the bbox_key
         if let Some(ref bbox_key) = input.bbox_key {
-            console_log!("📦 [Cache] Bbox key provided: '{}'", bbox_key);
             
             // Store using the bbox_key directly as the key
             state.elevation_grids.insert(bbox_key.clone(), elevation_grid.clone());
-            console_log!("📦 [Cache] ✅ Stored elevation grid with direct bbox_key: '{}'", bbox_key);
             
             // Also store with a prefixed version of the bbox_key for redundancy
             let alt_key = format!("bbox_{}", bbox_key);
             state.elevation_grids.insert(alt_key.clone(), elevation_grid.clone());
-            console_log!("📦 [Cache] ✅ Stored elevation grid with alternate key: '{}'", alt_key);
             
             // Create a mapping for debugging
-            console_log!("📦 [Cache] ✅ Using standardized bbox_key format '{}'", bbox_key);
             
             // List all keys in cache for debugging 
             let keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
-            console_log!("📦 [Cache] All cache keys after storage: {:?}", keys);
         } else {
-            console_log!("📦 [Cache] ⚠️ No bbox_key provided, elevation data only stored with bbox_key");
         }
     }
     
@@ -392,7 +371,6 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
 		cache_hit_rate: hit_rate,
 	};
 	
-	console_log!("Finished elevation processing: processed_min={}, processed_max={}", processed_min, processed_max);
 	
 	Ok(to_value(&result)?)
 }

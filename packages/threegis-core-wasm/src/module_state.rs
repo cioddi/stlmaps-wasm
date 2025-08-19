@@ -192,37 +192,37 @@ impl ModuleState {
     pub fn get_tile_data(&self, key: &str) -> Option<TileData> {
         // For now, just return None to make the compiler happy
         // In a real implementation, this would retrieve the tile from a HashMap
-        console_log!("Looking for tile with key: {}", key);
+        
         None
     }
     
     // Set tile data in cache
     pub fn set_tile_data(&mut self, key: &str, _tile_data: TileData) {
         // In a real implementation, this would store the tile in a HashMap
-        console_log!("Storing tile with key: {}", key);
+        
     }
     
     // Get a cached parsed vector tile by cache key
     pub fn get_parsed_mvt_tile(&self, key: &str) -> Option<ParsedMvtTile> {
-        console_log!("🔍 CACHE: Checking parsed tile cache for key: {}", key);
+        
         if let Some(tile) = self.mvt_parsed_tiles.get(key) {
-            console_log!("✅ CACHE HIT: Parsed tile cache for key: {}", key);
+            
             Some(tile.clone())
         } else {
-            console_log!("❌ CACHE MISS: Parsed tile cache for key: {}", key);
+            
             None
         }
     }
 
     // Store a parsed vector tile in cache by cache key
     pub fn set_parsed_mvt_tile(&mut self, key: &str, tile: ParsedMvtTile) {
-        console_log!("🔒 CACHE STORE: Storing parsed tile for key: {}", key);
+        
         self.mvt_parsed_tiles.insert(key.to_string(), tile);
     }
 
     // Store fetched vector tiles under bbox_key
     pub fn store_vector_tiles(&mut self, bbox_key: &str, results: &[crate::vectortile::VectorTileResult]) {
-        console_log!("🔒 CACHE STORE: Storing {} tiles under key {}", results.len(), bbox_key);
+        
         let mut tile_list = Vec::with_capacity(results.len());
         for r in results {
             let key = format!("{}/{}/{}", r.tile.z, r.tile.x, r.tile.y);
@@ -247,12 +247,12 @@ impl ModuleState {
 
     // Retrieve cached vector tiles by bbox_key
     pub fn get_vector_tiles(&self, bbox_key: &str) -> Option<&Vec<TileData>> {
-        console_log!("🔍 CACHE: Looking for vector tiles under key {}", bbox_key);
+        
         if let Some(tiles) = self.bbox_vector_tiles.get(bbox_key) {
-            console_log!("✅ CACHE HIT: Found {} tiles under key {}", tiles.len(), bbox_key);
+            
             Some(tiles)
         } else {
-            console_log!("❌ CACHE MISS: No tiles under key {}", bbox_key);
+            
             None
         }
     }
@@ -260,7 +260,7 @@ impl ModuleState {
     // Get elevation data for a process ID
     pub fn get_elevation_data(&self, bbox_key: &str) -> Option<ElevationData> {
         // In a real implementation, this would retrieve the elevation data from a HashMap
-        console_log!("Looking for elevation data with bbox_key: {}", bbox_key);
+        
         
         // Return dummy elevation data for testing
         Some(ElevationData {
@@ -277,7 +277,7 @@ impl ModuleState {
     // Get cached geometry data for a specific layer and bbox key
     pub fn get_cached_geometry_data(&self, bbox_key: &str, source_layer: &str) -> Option<Vec<crate::polygon_geometry::GeometryData>> {
         // Get data using the proper bbox_key format used throughout the app
-        console_log!("Looking for cached geometry data for layer: {} with bbox_key: {}", source_layer, bbox_key);
+        
         
         // Try to get vector tiles for this bbox_key - using the same format as extract_features_from_vector_tiles
         if let Some(vector_tiles) = self.get_vector_tiles(bbox_key) {
@@ -316,7 +316,7 @@ impl ModuleState {
             }
             
             if !features.is_empty() {
-                console_log!("Found {} cached features for layer: {}", features.len(), source_layer);
+                
                 return Some(features);
             }
         }
@@ -328,7 +328,7 @@ impl ModuleState {
     pub fn add_cached_object(&mut self, key: &str, _value: JsValue) {
         // In a real implementation, you would store this in a HashMap<String, JsValue>
         // For now, we'll just log it since we're not implementing the full cache
-        console_log!("Caching object with key: {}", key);
+        
     }
     
     // Get a cached object
@@ -344,7 +344,7 @@ impl ModuleState {
             .entry(bbox_key.to_string())
             .or_insert_with(HashMap::new);
         entry.insert(inner_key.to_string(), json);
-        console_log!("Stored feature data for bbox_key: {} inner_key: {}", bbox_key, inner_key);
+        
     }
     
     /// Retrieve stored feature data by bbox_key and inner_key
@@ -358,7 +358,7 @@ impl ModuleState {
     /// Clear all feature data entries for a given bbox_key
     pub fn clear_feature_data_for_bbox(&mut self, bbox_key: &str) {
         if self.feature_data_cache.remove(bbox_key).is_some() {
-            console_log!("Cleared feature data cache for bbox_key: {}", bbox_key);
+            
         }
     }
     

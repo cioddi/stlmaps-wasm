@@ -9,7 +9,7 @@ export const vtGeometries: VtDataSet[] = [
     zOffset: -0.3,
     bufferSize: 2,
     enabled: true,
-    alignVerticesToTerrain: false,
+    alignVerticesToTerrain: true,
     csgClipping: false,
   },
   {

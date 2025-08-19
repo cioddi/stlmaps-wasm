@@ -24,67 +24,6 @@ struct Vector2 {
     y: f64,
 }
 
-// Struct to represent a 3D point
-#[derive(Debug, Clone, Copy)]
-struct Vector3 {
-    x: f64,
-    y: f64, 
-    z: f64,
-}
-
-// Struct to represent a 3D box for clipping
-#[derive(Debug, Clone)]
-struct Box3 {
-    min: Vector3,
-    max: Vector3,
-}
-
-impl Box3 {
-    fn new() -> Self {
-        Box3 {
-            min: Vector3 { x: f64::INFINITY, y: f64::INFINITY, z: f64::INFINITY },
-            max: Vector3 { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY, z: f64::NEG_INFINITY },
-        }
-    }
-
-    // Set box from center position and size
-    fn set_from_center_and_size(&mut self, center: Vector3, size: Vector3) {
-        let half_size = Vector3 {
-            x: size.x * 0.5,
-            y: size.y * 0.5,
-            z: size.z * 0.5,
-        };
-
-        self.min = Vector3 {
-            x: center.x - half_size.x,
-            y: center.y - half_size.y,
-            z: center.z - half_size.z,
-        };
-
-        self.max = Vector3 {
-            x: center.x + half_size.x,
-            y: center.y + half_size.y,
-            z: center.z + half_size.z,
-        };
-    }
-
-    // Check if this box intersects with another box
-    fn intersects_box(&self, other: &Box3) -> bool {
-        // If any dimension doesn't overlap, they don't intersect
-        !(other.max.x < self.min.x || other.min.x > self.max.x ||
-          other.max.y < self.min.y || other.min.y > self.max.y ||
-          other.max.z < self.min.z || other.min.z > self.max.z)
-    }
-}
-
-// Struct to represent a color
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Color {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-}
-
 // Deserializable struct matching GeometryData from TypeScript
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometryData {
@@ -117,7 +56,6 @@ pub struct VtDataSet {
     pub zOffset: Option<f64>,
     pub alignVerticesToTerrain: Option<bool>,
     pub filter: Option<serde_json::Value>,
-    pub geometryDebugMode: Option<bool>, // Skip processing like linestring buffering and polygon extrusion
 }
 
 // Default color function for VtDataSet
@@ -304,24 +242,6 @@ fn calculate_adaptive_scale_factor(
     scale_factor.clamp(0.05, 5.0)
 }
 
-// Parse a color string in hex format (#RRGGBB)
-fn parse_color(color_str: &str) -> Color {
-    if color_str.starts_with('#') && color_str.len() >= 7 {
-        let r = u8::from_str_radix(&color_str[1..3], 16).unwrap_or(255);
-        let g = u8::from_str_radix(&color_str[3..5], 16).unwrap_or(255);
-        let b = u8::from_str_radix(&color_str[5..7], 16).unwrap_or(255);
-        
-        Color {
-            r: r as f32 / 255.0,
-            g: g as f32 / 255.0,
-            b: b as f32 / 255.0,
-        }
-    } else {
-        // Default to gray
-        Color { r: 0.7, g: 0.7, b: 0.7 }
-    }
-}
-
 // Enhanced polygon validation to catch degenerate cases
 fn is_valid_polygon(points: &[Vector2]) -> bool {
     if points.len() < 3 {
@@ -405,7 +325,7 @@ fn clean_polygon_footprint(points: &[Vector2]) -> Vec<Vector2> {
 
     // Final check: need at least 3 unique vertices for a polygon
     if cleaned.len() < 3 {
-        console_log!("Cleaned: Polygon has less than 3 unique vertices after cleaning ({})", cleaned.len());
+        
         return Vec::new();
     }
     
@@ -416,7 +336,7 @@ fn clean_polygon_footprint(points: &[Vector2]) -> Vec<Vector2> {
     
     // Validate the final polygon
     if !is_valid_polygon(&cleaned) {
-        console_log!("Polygon validation failed after cleaning");
+        
         return Vec::new();
     }
 
@@ -700,7 +620,7 @@ fn create_extruded_shape(
     // Ensure we have enough points to form a valid polygon
     if unique_shape_points.len() < 3 {
         // For debugging purposes
-        console_log!("Warning: Attempting to extrude a shape with fewer than 3 points: {}", unique_shape_points.len());
+        
         
         // Not enough points to form a polygon, create a simple fallback shape
         if unique_shape_points.len() == 1 {
@@ -769,8 +689,8 @@ fn create_extruded_shape(
     }
     
     let unique_points_count = unique_shape_points.len();
-    // console_log!("Extruding polygon with {} points using extrude_geometry", unique_points_count);
-    // console_log!("Extrusion height: {}", height);
+    // 
+    // 
     // Convert the points to the format expected by extrude_geometry
     // The extrude function expects a list of shapes, each shape is an array of rings
     // First ring is the contour, any additional rings are holes (not used here)
@@ -795,7 +715,7 @@ fn create_extruded_shape(
     let shapes_js = match to_value(&shapes) {
         Ok(val) => val,
         Err(e) => {
-            console_log!("Failed to convert shapes to JsValue: {:?}", e);
+            
             return BufferGeometry {
                 vertices: Vec::new(),
                 normals: None,
@@ -811,7 +731,7 @@ fn create_extruded_shape(
     let options_js = match to_value(&options) {
         Ok(val) => val,
         Err(e) => {
-            console_log!("Failed to convert options to JsValue: {:?}", e);
+            
             return BufferGeometry {
                 vertices: Vec::new(),
                 normals: None,
@@ -828,7 +748,7 @@ fn create_extruded_shape(
     let extruded_js = match extrude::extrude_shape(shapes, height, 1) {
         Ok(val) => val,
         Err(e) => {
-            console_log!("Error during extrusion: {:?}", e);
+            
             return BufferGeometry {
                 vertices: Vec::new(),
                 normals: None,
@@ -846,7 +766,7 @@ fn create_extruded_shape(
         // Get position array from extruded_js
         let position_js = js_sys::Reflect::get(&extruded_js, &JsValue::from_str("position")).unwrap_or(JsValue::null());
         if position_js.is_null() {
-            console_log!("Failed to get position from extrusion result");
+            
             return BufferGeometry {
                 vertices: Vec::new(),
                 normals: None,
@@ -952,8 +872,11 @@ fn create_extruded_shape(
                     let current_base_z = vertices[i + 2] as f64 - z_offset;
                     vertices[i + 2] = (terrain_height + current_base_z) as f32;
                 } else {
-                    // For buildings and other features, add terrain height to elevate above terrain
-                    vertices[i + 2] += terrain_height as f32;
+                    // For other features (landuse, water, buildings), align bottom to terrain
+                    // First, get the height of this vertex above the base z_offset
+                    let vertex_height_above_base = vertices[i + 2] as f64 - z_offset;
+                    // Then set the vertex to terrain height plus that height
+                    vertices[i + 2] = (terrain_height + vertex_height_above_base) as f32;
                 }
             }
         }
@@ -974,76 +897,9 @@ fn create_extruded_shape(
     }
 }
 
-// Create simple debug geometry without extrusion (flat wireframe)
-fn create_debug_geometry(
-    shape_points: &[Vector2], 
-    z_offset: f64,
-    properties: Option<std::collections::HashMap<String, serde_json::Value>>
-) -> BufferGeometry {
-    if shape_points.len() < 3 {
-        console_log!("Warning: Attempting to create debug geometry with fewer than 3 points: {}", shape_points.len());
-        return BufferGeometry {
-            vertices: Vec::new(),
-            normals: None,
-            indices: None,
-            colors: None,
-            uvs: None,
-            hasData: false,
-            properties,
-        };
-    }
-
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    
-    // Create vertices for the flat polygon at the specified z offset
-    for point in shape_points {
-        vertices.push(point.x as f32);
-        vertices.push(point.y as f32);
-        vertices.push((z_offset + 0.1) as f32); // Slightly elevated for visibility
-    }
-    
-    // Create line indices to form the polygon outline (wireframe)
-    for i in 0..shape_points.len() {
-        let next_i = (i + 1) % shape_points.len();
-        indices.push(i as u32);
-        indices.push(next_i as u32);
-    }
-    
-    // For polygons, also add a center point and connect it to all vertices for visualization
-    if shape_points.len() > 3 {
-        // Calculate center point
-        let center_x: f64 = shape_points.iter().map(|p| p.x).sum::<f64>() / shape_points.len() as f64;
-        let center_y: f64 = shape_points.iter().map(|p| p.y).sum::<f64>() / shape_points.len() as f64;
-        
-        // Add center vertex
-        vertices.push(center_x as f32);
-        vertices.push(center_y as f32);
-        vertices.push((z_offset + 0.2) as f32); // Slightly higher than the outline
-        
-        let center_index = shape_points.len() as u32;
-        
-        // Connect center to all outline vertices
-        for i in 0..shape_points.len() {
-            indices.push(center_index);
-            indices.push(i as u32);
-        }
-    }
-    
-    BufferGeometry {
-        vertices,
-        normals: None, // No normals needed for debug wireframe
-        indices: Some(indices),
-        colors: None,
-        uvs: None,
-        hasData: true,
-        properties,
-    }
-}
-
 // Process the polygon geometry input and produce a buffer geometry output
 pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
-    // console_log!("create_polygon_geometry raw input: {:?}", input_json);
+    // 
     // Parse the input JSON
     let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
         Ok(data) => data,
@@ -1051,8 +907,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     };
 
     // Debug log full input and specific dataset config
-    // console_log!("create_polygon_geometry input: {:?}", input);
-    // console_log!("create_polygon_geometry vtDataSet config: {:?}", input.vtDataSet);
+    // 
+    // 
     // Compute dataset terrain extremes by sampling the elevation grid
     const SAMPLE_COUNT: usize = 10;
     let mut dataset_lowest_z = f64::INFINITY;
@@ -1075,7 +931,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
     let use_same_z_offset = input.useSameZOffset;
 
-    console_log!("Processing polygon geometry with {} polygons", input.polygons.len());
+    
     // Dataset terrain extremes for fallback and shared Z offset
     let dataset_lowest_z = input.minElevation;
     let dataset_highest_z = input.maxElevation;
@@ -1083,7 +939,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     let use_same_z_offset = input.useSameZOffset;
     
     if input.polygons.is_empty() {
-        console_log!("No polygons to process");
+        
         return Ok(serde_json::to_string(&BufferGeometry {
             vertices: Vec::new(),
             normals: None,
@@ -1105,12 +961,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             let geom_type = feature.r#type.as_deref().unwrap_or("unknown");
             *geometry_types.entry(geom_type).or_insert(0) += 1;
         }
-        console_log!("🛣️ Transportation geometry types: {:?}", geometry_types);
+        
     }
 
     for (i, polygon_data) in input.polygons.iter().enumerate() {
         if i % 1000 == 0 && i > 0 {
-            console_log!("Processed {} out of {} polygons", i, input.polygons.len());
+            
         }
         
         // First, check if this polygon intersects with the bbox at all
@@ -1137,9 +993,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 }
             }
         }
-        
-        // Check if debug mode is enabled
-        let debug_mode = false; // Always disable debug mode special handling
         
         // Calculate if this is a major road (for logging purposes)
         let is_major_road = if let Some(ref props) = polygon_data.properties {
@@ -1230,29 +1083,29 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                                         
                                         buffered_points
                                     } else {
-                                        console_log!("❌ WASM buffer failed: invalid coordinates format");
+                                        
                                         Vec::new()
                                     }
                                 } else {
-                                    console_log!("❌ WASM buffer failed: no coordinates in result");
+                                    
                                     Vec::new()
                                 }
                             } else {
-                                console_log!("❌ WASM buffer failed: no geometry in result");
+                                
                                 Vec::new()
                             }
                         }
                         Err(e) => {
-                            console_log!("❌ WASM buffer failed to parse result: {}", e);
+                            
                             Vec::new()
                         }
                     }
                 } else {
-                    console_log!("❌ LineString has insufficient valid coordinates: {}", line_coordinates.len());
+                    
                     Vec::new()
                 }
             } else {
-                console_log!("❌ LineString has insufficient geometry points: {}", polygon_data.geometry.len());
+                
                 Vec::new()
             }
         } else {
@@ -1469,7 +1322,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Base z offset: position bottom face at terrain surface minus submerge
         let z_offset = lowest_terrain_z + input.vtDataSet.zOffset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
         
-        // Create geometry based on debug mode
         // Extract properties from polygon_data for attaching to geometry
         let properties = if let Some(ref props) = polygon_data.properties {
             // Convert serde_json::Value to HashMap<String, serde_json::Value>
@@ -1505,15 +1357,15 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         }
     }
     
-    console_log!("Created {} valid 3D geometries", all_geometries.len());
+    
     
     // Return all individual geometries without merging
     if all_geometries.is_empty() {
-        console_log!("No valid geometries were created");
+        
         return Ok(serde_json::to_string(&Vec::<BufferGeometry>::new()).unwrap());
     }
     
-    console_log!("Returning {} individual geometries", all_geometries.len());
+    
     
     // Serialize all geometries as an array
     match serde_json::to_string(&all_geometries) {

@@ -373,7 +373,6 @@ pub fn extrude_geometry_native(
             for i in 0..vlen {
                 let vert = vertices[i];
 
-                // console_log!("Extruding vertex: extrude_by_path {} ({}, {}, {}) {}", extrude_by_path, vert.x, vert.y, s, opts.depth);
                 if !extrude_by_path {
                     v(vert.x, vert.y, opts.depth / opts.steps as f64 * s as f64);
                 } else {

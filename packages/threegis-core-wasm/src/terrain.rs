@@ -37,7 +37,7 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
     let kernel_radius = kernel_size / 2;
     let sigma = 0.8; // Reduced sigma for sharper falloff (was 1.0)
     
-    console_log!("Applying terrain smoothing with kernel size: {}, sigma: {}", kernel_size, sigma);
+    
     
     // Precompute gaussian weights for optimization
     let mut kernel_weights = vec![vec![0.0; kernel_size]; kernel_size];
@@ -139,8 +139,8 @@ fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) 
     let lower_threshold = mean - 2.5 * std_dev;
     let upper_threshold = mean + 2.5 * std_dev;
     
-    console_log!("Elevation stats - Mean: {:.2}, StdDev: {:.2}", mean, std_dev);
-    console_log!("Clipping outliers: < {:.2} or > {:.2}", lower_threshold, upper_threshold);
+    
+    
     
     // Apply clipping
     let mut new_min = f64::INFINITY;
@@ -186,8 +186,8 @@ pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse parameters
     let params: TerrainGeometryParams = serde_wasm_bindgen::from_value(params_js)?;
     
-    console_log!("🏔️ [Terrain] Starting terrain geometry creation...");
-    console_log!("🏔️ [Terrain] Using bbox_key: '{}'", params.bbox_key);
+    
+    
     console_log!("🏔️ [Terrain] Terrain params: bbox=[{}, {}, {}, {}], vertical_exaggeration={}, base_height={}", 
                 params.min_lng, params.min_lat, params.max_lng, params.max_lat, 
                 params.vertical_exaggeration, params.terrain_base_height);
@@ -196,29 +196,29 @@ pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     let state = ModuleState::global();
     let state = state.lock().unwrap();
     
-    console_log!("🏔️ [Terrain] Current elevation cache has {} entries", state.elevation_grids.len());
+    
     
     // List all keys in cache for debugging
     let keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
-    console_log!("🏔️ [Terrain] Available cache keys: {:?}", keys);
+    
     
     // Create the bbox_key format - this is the same format used in elevation.rs
     let bbox_key = format!("{}_{}_{}_{}", params.min_lng, params.min_lat, params.max_lng, params.max_lat);
     let has_bbox_key = state.elevation_grids.contains_key(&bbox_key);
     
-    console_log!("🏔️ [Terrain] Looking for elevation data with bbox_key: '{}'", bbox_key);
-    console_log!("🏔️ [Terrain] Elevation data with this key exists: {}", has_bbox_key);
+    
+    
     
     // Get elevation data using ONLY the bbox_key format
     let elevation_grid = match state.get_elevation_grid(&bbox_key) {
         Some(grid) => {
-            console_log!("🏔️ [Terrain] ✅ Successfully retrieved elevation grid using bbox_key: '{}'", bbox_key);
-            console_log!("🏔️ [Terrain] Grid dimensions: {}x{}", grid[0].len(), grid.len());
+            
+            
             grid
         },
         None => {
-            console_log!("🏔️ [Terrain] ❌ ERROR: No elevation data found for bbox_key: '{}'", bbox_key);
-            console_log!("🏔️ [Terrain] ℹ️ Available cache keys: {:?}", keys);
+            
+            
             return Err(JsValue::from_str(&format!("No elevation data found for bbox [{}, {}, {}, {}]. Process elevation data first.",
                 params.min_lng, params.min_lat, params.max_lng, params.max_lat)));
         }

@@ -68,7 +68,7 @@ pub fn start() {
     state.max_vector_tiles = 100;
     
     // Log that the module has been initialized
-    console_log!("ThreeGIS WASM module initialized with caching");
+    
 }
 
 // Function to store a raster tile in the cache
@@ -207,7 +207,7 @@ pub fn add(a: i32, b: i32) -> i32 {
 // Returns a GeoJSON Feature with MultiPolygon geometry.
 #[wasm_bindgen]
 pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
-    console_log!("buffer_line_string called with distance: {}, input length: {}", dist, geojson_str.len());
+    
 
     // Defensive: non-positive or NaN distances return empty geometry
     if !dist.is_finite() || dist == 0.0 {
@@ -219,7 +219,7 @@ pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
     let parsed = match geojson_str.parse::<GeoJson>() {
         Ok(gj) => gj,
         Err(e) => {
-            console_log!("buffer_line_string: invalid GeoJSON: {}", e);
+            
             return "{}".to_string();
         }
     };
@@ -239,22 +239,22 @@ pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
         match val? {
             Value::LineString(coords) => {
                 let ls = coords_to_linestring(&coords);
-                console_log!("Buffering LineString with {} points, buffer distance: {}", coords.len(), dist);
+                
                 let buffered = ls.buffer(dist);
-                console_log!("LineString buffer result: {} polygons", buffered.0.len());
+                
                 Some(buffered)
             }
             Value::MultiLineString(lines) => {
-                console_log!("Processing MultiLineString input with {} coordinate arrays", lines.len());
+                
                 let parts: Vec<LineString<f64>> = lines.iter().map(|c| coords_to_linestring(c)).collect();
-                console_log!("Buffering MultiLineString with {} lines, buffer distance: {}", parts.len(), dist);
+                
                 let multi_ls = MultiLineString::new(parts);
                 let buffered = multi_ls.buffer(dist);
-                console_log!("MultiLineString buffer result: {} polygons", buffered.0.len());
+                
                 Some(buffered)
             }
             _ => {
-                console_log!("Skipping non-LineString geometry type");
+                
                 None
             }
         }
@@ -262,26 +262,26 @@ pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
 
     let multipoly: Option<MultiPolygon<f64>> = match parsed {
         GeoJson::Feature(f) => {
-            console_log!("Processing single Feature");
+            
             geometry_to_multipoly(f.geometry.map(|g| g.value))
         }
         GeoJson::Geometry(g) => {
-            console_log!("Processing single Geometry");
+            
             geometry_to_multipoly(Some(g.value))
         }
         GeoJson::FeatureCollection(fc) => {
-            console_log!("Processing FeatureCollection with {} features", fc.features.len());
+            
             // Buffer all LineString-like features and merge into one MultiPolygon
             let mut acc: Vec<Polygon<f64>> = Vec::new();
             for (i, feat) in fc.features.into_iter().enumerate() {
                 if let Some(mp) = geometry_to_multipoly(feat.geometry.map(|g| g.value)) {
-                    console_log!("Feature {}: Added {} polygons from buffering", i, mp.0.len());
+                    
                     acc.extend(mp.0);
                 } else {
-                    console_log!("Feature {}: No geometry to buffer", i);
+                    
                 }
             }
-            console_log!("Total buffered polygons: {}", acc.len());
+            
             if acc.is_empty() { None } else { Some(MultiPolygon(acc)) }
         }
     };
@@ -290,11 +290,11 @@ pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
     if let Some(mp) = multipoly {
         // Handle empty result gracefully
         if mp.0.is_empty() {
-            console_log!("buffer_line_string: No buffered polygons to return");
+            
             return "{}".to_string();
         }
 
-        console_log!("buffer_line_string: Serializing {} buffered polygons", mp.0.len());
+        
 
         let coords_multi: Vec<Vec<Vec<Vec<f64>>>> = mp
             .0
@@ -316,10 +316,10 @@ pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
         let geometry = Geometry::new(Value::MultiPolygon(coords_multi));
         let feature = Feature { bbox: None, geometry: Some(geometry), id: None, properties: None, foreign_members: None };
         let result = serde_json::to_string(&feature).unwrap_or_else(|_| "{}".to_string());
-        console_log!("buffer_line_string: Returning result with length: {}", result.len());
+        
         result
     } else {
-        console_log!("buffer_line_string: No geometry found to buffer");
+        
         "{}".to_string()
     }
 }
@@ -327,7 +327,7 @@ pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
 // Function to create 3D building geometry from a GeoJSON polygon
 #[wasm_bindgen]
 pub fn create_building_geometry(building_json: &str, height: f64) -> String {
-    console_log!("Creating building geometry with height: {}", height);
+    
     
     // In a real implementation, this would:
     // 1. Parse the building GeoJSON
@@ -423,33 +423,33 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         source_layer, 
         input_val.get("vtDataSet").and_then(|v| v.get("filter"))
     );
-    console_log!("🔍 Looking for cached features: bbox_key='{}', inner_key='{}', source_layer='{}'", bbox_key, inner_key, source_layer);
+    
     
     // Retrieve features from feature_data_cache
     let features: Vec<crate::polygon_geometry::GeometryData> = if let Some(js_val) = state.get_feature_data(&bbox_key, &inner_key) {
         // Stored as JSON string in JsValue
         let json_str = js_val.as_string().unwrap_or_else(|| "[]".to_string());
-        console_log!("✅ Found cached data for {}: {} characters", inner_key, json_str.len());
+        
         match serde_json::from_str::<Vec<crate::polygon_geometry::GeometryData>>(&json_str) {
             Ok(data) => {
-                console_log!("Successfully deserialized {} features", data.len());
+                
                 data
             },
             Err(e) => {
-                console_log!("Failed to deserialize features: {}", e);
+                
                 Vec::new()
             }
         }
     } else {
-        console_log!("❌ No cached features found for bbox_key='{}', inner_key='{}'", bbox_key, inner_key);
-        console_log!("🔍 Available cache keys for bbox:");
+        
+        
         // List what cache keys are actually available
         if let Some(bbox_cache) = state.feature_data_cache.get(&bbox_key) {
             for (key, _) in bbox_cache.iter() {
-                console_log!("  Available key: '{}'", key);
+                
             }
         } else {
-            console_log!("  No cache entry for bbox_key: '{}'", bbox_key);
+            
         }
         Vec::new()
     };

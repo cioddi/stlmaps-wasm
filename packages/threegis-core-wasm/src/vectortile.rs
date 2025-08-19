@@ -580,7 +580,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     // Use the specific elevation_bbox_key provided in the input
     let elevation_data = match &input.elevationBBoxKey {
         Some(key) => {
-            console_log!("Using elevationBBoxKey for elevation data lookup: {}", key);
+            
             module_state.get_elevation_data(key)
         }
         None => {
@@ -644,7 +644,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let raw_mvt_data = match vt_tile_data.rust_parsed_mvt {
             Some(ref data) => data,
             None => {
-                console_log!("  Tile {}/{}/{} has no raw MVT data (rust_parsed_mvt is None), using buffer field.", tile_z, tile_x, tile_y);
+                
                 &vt_tile_data.buffer // Fallback to buffer if rust_parsed_mvt is missing
             }
         };
@@ -749,12 +749,12 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         }
         
         // Log statistics for this layer
-        console_log!("=== MVT Layer Statistics for '{}' ===", vt_dataset.sourceLayer);
-        console_log!("Total features before filtering: {}", layer.features.len());
+        
+        
         for (class, count) in &class_stats {
-            console_log!("  {}: {} features", class, count);
+            
         }
-        console_log!("=====================================");
+        
 
         // Process each feature in the layer
         let mut filtered_by_expression = 0;
@@ -782,7 +782,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                 //         if class_str == "primary" || class_str == "secondary" {
                 //             let filter_result = evaluate_filter(filter, &filterable_feature);
                 //             if !filter_result {
-                //                 console_log!("❌ {} feature was filtered out by expression!", class_str);
+                //                 
                 //             }
                 //         }
                 //     }
@@ -810,7 +810,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                 .or_else(|| feature.properties.get("ele").and_then(|v| v.as_f64())) // Check 'ele' too
                 .unwrap_or(0.0);
             // Debug: log extracted height for each feature
-            // console_log!("    [vectortile] Feature ID {}: extracted height = {}", feature.id.unwrap_or(0), height);
+            // 
 
             // --- Geometry Processing & Transformation ---
             let geometry_type_str = feature.geometry_type.as_str();
@@ -839,7 +839,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         }
 
                         if !transformed_ring.is_empty() {
-                            // console_log!("    Transformed Polygon ring with {} vertices.", transformed_ring.len());
+                            // 
                             let base_elevation = calculate_base_elevation(
                                 &transformed_ring,
                                 &elevation_grid,
@@ -850,7 +850,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 elev_max_lng,
                                 elev_max_lat, // Use elevation bbox
                             );
-                            // console_log!("    Calculated base elevation: {}", base_elevation);
+                            // 
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_ring, // Store transformed coords
@@ -939,7 +939,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                     tile_z,
                                 );
                                 let transformed_point = vec![lng, lat];
-                                // console_log!("    Transformed Point: {:?}", transformed_point);
+                                // 
 
                                 let base_elevation = calculate_base_elevation(
                                     &vec![transformed_point.clone()], // Pass as vec of points
@@ -951,7 +951,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                     elev_max_lng,
                                     elev_max_lat,
                                 );
-                                // console_log!("    Calculated base elevation: {}", base_elevation);
+                                // 
 
                                 transformed_geometry_parts.push(GeometryData {
                                     geometry: vec![transformed_point], // Store as [[lng, lat]]
@@ -1094,7 +1094,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     let bbox_key = match &input.bbox_key {
         Some(key) => {
             if key.contains("{") || key.contains("}") {
-                // console_log!("Converting non-standard key to standard bbox_key format: {} -> {}", key, standard_bbox_key);
+                // 
                 standard_bbox_key
             } else {
                 key.clone()
@@ -1155,13 +1155,13 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             // since our JS helper function returns a TileFetchResponse object
             let raw_data_value = js_sys::Reflect::get(&fetch_result, &JsValue::from_str("rawData"))
                 .map_err(|e| {
-                    console_log!("❌ Failed to extract rawData from fetch result: {:?}", e);
+                    
                     JsValue::from_str("Failed to extract rawData from fetch result")
                 })?;
 
             // Verify we actually got a valid Uint8Array from the rawData property
             if raw_data_value.is_undefined() || raw_data_value.is_null() {
-                console_log!("❌ rawData property is undefined or null!");
+                
                 return Err(JsValue::from_str("rawData property is undefined or null"));
             }
 
@@ -1178,11 +1178,11 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             // Check if the data is gzipped and decompress if necessary
             if data_vec.starts_with(&[0x1f, 0x8b]) {
                 // Gzip magic number
-                console_log!("Detected gzipped tile, decompressing...");
+                
                 let mut decoder = GzDecoder::new(&data_vec[..]);
                 let mut decompressed_data = Vec::new();
                 decoder.read_to_end(&mut decompressed_data).map_err(|e| {
-                    console_log!("Failed to decompress gzipped tile: {}", e);
+                    
                     JsValue::from_str("Decompression error")
                 })?;
                 data_vec = decompressed_data;
@@ -1198,7 +1198,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 "🔍 DEBUG: First bytes of tile data (hex): {:02X?}",
                 debug_bytes
             );
-            console_log!("🔍 DEBUG: Total tile data size: {} bytes", data_vec.len());
+            
 
             // Parse the MVT data using our enhanced Rust MVT parser
             let parsed_mvt = match enhanced_parse_mvt_data(&data_vec, &tile) {
@@ -1214,7 +1214,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                     // Log the number of layers found
                     let layer_count = parsed.layers.len();
                     let layer_names: Vec<String> = parsed.layers.keys().cloned().collect();
-                    console_log!("Found {} layers: {:?}", layer_count, layer_names);
+                    
 
                     // Convert Rust-parsed features to the legacy format for compatibility
                     let mut legacy_layers = HashMap::new();
@@ -1262,7 +1262,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                     Some((parsed, legacy_layers))
                 }
                 Err(e) => {
-                    console_log!("Failed to parse MVT data: {}", e);
+                    
                     None
                 }
             };
@@ -1279,7 +1279,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             } else {
                 format!("{:02X?}", &data_vec)
             };
-            console_log!("🔍 WASM DEBUG: Raw data sample (hex): {}", hex_sample);
+            
 
             // Create new tile data entry
             let tile_data = TileData {
@@ -1387,7 +1387,7 @@ fn enhanced_parse_mvt_data(
     } else {
         format!("{:02X?}", &tile_data)
     };
-    console_log!("🔍 RAW DATA PREVIEW: First bytes: {}", raw_preview);
+    
 
     // Check for common MVT/PBF patterns in the raw data
     if tile_data.len() >= 4 {
@@ -1402,7 +1402,7 @@ fn enhanced_parse_mvt_data(
 
     // Try to detect protobuf structure directly
     if tile_data.len() > 10 {
-        // console_log!("🔍 SCANNING FOR PROTOBUF FIELDS:");
+        // 
         for i in 0..10.min(tile_data.len()) {
             let byte = tile_data[i];
             let field_num = byte >> 3;
@@ -1450,31 +1450,31 @@ fn enhanced_parse_mvt_data(
     } else {
         format!("{:02X?}", &data)
     };
-    console_log!("🔍 DEBUG: MVT data preview: {}", preview);
+    
 
     // Try to decode the MVT data using the Message trait implementation
     match Tile::decode(&*data) {
         Ok(mvt_tile) => {
-            console_log!("✅ Successfully decoded MVT data using Tile::decode");
-            console_log!("📊 MVT contains {} layers", mvt_tile.layers.len());
+            
+            
 
             // If no layers found, this could indicate a potential issue with the data format
             if mvt_tile.layers.is_empty() {
                 console_log!(
                     "⚠️ WARNING: No layers found in the decoded MVT data. This might indicate:"
                 );
-                console_log!("   1. The tile is empty (valid but contains no data)");
-                console_log!("   2. Data format mismatch (not a standard MVT)");
-                console_log!("   3. Decoder issue with this particular tile format");
+                
+                
+                
 
                 // Let's try an alternate approach: attempt to detect the protobuf structure manually
                 // This is a basic check to see if the data at least looks like a protobuf message
                 if data.len() > 2 {
-                    console_log!("🔍 Performing basic protobuf structure check:");
+                    
                     let mut offset = 0;
                     while offset < data.len() - 1 {
                         if offset >= 100 {
-                            console_log!("   Checked first 100 bytes, stopping manual inspection");
+                            
                             break;
                         }
 
@@ -1574,7 +1574,7 @@ fn enhanced_parse_mvt_data(
                     if decoded_geometry_tile_coords.is_empty()
                         || decoded_geometry_tile_coords[0].is_empty()
                     {
-                        // console_log!("Skipping feature ID {:?} due to empty geometry after decoding.", feature.id);
+                        // 
                         continue;
                     }
 
@@ -1650,7 +1650,7 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
 
                         current_part.push(vec![cursor_x as f64, cursor_y as f64]);
                     } else {
-                        // console_log!("Warning: Malformed MoveTo command sequence.");
+                        // 
                         break; // Exit inner loop if data is short
                     }
                 }
@@ -1681,12 +1681,12 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
                             // MVT spec v2: "A LineTo command must be preceded by a MoveTo command."
                             // If we encounter LineTo without a preceding MoveTo, it's likely an error or
                             // implies starting from (0,0), but safer to log/ignore.
-                            // console_log!("Warning: LineTo command encountered without preceding MoveTo.");
+                            // 
                         } else {
                             current_part.push(vec![cursor_x as f64, cursor_y as f64]);
                         }
                     } else {
-                        // console_log!("Warning: Malformed LineTo command sequence.");
+                        // 
                         break; // Exit inner loop
                     }
                 }
@@ -1700,14 +1700,14 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
                     }
                     // ClosePath command has no parameters, so just continue
                 } else {
-                    // console_log!("Warning: ClosePath encountered without preceding MoveTo/LineTo.");
+                    // 
                 }
                 // MVT Spec: A ClosePath command is followed by a MoveTo command
                 // We don't need to push `current_part` here; the next MoveTo will handle it
             }
             _ => {
                 // Unknown command, skip parameters
-                // console_log!("Warning: Unknown MVT command ID: {}", cmd_id);
+                // 
                 i += 2 * cmd_count;
             }
         }
