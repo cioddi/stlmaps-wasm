@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@mapbox/vector-tile": "^2.0.3",
-    "@mapcomponents/react-maplibre": "^1.1.0",
+    "@mapcomponents/react-maplibre": "^1.3.3",
     "@mui/icons-material": "^6.4.8",
     "@mui/material": "^6.4.8",
     "@threegis/core": "*",
