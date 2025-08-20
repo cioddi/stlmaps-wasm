@@ -145,46 +145,60 @@ const ExportButtons: React.FC = () => {
     return validatedGeometry;
   };
 
-  // Create a scene with all meshes for export
+  // Create a scene with all meshes for export, skipping invalid geometries
   const createExportScene = (validateGeometries = false): THREE.Scene => {
     const scene = new THREE.Scene();
-    
+
+    // Helper to check if geometry is valid for export
+    const isValidGeometry = (geometry: any) => {
+      return (
+        geometry &&
+        geometry.isBufferGeometry &&
+        geometry.attributes &&
+        geometry.attributes.position &&
+        geometry.attributes.position.count > 0
+      );
+    };
+
     // Add terrain
     if (geometryDataSets.terrainGeometry) {
       const geomToUse = validateGeometries ? validateGeometry(geometryDataSets.terrainGeometry) : geometryDataSets.terrainGeometry;
-      const terrainMaterial = new THREE.MeshStandardMaterial({ 
-        vertexColors: true,
-        flatShading: true
-      });
-      const terrainMesh = new THREE.Mesh(geomToUse, terrainMaterial);
-      terrainMesh.name = "Terrain";
-      scene.add(terrainMesh);
+      if (isValidGeometry(geomToUse)) {
+        const terrainMaterial = new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          flatShading: true
+        });
+        const terrainMesh = new THREE.Mesh(geomToUse, terrainMaterial);
+        terrainMesh.name = "Terrain";
+        scene.add(terrainMesh);
+      }
     }
-    
+
     // Add other polygon geometries
     if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
       geometryDataSets.polygonGeometries.forEach((vtDataset, index) => {
         if (!vtDataset?.geometry) return;
-        
         const geomToUse = validateGeometries ? validateGeometry(vtDataset.geometry) : vtDataset.geometry;
-        const material = new THREE.MeshStandardMaterial({
-          color: 0x87ceeb, // Light sky blue
-          flatShading: true
-        });
-        const mesh = new THREE.Mesh(geomToUse, material);
-        mesh.name = `Polygon_${index}`;
-        scene.add(mesh);
+        if (isValidGeometry(geomToUse)) {
+          const material = new THREE.MeshStandardMaterial({
+            color: 0x87ceeb, // Light sky blue
+            flatShading: true
+          });
+          const mesh = new THREE.Mesh(geomToUse, material);
+          mesh.name = `Polygon_${index}`;
+          scene.add(mesh);
+        }
       });
     }
-    
+
     // Add lights for better visualization in viewers
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
-    
+
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(1, 1, 1);
     scene.add(directionalLight);
-    
+
     return scene;
   };
 
@@ -289,25 +303,60 @@ const ExportButtons: React.FC = () => {
     }
   };
 
-  // Handle generating and downloading OBJ
+
+  // Handle generating and auto-downloading OBJ
   const handleObjExport = () => {
     setLoading(prev => ({ ...prev, obj: true }));
     generateOBJFile();
     setLoading(prev => ({ ...prev, obj: false }));
   };
 
-  // Handle generating and downloading STL
+  // Handle generating and auto-downloading STL
   const handleStlExport = () => {
     setLoading(prev => ({ ...prev, stl: true }));
     generateSTLFile();
     setLoading(prev => ({ ...prev, stl: false }));
   };
 
-  // Handle generating and downloading GLTF/GLB
+  // Handle generating and auto-downloading GLTF/GLB
   const handleGltfExport = () => {
     setLoading(prev => ({ ...prev, gltf: true }));
     generateGLTFFile();
   };
+
+  // Always auto-download when a new download URL is set
+  useEffect(() => {
+    if (objDownloadUrl) {
+      const a = document.createElement('a');
+      a.href = objDownloadUrl;
+      a.download = 'model.obj';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }, [objDownloadUrl]);
+
+  useEffect(() => {
+    if (stlDownloadUrl) {
+      const a = document.createElement('a');
+      a.href = stlDownloadUrl;
+      a.download = 'model.stl';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }, [stlDownloadUrl]);
+
+  useEffect(() => {
+    if (gltfDownloadUrl) {
+      const a = document.createElement('a');
+      a.href = gltfDownloadUrl;
+      a.download = 'model.glb';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }, [gltfDownloadUrl]);
 
   const isDisabled = !geometryDataSets.terrainGeometry;
 
