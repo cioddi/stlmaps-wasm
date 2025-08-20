@@ -94,7 +94,6 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(
             },
             paint: {
               "fill-color": hexColor,
-              "fill-opacity": 0.6,
             },
             maxzoom: 20,
           };

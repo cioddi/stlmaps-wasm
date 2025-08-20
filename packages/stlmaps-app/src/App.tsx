@@ -99,6 +99,7 @@ const App: React.FC = () => {
   const showDivider = viewMode === "split";
 
   return (<>
+    <MlOrderLayers layerIds={['controls-order-layer','data-order-layer']} />
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <CssBaseline />
       <TopBar 
@@ -197,7 +198,6 @@ const App: React.FC = () => {
         setBbox(geojson);
       }}
     />
-    <MlOrderLayers layerIds={['controls-order-layer','data-order-layer']} />
   </>
   );
 };
