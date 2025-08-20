@@ -174,18 +174,50 @@ const ExportButtons: React.FC = () => {
       }
     }
 
-    // Add other polygon geometries
+    // Add all enabled vector tile geometries (buildings, water, roads, landuse, etc.)
     if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
       geometryDataSets.polygonGeometries.forEach((vtDataset, index) => {
-        if (!vtDataset?.geometry) return;
+        if (!vtDataset?.geometry) {
+          return;
+        }
+        if (vtDataset.enabled === false) {
+          return;
+        }
         const geomToUse = validateGeometries ? validateGeometry(vtDataset.geometry) : vtDataset.geometry;
-        if (isValidGeometry(geomToUse)) {
+
+        // Type for geometry with individualGeometries in userData (matching actual data structure)
+        type GeometryWithUserData = THREE.BufferGeometry & {
+          userData?: {
+            isContainer?: boolean;
+            individualGeometries?: THREE.BufferGeometry[];
+            geometryCount?: number;
+          };
+        };
+
+        // Handle geometries with individualGeometries in userData (where the actual data is stored)
+        if (geomToUse && (geomToUse as GeometryWithUserData).userData?.isContainer && Array.isArray((geomToUse as GeometryWithUserData).userData?.individualGeometries)) {
+          // Process each individual geometry from userData
+          (geomToUse as GeometryWithUserData).userData!.individualGeometries!.forEach((indGeom: THREE.BufferGeometry, indIdx: number) => {
+            if (isValidGeometry(indGeom)) {
+              const color = vtDataset.color instanceof THREE.Color ? vtDataset.color : new THREE.Color(0x87ceeb);
+              const material = new THREE.MeshStandardMaterial({
+                color,
+                flatShading: true
+              });
+              const mesh = new THREE.Mesh(validateGeometries ? validateGeometry(indGeom) : indGeom, material);
+              mesh.name = vtDataset.sourceLayer ? `${vtDataset.sourceLayer}_${index}_part${indIdx}` : `Polygon_${index}_part${indIdx}`;
+              scene.add(mesh);
+            }
+          });
+        } else if (isValidGeometry(geomToUse)) {
+          // Use the color from the dataset if available, otherwise fallback
+          const color = vtDataset.color instanceof THREE.Color ? vtDataset.color : new THREE.Color(0x87ceeb);
           const material = new THREE.MeshStandardMaterial({
-            color: 0x87ceeb, // Light sky blue
+            color,
             flatShading: true
           });
           const mesh = new THREE.Mesh(geomToUse, material);
-          mesh.name = `Polygon_${index}`;
+          mesh.name = vtDataset.sourceLayer ? `${vtDataset.sourceLayer}_${index}` : `Polygon_${index}`;
           scene.add(mesh);
         }
       });

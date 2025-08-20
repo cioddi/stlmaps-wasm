@@ -1131,8 +1131,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            console_log!("❌ SKIPPING {} road ({}/{}): only {} points after processing (need ≥3)", 
-                transportation_class, i + 1, input.polygons.len(), points.len());
             continue; // Skip invalid polygons
         }
         
@@ -1172,8 +1170,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            console_log!("❌ SKIPPING {} road ({}/{}): height {} <= 0", 
-                transportation_class, i + 1, input.polygons.len(), height);
             continue; // Skip flat geometry
         }
         
@@ -1196,8 +1192,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            console_log!("❌ SKIPPING {} road ({}/{}): polygon cleaning resulted in empty geometry (had {} mesh points)", 
-                transportation_class, i + 1, input.polygons.len(), mesh_points.len());
             continue; // Skip invalid polygon after cleaning
         }
 
@@ -1233,8 +1227,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            console_log!("❌ SKIPPING {} road ({}/{}): clipping resulted in empty geometry (had {} cleaned points)", 
-                transportation_class, i + 1, input.polygons.len(), cleaned_points.len());
             continue;
         }
         
@@ -1283,8 +1275,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     } else { "no_props".to_string() }
                 } else { "no_props".to_string() };
                 
-                console_log!("❌ SKIPPING {} road ({}/{}): not potentially visible after clipping (had {} clipped points < 3)", 
-                    transportation_class, i + 1, input.polygons.len(), clipped_points.len());
                 continue;
             }
         } else {
@@ -1300,8 +1290,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             } else { "no_props".to_string() }
         } else { "no_props".to_string() };
         
-        console_log!("✅ PROCESSING {} road ({}/{}): {} final points", 
-            transportation_class, i + 1, input.polygons.len(), final_points.len());
 
         // Compute per-polygon terrain extremes for base alignment
         let mut lowest_terrain_z = f64::INFINITY;
