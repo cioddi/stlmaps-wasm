@@ -3,6 +3,18 @@ import { VtDataSet } from "../types/VtDataSet";
 
 export const vtGeometries: VtDataSet[] = [
   {
+    sourceLayer: "landuse",
+    color: new THREE.Color(0x4caf50), // Green color for landuse
+    extrusionDepth: 0.8, // Thin extrusion for landuse
+    zOffset: -0.4,
+    bufferSize: 2,
+    enabled: true,
+    alignVerticesToTerrain: true,
+    // Filter to include green areas
+    filter: ["in", "class", "commercial", "residential"],
+    csgClipping: false,
+  },
+  {
     sourceLayer: "landcover",
     color: new THREE.Color(0x74e010), // Green color for landuse
     extrusionDepth: 1.2, // Thin extrusion for landuse
@@ -20,18 +32,6 @@ export const vtGeometries: VtDataSet[] = [
     bufferSize: 2,
     enabled: true,
     alignVerticesToTerrain: true,
-    csgClipping: false,
-  },
-  {
-    sourceLayer: "landuse",
-    color: new THREE.Color(0x4caf50), // Green color for landuse
-    extrusionDepth: 0.8, // Thin extrusion for landuse
-    zOffset: -0.4,
-    bufferSize: 2,
-    enabled: true,
-    alignVerticesToTerrain: true,
-    // Filter to include green areas
-    filter: ["in", "class", "commercial", "residential"],
     csgClipping: false,
   },
   {
