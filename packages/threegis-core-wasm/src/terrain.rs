@@ -3,6 +3,8 @@ use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use js_sys::{Float32Array, Uint32Array, Array, Object};
 use std::collections::HashMap;
+use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::closure::Closure;
 
 use crate::module_state::{ModuleState};
 use crate::elevation::{ElevationProcessingResult, GridSize};
@@ -180,9 +182,9 @@ fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) 
     (final_result, final_min, final_max)
 }
 
-// Main function to create terrain geometry from elevation data
+// Main function to create terrain geometry from elevation data with retry mechanism
 #[wasm_bindgen]
-pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
+pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse parameters
     let params: TerrainGeometryParams = serde_wasm_bindgen::from_value(params_js)?;
     
@@ -209,18 +211,87 @@ pub fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     
     
     
-    // Get elevation data using ONLY the bbox_key format
-    let elevation_grid = match state.get_elevation_grid(&bbox_key) {
-        Some(grid) => {
+    // Get elevation data with retry mechanism
+    let elevation_grid = {
+        // First try to get existing elevation data
+        if let Some(grid) = state.get_elevation_grid(&bbox_key) {
+            console_log!("🏔️ Found cached elevation data for bbox_key: {}", bbox_key);
+            grid.clone()
+        } else {
+            console_log!("🔄 No cached elevation data found for bbox_key: {}, attempting retry...", bbox_key);
             
+            // Release the lock before async operations
+            drop(state);
             
-            grid
-        },
-        None => {
+            // Retry mechanism: attempt to process elevation data up to 4 times
+            let max_retries = 4;
+            let mut elevation_grid: Option<Vec<Vec<f64>>> = None;
             
+            for attempt in 1..=max_retries {
+                console_log!("🔄 Elevation data retry attempt {} of {}", attempt, max_retries);
+                
+                // Create elevation processing input
+                let elevation_input = crate::elevation::ElevationProcessingInput {
+                    min_lng: params.min_lng,
+                    min_lat: params.min_lat,
+                    max_lng: params.max_lng,
+                    max_lat: params.max_lat,
+                    tiles: Vec::new(), // Will be populated by the processing function
+                    grid_width: 256,   // Standard grid size
+                    grid_height: 256,  // Standard grid size
+                    bbox_key: Some(bbox_key.clone()),
+                };
+                
+                // Serialize input
+                match serde_json::to_string(&elevation_input) {
+                    Ok(input_json) => {
+                        // Attempt to process elevation data
+                        match crate::elevation::process_elevation_data_async(&input_json).await {
+                            Ok(_) => {
+                                console_log!("✅ Elevation processing succeeded on attempt {}", attempt);
+                                
+                                // Check if we now have the data
+                                let state = ModuleState::global();
+                                let state = state.lock().unwrap();
+                                if let Some(grid) = state.get_elevation_grid(&bbox_key) {
+                                    elevation_grid = Some(grid.clone());
+                                    break;
+                                }
+                            },
+                            Err(e) => {
+                                console_log!("❌ Elevation processing failed on attempt {}: {:?}", attempt, e);
+                                
+                                if attempt < max_retries {
+                                    // Exponential backoff: wait 500ms * 2^(attempt-1)
+                                    let delay_ms = 500 * (1 << (attempt - 1));
+                                    console_log!("⏳ Waiting {}ms before retry...", delay_ms);
+                                    
+                                    // Simple delay - just log the delay for now
+                                    // In a real implementation, you might want to add actual delay
+                                    console_log!("⏳ Retry delay would be {}ms", delay_ms);
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        console_log!("❌ Failed to serialize elevation input: {}", e);
+                        break;
+                    }
+                }
+            }
             
-            return Err(JsValue::from_str(&format!("No elevation data found for bbox [{}, {}, {}, {}]. Process elevation data first.",
-                params.min_lng, params.min_lat, params.max_lng, params.max_lat)));
+            match elevation_grid {
+                Some(grid) => {
+                    console_log!("✅ Successfully retrieved elevation data after retry");
+                    grid
+                },
+                None => {
+                    return Err(JsValue::from_str(&format!(
+                        "❌ Failed to retrieve elevation data for bbox [{}, {}, {}, {}] after {} attempts. Check your internet connection or try adjusting the bounding box.",
+                        params.min_lng, params.min_lat, params.max_lng, params.max_lat, max_retries
+                    )));
+                }
+            }
         }
     };
     

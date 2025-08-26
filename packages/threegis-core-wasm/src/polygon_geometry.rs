@@ -1138,14 +1138,53 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             continue; // Skip invalid polygons
         }
         
-        // Determine extrusion height: vtDataSet.extrusionDepth first, then feature height, else dataset range
-        let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
+        // Determine extrusion height based on geometry type and available data
         let mut height = if let Some(d) = input.vtDataSet.extrusionDepth {
+            // Use explicitly set extrusion depth
             d
         } else if let Some(h) = polygon_data.height.filter(|h| *h > 0.0) {
+            // Use feature-specific height (typically for buildings)
             h
         } else {
-            dataset_range
+            // Determine height based on geometry type/class
+            let geometry_class = if let Some(ref props) = polygon_data.properties {
+                if let serde_json::Value::Object(obj) = props {
+                    obj.get("class")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                } else {
+                    "unknown"
+                }
+            } else {
+                "unknown"
+            };
+            
+            // Use appropriate default heights based on geometry type
+            match geometry_class {
+                // Transportation features should have small, fixed heights
+                "motorway" | "trunk" | "primary" | "secondary" | "tertiary" => 0.3,
+                "residential" | "service" | "unclassified" | "track" => 0.2,
+                "footway" | "cycleway" | "path" | "pedestrian" => 0.1,
+                "railway" | "subway" => 0.4,
+                "runway" | "taxiway" => 0.2,
+                
+                // Water features should be flat or slightly below ground
+                "water" | "ocean" | "lake" | "river" | "stream" => 0.05,
+                
+                // Natural/landuse features with small fixed heights
+                "park" | "forest" | "grass" | "meadow" | "farmland" => 0.1,
+                "sand" | "beach" => 0.05,
+                "rock" | "bare_rock" => 0.3,
+                
+                // Building-like structures use dataset scaling for proper proportions
+                "building" | "residential_building" | "commercial" | "industrial" => {
+                    let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
+                    dataset_range * 0.1 // Default to 10% of elevation range for buildings
+                },
+                
+                // Unknown types get small fixed height to avoid scaling issues
+                _ => 0.2
+            }
         };
         // Enforce minimum extrusion depth
         if let Some(min_d) = input.vtDataSet.minExtrusionDepth {
@@ -1157,10 +1196,61 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
         // Apply adaptive scale first, then heightScaleFactor
         if input.vtDataSet.useAdaptiveScaleFactor.unwrap_or(false) {
-            height *= calculate_adaptive_scale_factor(
+            // Get geometry class for selective scaling
+            let geometry_class = if let Some(ref props) = polygon_data.properties {
+                if let serde_json::Value::Object(obj) = props {
+                    obj.get("class")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                } else {
+                    "unknown"
+                }
+            } else {
+                "unknown"
+            };
+            
+            let base_scale_factor = calculate_adaptive_scale_factor(
                 input.bbox[0], input.bbox[1], input.bbox[2], input.bbox[3],
                 input.minElevation, input.maxElevation,
             );
+            
+            // Apply different scaling strategies based on geometry type
+            let scale_factor = match geometry_class {
+                // Buildings should scale moderately - not too extreme when bbox increases
+                "building" | "residential_building" | "commercial" | "industrial" => {
+                    // Apply 60% of the base scaling to prevent buildings from getting too tall
+                    1.0 + (base_scale_factor - 1.0) * 0.6
+                },
+                
+                // Transportation features should have minimal scaling to maintain consistent visibility
+                "motorway" | "trunk" | "primary" | "secondary" | "tertiary" |
+                "residential" | "service" | "unclassified" | "track" |
+                "footway" | "cycleway" | "path" | "pedestrian" |
+                "railway" | "subway" | "runway" | "taxiway" => {
+                    // Use much more conservative scaling for roads
+                    1.0 + (base_scale_factor - 1.0) * 0.2
+                },
+                
+                // Water features should barely scale at all
+                "water" | "ocean" | "lake" | "river" | "stream" => {
+                    1.0 + (base_scale_factor - 1.0) * 0.1
+                },
+                
+                // Natural features should scale moderately
+                "park" | "forest" | "grass" | "meadow" | "farmland" |
+                "sand" | "beach" | "rock" | "bare_rock" => {
+                    1.0 + (base_scale_factor - 1.0) * 0.3
+                },
+                
+                // Unknown types get conservative scaling
+                _ => 1.0 + (base_scale_factor - 1.0) * 0.3
+            };
+            
+            height *= scale_factor;
+            
+            // Debug logging for height scaling
+            console_log!("🏗️ Geometry scaling: class={}, base_height={:.3}, scale_factor={:.3}, final_height={:.3}", 
+                geometry_class, height / scale_factor, scale_factor, height);
         }
         if let Some(factor) = input.vtDataSet.heightScaleFactor {
             height *= factor;

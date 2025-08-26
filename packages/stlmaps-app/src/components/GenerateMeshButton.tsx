@@ -398,9 +398,8 @@ export const GenerateMeshButton = function () {
           bbox_key: currentBboxHash, // Use the bbox hash as the cache key
         };
 
-        // Call the WASM terrain geometry generator
-        const wasmTerrainResult =
-          wasmModule.create_terrain_geometry(terrainParams);
+        // Call the WASM terrain geometry generator (now async)
+        const wasmTerrainResult = await wasmModule.create_terrain_geometry(terrainParams);
 
         // Convert WASM TypedArrays to THREE.js BufferGeometry
         const geometry = new THREE.BufferGeometry();
