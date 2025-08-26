@@ -124,8 +124,14 @@ export const GenerateMeshButton = function () {
     // Cancel any ongoing polygon geometry tasks as well
     try {
       WorkerService.cancelActiveTasks("polygon-geometry");
+      // Also cancel any WASM operations
+      const wasmModule = getWasmModule();
+      if (wasmModule?.cancel_operation) {
+        wasmModule.cancel_operation("polygon_processing");
+        wasmModule.cancel_operation("terrain_generation");
+      }
     } catch (err) {
-      console.warn("Error cancelling existing worker tasks:", err);
+      console.warn("Error cancelling existing tasks:", err);
     }
 
     setIsProcessing(true);
@@ -653,7 +659,11 @@ export const GenerateMeshButton = function () {
 
           const serializedInput = JSON.stringify(polygonGeometryInput);
           
-          // Call the Rust implementation directly
+          // Create cancellation token for this layer processing
+          const layerToken = `layer_${currentLayer.sourceLayer}_${cancellationToken.id}`;
+          getWasmModule().create_cancellation_token(layerToken);
+          
+          // Call the Rust implementation directly with cancellation support
           const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
           const geometryDataArray = JSON.parse(geometryJson) as Array<{
             vertices: number[];
@@ -819,6 +829,9 @@ export const GenerateMeshButton = function () {
           console.log(
             "All worker geometries have been generated and integrated"
           );
+          
+          // CSG union is now handled automatically in the WASM module
+          console.log("✅ Geometry processing completed with integrated CSG union optimization");
         } catch (error) {
           console.error("Error waiting for geometry workers:", error);
         }

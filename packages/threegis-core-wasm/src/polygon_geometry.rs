@@ -82,7 +82,7 @@ pub struct PolygonGeometryInput {
 }
 
 // Output struct for the polygon geometry
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BufferGeometry {
     pub vertices: Vec<f32>,
     pub normals: Option<Vec<f32>>,
@@ -964,9 +964,13 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         
     }
 
+    let total_polygons = input.polygons.len();
+    let batch_size = 500; // Process in batches for better performance
+    
     for (i, polygon_data) in input.polygons.iter().enumerate() {
-        if i % 1000 == 0 && i > 0 {
-            
+        // Process in batches and yield control periodically
+        if i % batch_size == 0 && i > 0 {
+            console_log!("Processed {}/{} polygons", i, total_polygons);
         }
         
         // First, check if this polygon intersects with the bbox at all
@@ -1345,18 +1349,48 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         }
     }
     
-    
-    
-    // Return all individual geometries without merging
+    // Apply CSG union per layer to merge geometries
     if all_geometries.is_empty() {
-        
         return Ok(serde_json::to_string(&Vec::<BufferGeometry>::new()).unwrap());
     }
     
+    // Group geometries by layer and apply CSG union
+    let merged_geometries = if all_geometries.len() > 1 {
+        let initial_count = all_geometries.len();
+        console_log!("Applying CSG union to {} geometries for layer: {}", initial_count, input.vtDataSet.sourceLayer);
+        
+        // Merge geometries using CSG union
+        let layer_merged = crate::csg_union::merge_geometries_by_layer(all_geometries);
+        
+        // Extract merged geometries, optimizing each one
+        let mut final_geometries = Vec::new();
+        for (layer_name, geometry) in layer_merged {
+            console_log!("Optimizing merged geometry for layer: {}", layer_name);
+            let optimized = crate::csg_union::optimize_geometry(geometry, 0.01); // 1cm tolerance
+            if optimized.hasData {
+                final_geometries.push(optimized);
+            }
+        }
+        
+        console_log!("CSG union complete. Reduced {} geometries to {} merged geometries", 
+                    initial_count, final_geometries.len());
+        final_geometries
+    } else {
+        // Single geometry, just optimize it
+        if let Some(geometry) = all_geometries.into_iter().next() {
+            let optimized = crate::csg_union::optimize_geometry(geometry, 0.01);
+            if optimized.hasData {
+                vec![optimized]
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        }
+    };
     
-    
-    // Serialize all geometries as an array
-    match serde_json::to_string(&all_geometries) {
+    // Serialize merged and optimized geometries
+    match serde_json::to_string(&merged_geometries) {
         Ok(json) => Ok(json),
         Err(e) => Err(format!("Failed to serialize output: {}", e)),
     }

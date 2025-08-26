@@ -1,11 +1,9 @@
 use wasm_bindgen::prelude::*;
-use crate::cache_keys::{make_bbox_key, make_inner_key, make_inner_key_from_filter};
-use geojson::{Feature, GeoJson, Geometry, Value};
-use geo::{Coord, LineString, MultiLineString, MultiPolygon, Polygon};
+use crate::cache_keys::make_inner_key_from_filter;
+use geo::{Coord, LineString};
 use geo::algorithm::buffer::Buffer;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
-use std::collections::HashMap;
 use js_sys::Date;
 
 // Create a console module for logging
@@ -32,6 +30,10 @@ mod bbox_filter;
 // Import our geometry functions
 #[path = "../geometry_functions/extrude.rs"]
 pub mod extrude;
+// Import CSG union functionality
+mod csg_union;
+// Import cancellation handling
+mod cancellation;
 
 use module_state::{ModuleState, TileData, create_tile_key};
 use models::{CacheStats, RustResponse};
@@ -73,7 +75,7 @@ pub fn start() {
 
 // Function to store a raster tile in the cache
 #[wasm_bindgen]
-pub fn store_raster_tile(x: u32, y: u32, z: u32, source: &str, width: u32, height: u32, data: &[u8]) -> bool {
+pub fn store_raster_tile(x: u32, y: u32, z: u32, _source: &str, width: u32, height: u32, data: &[u8]) -> bool {
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
     
@@ -98,7 +100,7 @@ pub fn store_raster_tile(x: u32, y: u32, z: u32, source: &str, width: u32, heigh
 
 // Function to check if a raster tile exists in the cache
 #[wasm_bindgen]
-pub fn has_raster_tile(x: u32, y: u32, z: u32, source: &str) -> bool {
+pub fn has_raster_tile(x: u32, y: u32, z: u32, _source: &str) -> bool {
     let state = ModuleState::global();
     let mut state = state.lock().unwrap();
     
@@ -185,7 +187,7 @@ pub fn hello_from_rust(name: &str) -> Result<JsValue, JsValue> {
 
 // Add a placeholder for projection testing later
 #[wasm_bindgen]
-pub fn transform_coordinate(lon: f64, lat: f64, from_epsg: u32, to_epsg: u32) -> Result<JsValue, JsValue> {
+pub fn transform_coordinate(_lon: f64, _lat: f64, _from_epsg: u32, _to_epsg: u32) -> Result<JsValue, JsValue> {
     // Simple implementation without using the 'proj' crate
     // For EPSG:4326 (WGS84) to EPSG:3857 (Web Mercator)
     // This is a basic implementation - for production, use a proper projection library
@@ -203,130 +205,121 @@ pub fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 
-// Buffer a LineString or MultiLineString by a distance (in coordinate units)
-// Returns a GeoJSON Feature with MultiPolygon geometry.
+// Buffer a LineString by a distance (in coordinate units)
+// Returns a serialized array of polygon coordinates.
 #[wasm_bindgen]
-pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
+pub fn buffer_line_string_direct(coordinates: &[f64], dist: f64) -> String {
     
 
     // Defensive: non-positive or NaN distances return empty geometry
-    if !dist.is_finite() || dist == 0.0 {
-        return "{}".to_string();
+    if !dist.is_finite() || dist == 0.0 || coordinates.len() < 4 {
+        return "[]".to_string();
     }
     let dist = dist.abs();
 
-    // Try to parse any valid GeoJSON payload (Feature, Geometry, or raw geometry JSON)
-    let parsed = match geojson_str.parse::<GeoJson>() {
-        Ok(gj) => gj,
-        Err(e) => {
-            
-            return "{}".to_string();
-        }
-    };
+    // Convert flat coordinate array to LineString
+    if coordinates.len() % 2 != 0 {
+        return "[]".to_string();
+    }
 
-    // Using default buffer options provided by geo
+    // Convert flat coordinate array to LineString
+    let mut coords = Vec::new();
+    for i in (0..coordinates.len()).step_by(2) {
+        coords.push(Coord {
+            x: coordinates[i],
+            y: coordinates[i + 1],
+        });
+    }
+    
+    let linestring = LineString::new(coords);
+    let buffered = linestring.buffer(dist);
 
-    // Convert a Vec<[f64; 2+]>-like into a geo LineString, ignoring Z/M if present
-    let coords_to_linestring = |coords: &Vec<Vec<f64>>| -> LineString<f64> {
-        let pts: Vec<Coord<f64>> = coords
-            .iter()
-            .filter_map(|c| if c.len() >= 2 { Some(Coord { x: c[0], y: c[1] }) } else { None })
-            .collect();
-        LineString::new(pts)
-    };
+    // Serialize result as simple coordinate array
+    if buffered.0.is_empty() {
+        return "[]".to_string();
+    }
 
-    let geometry_to_multipoly = |val: Option<Value>| -> Option<MultiPolygon<f64>> {
-        match val? {
-            Value::LineString(coords) => {
-                let ls = coords_to_linestring(&coords);
-                
-                let buffered = ls.buffer(dist);
-                
-                Some(buffered)
-            }
-            Value::MultiLineString(lines) => {
-                
-                let parts: Vec<LineString<f64>> = lines.iter().map(|c| coords_to_linestring(c)).collect();
-                
-                let multi_ls = MultiLineString::new(parts);
-                let buffered = multi_ls.buffer(dist);
-                
-                Some(buffered)
-            }
-            _ => {
-                
-                None
-            }
-        }
-    };
+    // Convert to coordinate array format for direct use
+    let coords_array: Vec<Vec<Vec<f64>>> = buffered
+        .0
+        .into_iter()
+        .map(|poly| {
+            // Only take exterior ring for simplicity
+            poly.exterior().coords().map(|c| vec![c.x, c.y]).collect()
+        })
+        .collect();
 
-    let multipoly: Option<MultiPolygon<f64>> = match parsed {
-        GeoJson::Feature(f) => {
-            
-            geometry_to_multipoly(f.geometry.map(|g| g.value))
-        }
-        GeoJson::Geometry(g) => {
-            
-            geometry_to_multipoly(Some(g.value))
-        }
-        GeoJson::FeatureCollection(fc) => {
-            
-            // Buffer all LineString-like features and merge into one MultiPolygon
-            let mut acc: Vec<Polygon<f64>> = Vec::new();
-            for (i, feat) in fc.features.into_iter().enumerate() {
-                if let Some(mp) = geometry_to_multipoly(feat.geometry.map(|g| g.value)) {
-                    
-                    acc.extend(mp.0);
+    serde_json::to_string(&coords_array).unwrap_or_else(|_| "[]".to_string())
+}
+
+// Legacy buffer function for backward compatibility - uses direct coordinate processing
+#[wasm_bindgen]
+pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
+    // Parse simple GeoJSON and extract coordinates
+    match serde_json::from_str::<serde_json::Value>(geojson_str) {
+        Ok(geojson) => {
+            if let Some(geometry) = geojson.get("geometry") {
+                if let Some(coords) = geometry.get("coordinates") {
+                    if let Some(coord_array) = coords.as_array() {
+                        // Convert coordinate array to flat array
+                        let mut flat_coords = Vec::new();
+                        for coord in coord_array {
+                            if let Some(coord_pair) = coord.as_array() {
+                                if coord_pair.len() >= 2 {
+                                    if let (Some(x), Some(y)) = (coord_pair[0].as_f64(), coord_pair[1].as_f64()) {
+                                        flat_coords.push(x);
+                                        flat_coords.push(y);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Call the optimized direct function
+                        let result = buffer_line_string_direct(&flat_coords, dist);
+                        
+                        // Convert back to GeoJSON format for backward compatibility
+                        match serde_json::from_str::<Vec<Vec<Vec<f64>>>>(&result) {
+                            Ok(polygons) => {
+                                if polygons.is_empty() {
+                                    return "{}".to_string();
+                                }
+                                
+                                // Create MultiPolygon GeoJSON
+                                let multipolygon_coords: Vec<Vec<Vec<Vec<f64>>>> = polygons
+                                    .into_iter()
+                                    .map(|exterior| vec![exterior])
+                                    .collect();
+                                
+                                let feature = serde_json::json!({
+                                    "type": "Feature",
+                                    "geometry": {
+                                        "type": "MultiPolygon",
+                                        "coordinates": multipolygon_coords
+                                    },
+                                    "properties": {}
+                                });
+                                
+                                serde_json::to_string(&feature).unwrap_or_else(|_| "{}".to_string())
+                            }
+                            Err(_) => "{}".to_string()
+                        }
+                    } else {
+                        "{}".to_string()
+                    }
                 } else {
-                    
+                    "{}".to_string()
                 }
+            } else {
+                "{}".to_string()
             }
-            
-            if acc.is_empty() { None } else { Some(MultiPolygon(acc)) }
         }
-    };
-
-    // Serialize result
-    if let Some(mp) = multipoly {
-        // Handle empty result gracefully
-        if mp.0.is_empty() {
-            
-            return "{}".to_string();
-        }
-
-        
-
-        let coords_multi: Vec<Vec<Vec<Vec<f64>>>> = mp
-            .0
-            .into_iter()
-            .map(|poly| {
-                let exterior: Vec<Vec<f64>> = poly.exterior().coords().map(|c| vec![c.x, c.y]).collect();
-                let interiors: Vec<Vec<Vec<f64>>> = poly
-                    .interiors()
-                    .iter()
-                    .map(|ring| ring.coords().map(|c| vec![c.x, c.y]).collect())
-                    .collect();
-                let mut rings = Vec::with_capacity(1 + interiors.len());
-                rings.push(exterior);
-                rings.extend(interiors);
-                rings
-            })
-            .collect();
-
-        let geometry = Geometry::new(Value::MultiPolygon(coords_multi));
-        let feature = Feature { bbox: None, geometry: Some(geometry), id: None, properties: None, foreign_members: None };
-        let result = serde_json::to_string(&feature).unwrap_or_else(|_| "{}".to_string());
-        
-        result
-    } else {
-        
-        "{}".to_string()
+        Err(_) => "{}".to_string()
     }
 }
 
 // Function to create 3D building geometry from a GeoJSON polygon
 #[wasm_bindgen]
-pub fn create_building_geometry(building_json: &str, height: f64) -> String {
+pub fn create_building_geometry(_building_json: &str, height: f64) -> String {
     
     
     // In a real implementation, this would:
@@ -389,6 +382,30 @@ pub fn free_cache_group(group_id: &str) -> Result<(), JsValue> {
     crate::cache_manager::free_group_js(group_id)
 }
 
+// Export CSG union functionality
+#[wasm_bindgen]
+pub fn merge_geometries_with_csg_union(geometries_json: &str) -> Result<JsValue, JsValue> {
+    // Parse input geometries
+    let geometries: Vec<crate::polygon_geometry::BufferGeometry> = 
+        serde_json::from_str(geometries_json)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse geometries: {}", e)))?;
+    
+    // Merge geometries by layer
+    let merged_by_layer = csg_union::merge_geometries_by_layer(geometries);
+    
+    // Convert to output format
+    let result: Vec<crate::polygon_geometry::BufferGeometry> = merged_by_layer
+        .into_values()
+        .map(|geometry| csg_union::optimize_geometry(geometry, 0.01)) // 1cm tolerance
+        .collect();
+    
+    // Serialize result
+    let json = serde_json::to_string(&result)
+        .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))?;
+    
+    Ok(JsValue::from_str(&json))
+}
+
 // Export the polygon geometry creation function with cached feature retrieval
 #[wasm_bindgen]
 pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
@@ -435,7 +452,7 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
                 
                 data
             },
-            Err(e) => {
+            Err(_e) => {
                 
                 Vec::new()
             }
@@ -445,7 +462,7 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         
         // List what cache keys are actually available
         if let Some(bbox_cache) = state.feature_data_cache.get(&bbox_key) {
-            for (key, _) in bbox_cache.iter() {
+            for (_key, _) in bbox_cache.iter() {
                 
             }
         } else {
