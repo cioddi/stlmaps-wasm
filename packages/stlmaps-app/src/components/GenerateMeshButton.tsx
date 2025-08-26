@@ -677,55 +677,79 @@ export const GenerateMeshButton = function () {
           console.log(`WASM returned ${geometryDataArray.length} individual geometries`);
 
           // Convert each geometry and merge them into a single Three.js buffer geometry
+          // Process in batches to avoid blocking the main thread
           const geometries: THREE.BufferGeometry[] = [];
+          const batchSize = 50; // Process 50 geometries per batch
           
-          for (const geometryData of geometryDataArray) {
-            if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
-              continue;
-            }
+          for (let i = 0; i < geometryDataArray.length; i += batchSize) {
+            const batch = geometryDataArray.slice(i, i + batchSize);
+            
+            // Process current batch
+            for (const geometryData of batch) {
+              if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
+                continue;
+              }
 
-            const geometry = new THREE.BufferGeometry();
-            
-            // Add position attribute (vertices)
-            geometry.setAttribute(
-              "position", 
-              new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
-            );
-            
-            // Add normal attribute if available
-            if (geometryData.normals && geometryData.normals.length > 0) {
+              const geometry = new THREE.BufferGeometry();
+              
+              // Add position attribute (vertices)
               geometry.setAttribute(
-                "normal",
-                new THREE.BufferAttribute(new Float32Array(geometryData.normals), 3)
+                "position", 
+                new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
               );
-            }
-            
-            // Add color attribute if available
-            if (geometryData.colors && geometryData.colors.length > 0) {
-              geometry.setAttribute(
-                "color",
-                new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
-              );
-            }
-            
-            // Add index attribute if available
-            if (geometryData.indices && geometryData.indices.length > 0) {
-              geometry.setIndex(Array.from(geometryData.indices));
-            }
+              
+              // Add normal attribute if available
+              if (geometryData.normals && geometryData.normals.length > 0) {
+                geometry.setAttribute(
+                  "normal",
+                  new THREE.BufferAttribute(new Float32Array(geometryData.normals), 3)
+                );
+              }
+              
+              // Add color attribute if available
+              if (geometryData.colors && geometryData.colors.length > 0) {
+                geometry.setAttribute(
+                  "color",
+                  new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
+                );
+              }
+              
+              // Add index attribute if available
+              if (geometryData.indices && geometryData.indices.length > 0) {
+                geometry.setIndex(Array.from(geometryData.indices));
+              }
 
-            // Add properties to userData for hover interaction
-            if (geometryData.properties) {
-              geometry.userData = {
-                properties: geometryData.properties
-              };
+              // Add properties to userData for hover interaction
+              if (geometryData.properties) {
+                geometry.userData = {
+                  properties: geometryData.properties
+                };
+              }
+              
+              // Compute normals if not provided
+              if (!geometryData.normals) {
+                geometry.computeVertexNormals();
+              }
+
+              geometries.push(geometry);
             }
             
-            // Compute normals if not provided
-            if (!geometryData.normals) {
-              geometry.computeVertexNormals();
+            // Yield control to the event loop after each batch
+            if (i + batchSize < geometryDataArray.length) {
+              updateProcessingState({
+                status: `Processing geometries... (${Math.min(i + batchSize, geometryDataArray.length)}/${geometryDataArray.length})`,
+                progress: (i + batchSize) / geometryDataArray.length * 0.8 + 0.1 // 10-90% of progress
+              });
+              
+              // Yield to event loop
+              await new Promise(resolve => setTimeout(resolve, 0));
+              
+              // Check for cancellation
+              if (cancellationToken.isCancelled()) {
+                console.log("Geometry processing cancelled by user");
+                return;
+              }
             }
-
-            geometries.push(geometry);
           }
 
           console.log(`Created ${geometries.length} individual Three.js geometries`);

@@ -34,6 +34,8 @@ pub mod extrude;
 mod csg_union;
 // Import cancellation handling
 mod cancellation;
+// Import 3MF export functionality
+mod export_3mf;
 
 use module_state::{ModuleState, TileData, create_tile_key};
 use models::{CacheStats, RustResponse};

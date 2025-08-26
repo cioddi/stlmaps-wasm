@@ -447,6 +447,7 @@ const LayerList: React.FC<LayerListProps> = () => {
                     marks={[
                       { value: 0, label: "0" },
                       { value: 1, label: "1" },
+                      { value: 2.5, label: "2.5" },
                       { value: 5, label: "5" },
                     ]}
                   />

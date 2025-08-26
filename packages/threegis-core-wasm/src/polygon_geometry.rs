@@ -179,16 +179,14 @@ fn is_clockwise(points: &[Vector2]) -> bool {
     sum > 0.0
 }
 
-// Calculate an adaptive scale factor based on the extent and elevation range
-fn calculate_adaptive_scale_factor(
+// Calculate conversion factor from meters to visualization units
+fn calculate_meters_to_units_scale(
     min_lng: f64,
     min_lat: f64,
     max_lng: f64,
     max_lat: f64,
-    min_elevation: f64,
-    max_elevation: f64,
 ) -> f64 {
-    // Geographic extent in km
+    // Geographic extent calculation
     let R = 6371.0; // Earth radius in km
     let lat_extent_rad = (max_lat - min_lat) * std::f64::consts::PI / 180.0;
     let lat_center_rad = ((min_lat + max_lat) / 2.0) * std::f64::consts::PI / 180.0;
@@ -197,49 +195,22 @@ fn calculate_adaptive_scale_factor(
     let width_km = R * lng_extent_rad * lat_center_rad.cos();
     let height_km = R * lat_extent_rad;
     
-    // Area in km^2
-    let area_km2 = width_km * height_km;
-    
-    // Calculate meters per unit of mesh (mesh size is 200 units, as per transform_to_mesh_coordinates)
-    const TERRAIN_SIZE: f64 = 200.0; // Mesh size in visualization units
-    // Calculate real-world dimensions in meters (1km = 1000m)
+    // Calculate real-world dimensions in meters
     let width_m = width_km * 1000.0;
     let height_m = height_km * 1000.0;
     
-    // The average meters per unit
-    let meters_per_unit = ((width_m / TERRAIN_SIZE) + (height_m / TERRAIN_SIZE)) / 2.0;
+    // Average real-world size in meters
+    let avg_size_m = (width_m + height_m) / 2.0;
     
-    // Elevation range in meters
-    let elev_range_m = (max_elevation - min_elevation).abs().max(10.0);
+    // Mesh size is 200 visualization units
+    const TERRAIN_SIZE: f64 = 200.0;
     
-    // Calculate how many visualization units we need for a meter of height
-    // to maintain proper scale with geographic extent
-    let units_per_meter = 1.0 / meters_per_unit;
+    // Calculate how many visualization units per meter
+    // This should decrease for larger areas (larger meter/unit ratio)
+    let units_per_meter = TERRAIN_SIZE / avg_size_m;
     
-    // Apply scaling based on area to adjust for zoom level
-    let area_scale_factor = if area_km2 < 1.0 {
-        // For very small areas, increase the height to make it more visible
-        1.5
-    } else if area_km2 < 10.0 {
-        // Medium small areas
-        1.2
-    } else if area_km2 < 100.0 {
-        // Standard area
-        1.0
-    } else if area_km2 < 1000.0 {
-        // Larger areas, reduce height to avoid massive structures
-        0.7
-    } else {
-        // Very large areas, further reduce height
-        0.5
-    };
-    
-    // Final scaling factor that converts real-world meters to visualization units
-    // with area-based adjustment
-    let scale_factor = units_per_meter * area_scale_factor;
-    
-    // Clamp to reasonable bounds
-    scale_factor.clamp(0.05, 5.0)
+    // Clamp to reasonable bounds to prevent extreme scaling
+    units_per_meter.clamp(0.001, 1.0)
 }
 
 // Enhanced polygon validation to catch degenerate cases
@@ -1143,7 +1114,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             // Use explicitly set extrusion depth
             d
         } else if let Some(h) = polygon_data.height.filter(|h| *h > 0.0) {
-            // Use feature-specific height (typically for buildings)
+            // Use feature-specific height (typically for buildings from OSM data)
+            // This ensures building height variation is preserved
             h
         } else {
             // Determine height based on geometry type/class
@@ -1176,10 +1148,10 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 "sand" | "beach" => 0.05,
                 "rock" | "bare_rock" => 0.3,
                 
-                // Building-like structures use dataset scaling for proper proportions
+                // Building-like structures should have reasonable default heights in meters
                 "building" | "residential_building" | "commercial" | "industrial" => {
-                    let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
-                    dataset_range * 0.1 // Default to 10% of elevation range for buildings
+                    // Default building height: 25 meters (reasonable for 6-8 story building)
+                    25.0
                 },
                 
                 // Unknown types get small fixed height to avoid scaling issues
@@ -1194,9 +1166,14 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         }
         // Clamp to reasonable bounds
         height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
-        // Apply adaptive scale first, then heightScaleFactor
+        // Apply meter-based scaling to convert from meters to visualization units
         if input.vtDataSet.useAdaptiveScaleFactor.unwrap_or(false) {
-            // Get geometry class for selective scaling
+            // Get the meters-to-units conversion factor
+            let meters_to_units = calculate_meters_to_units_scale(
+                input.bbox[0], input.bbox[1], input.bbox[2], input.bbox[3]
+            );
+            
+            // Get geometry class for logging
             let geometry_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     obj.get("class")
@@ -1209,51 +1186,18 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 "unknown"
             };
             
-            let base_scale_factor = calculate_adaptive_scale_factor(
-                input.bbox[0], input.bbox[1], input.bbox[2], input.bbox[3],
-                input.minElevation, input.maxElevation,
-            );
-            
-            // Apply different scaling strategies based on geometry type
-            let scale_factor = match geometry_class {
-                // Buildings should scale moderately - not too extreme when bbox increases
-                "building" | "residential_building" | "commercial" | "industrial" => {
-                    // Apply 60% of the base scaling to prevent buildings from getting too tall
-                    1.0 + (base_scale_factor - 1.0) * 0.6
-                },
-                
-                // Transportation features should have minimal scaling to maintain consistent visibility
-                "motorway" | "trunk" | "primary" | "secondary" | "tertiary" |
-                "residential" | "service" | "unclassified" | "track" |
-                "footway" | "cycleway" | "path" | "pedestrian" |
-                "railway" | "subway" | "runway" | "taxiway" => {
-                    // Use much more conservative scaling for roads
-                    1.0 + (base_scale_factor - 1.0) * 0.2
-                },
-                
-                // Water features should barely scale at all
-                "water" | "ocean" | "lake" | "river" | "stream" => {
-                    1.0 + (base_scale_factor - 1.0) * 0.1
-                },
-                
-                // Natural features should scale moderately
-                "park" | "forest" | "grass" | "meadow" | "farmland" |
-                "sand" | "beach" | "rock" | "bare_rock" => {
-                    1.0 + (base_scale_factor - 1.0) * 0.3
-                },
-                
-                // Unknown types get conservative scaling
-                _ => 1.0 + (base_scale_factor - 1.0) * 0.3
-            };
-            
-            height *= scale_factor;
+            // Apply the conversion - height is assumed to be in meters
+            let original_height = height;
+            height *= meters_to_units;
             
             // Debug logging for height scaling
-            console_log!("🏗️ Geometry scaling: class={}, base_height={:.3}, scale_factor={:.3}, final_height={:.3}", 
-                geometry_class, height / scale_factor, scale_factor, height);
+            console_log!("🏗️ Meter scaling: class={}, height_m={:.1}, meters_to_units={:.6}, final_height={:.3}", 
+                geometry_class, original_height, meters_to_units, height);
         }
-        if let Some(factor) = input.vtDataSet.heightScaleFactor {
-            height *= factor;
+        
+        // Apply heightScaleFactor as a multiplier (if provided)
+        if let Some(scale_factor) = input.vtDataSet.heightScaleFactor {
+            height *= scale_factor;
         }
         if height <= 0.0 {
             let transportation_class = if let Some(ref props) = polygon_data.properties {

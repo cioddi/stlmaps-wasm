@@ -51,6 +51,10 @@ interface LayerState {
   hoverState: HoverState;
   bbox: GeoJSON.Feature | undefined;
   
+  // Color update tracking
+  colorOnlyUpdate: boolean;
+  layerColorUpdates: Record<string, THREE.Color>;
+  
   // Config hashes for smart regeneration
   configHashes: ConfigHashes;
   processedTerrainData: ProcessedTerrainData;
@@ -110,6 +114,9 @@ interface LayerState {
   setHoveredMesh: (mesh: THREE.Object3D | null, properties: Record<string, unknown> | null) => void;
   setMousePosition: (position: { x: number; y: number } | null) => void;
   clearHover: () => void;
+  
+  // Actions for color updates
+  clearColorOnlyUpdate: () => void;
 
   // Geometry actions
   setGeometryDataSets: (geometryDataSets: {
@@ -189,6 +196,10 @@ const useLayerStore = create<LayerState>((set) => ({
     mousePosition: null
   },
   bbox: undefined,
+  
+  // Color update tracking
+  colorOnlyUpdate: false,
+  layerColorUpdates: {},
 
 
   // Layer actions
@@ -206,7 +217,11 @@ const useLayerStore = create<LayerState>((set) => ({
       ...updatedLayers[index],
       enabled: !updatedLayers[index].enabled
     };
-    return { vtLayers: updatedLayers };
+    return { 
+      vtLayers: updatedLayers,
+      colorOnlyUpdate: false,
+      layerColorUpdates: {}
+    };
   }),
 
   setLayerColor: (index, hexColor) => set((state) => {
@@ -214,11 +229,21 @@ const useLayerStore = create<LayerState>((set) => ({
     if (!rgbColor) return state;
 
     const updatedLayers = [...state.vtLayers];
+    const newColor = new THREE.Color(rgbColor.r, rgbColor.g, rgbColor.b);
     updatedLayers[index] = {
       ...updatedLayers[index],
-      color: new THREE.Color(rgbColor.r, rgbColor.g, rgbColor.b)
+      color: newColor
     };
-    return { vtLayers: updatedLayers };
+    
+    // Track this as a color-only update
+    const layerColorUpdates = { ...state.layerColorUpdates };
+    layerColorUpdates[updatedLayers[index].sourceLayer] = newColor;
+    
+    return { 
+      vtLayers: updatedLayers,
+      colorOnlyUpdate: true,
+      layerColorUpdates
+    };
   }),
 
   setLayerExtrusionDepth: (index, value) => set((state) => {
@@ -371,6 +396,12 @@ const useLayerStore = create<LayerState>((set) => ({
     }
   })),
 
+  // Color update actions
+  clearColorOnlyUpdate: () => set((state) => ({
+    colorOnlyUpdate: false,
+    layerColorUpdates: {}
+  })),
+
   // Bbox action
   setBbox: (bbox) => set({ bbox }),
 
@@ -422,7 +453,9 @@ const useLayerStore = create<LayerState>((set) => ({
       processedElevationGrid: undefined,
       processedMinElevation: 0,
       processedMaxElevation: 0
-    }
+    },
+    colorOnlyUpdate: false,
+    layerColorUpdates: {}
   })
 }));
 

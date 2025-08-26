@@ -280,10 +280,13 @@ const ModelPreview = ({}: ModelPreviewProps) => {
     renderingSettings, 
     debugSettings, 
     hoverState,
+    colorOnlyUpdate,
+    layerColorUpdates,
     setRenderingMode,
     setHoveredMesh,
     setMousePosition,
-    clearHover
+    clearHover,
+    clearColorOnlyUpdate
   } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -802,6 +805,31 @@ const ModelPreview = ({}: ModelPreviewProps) => {
   }, [renderingMode]); // Only depend on rendering mode, not camera position
   
   // Update scene geometry with latest data
+  // Function to update only material colors without recreating geometry
+  const updateMaterialColors = useCallback(() => {
+    if (!sceneDataRef.current || !Object.keys(layerColorUpdates).length) return;
+    
+    console.log("Updating material colors only", layerColorUpdates);
+    const { modelGroup } = sceneDataRef.current;
+    
+    modelGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.userData?.sourceLayer) {
+        const newColor = layerColorUpdates[child.userData.sourceLayer];
+        if (newColor && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if ('color' in mat) mat.color = newColor.clone();
+            });
+          } else if ('color' in child.material) {
+            child.material.color = newColor.clone();
+          }
+        }
+      }
+    });
+    
+    clearColorOnlyUpdate();
+  }, [layerColorUpdates, clearColorOnlyUpdate]);
+
   const updateScene = useCallback(() => {
     if (!sceneDataRef.current || !rendererRef.current) return;
     
@@ -936,7 +964,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               };
               
               individualGeometry.userData = { properties };
-              polygonMesh.userData = { properties };
+              polygonMesh.userData = { properties, sourceLayer: vtDataset.sourceLayer };
               
               modelGroup.add(polygonMesh);
             });
@@ -1000,7 +1028,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           };
           
           geometry.userData = { properties };
-          polygonMesh.userData = { properties };
+          polygonMesh.userData = { properties, sourceLayer: vtDataset.sourceLayer };
           
           modelGroup.add(polygonMesh);
         });
@@ -1127,8 +1155,17 @@ const ModelPreview = ({}: ModelPreviewProps) => {
   }, [initScene, handleResize]);
   
   // Update scene when geometry data or rendering mode changes
+  // Handle color-only updates
   useEffect(() => {
-    if (sceneDataRef.current?.initialized) {
+    if (colorOnlyUpdate && sceneDataRef.current?.initialized) {
+      console.log("Handling color-only update");
+      updateMaterialColors();
+    }
+  }, [colorOnlyUpdate, updateMaterialColors]);
+
+  // Handle full geometry updates
+  useEffect(() => {
+    if (sceneDataRef.current?.initialized && !colorOnlyUpdate) {
       console.log("Triggering updateScene due to dependency changes");
       updateScene();
     }

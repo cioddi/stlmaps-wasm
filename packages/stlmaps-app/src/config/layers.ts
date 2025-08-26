@@ -72,7 +72,7 @@ export const vtGeometries: VtDataSet[] = [
     zOffset: -0.1,
     useAdaptiveScaleFactor: true,
     alignVerticesToTerrain: false,
-    heightScaleFactor: 0.8,
+    heightScaleFactor: 1.5, // 50% taller than default to make buildings more visible
     enabled: true,
     csgClipping: false,
   },
