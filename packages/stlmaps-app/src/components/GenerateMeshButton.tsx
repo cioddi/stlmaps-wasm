@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   GeometryData,
 } from "./VectorTileFunctions";
@@ -12,6 +12,8 @@ import {
   createComponentHashes,
   createConfigHash,
   hashBbox,
+  hashVtLayerConfig,
+  hashTerrainConfig,
 } from "../utils/configHashing";
 import { WorkerService } from "../workers/WorkerService";
 import { tokenManager } from "../utils/CancellationToken";
@@ -919,6 +921,16 @@ export const GenerateMeshButton = function () {
     }
   };
 
+  // Create a geometry-only hash that excludes color changes
+  const geometryOnlyLayersHash = useMemo(() => {
+    return vtLayers.map(hashVtLayerConfig).join(':');
+  }, [vtLayers]);
+
+  // Create a geometry-only terrain hash that excludes color changes
+  const geometryOnlyTerrainHash = useMemo(() => {
+    return hashTerrainConfig(terrainSettings);
+  }, [terrainSettings]);
+
   useEffect(() => {
     console.log("GenerateMeshButton dependencies changed:", {
       hasBbox: !!bbox,
@@ -946,7 +958,12 @@ export const GenerateMeshButton = function () {
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [bbox, vtLayers, terrainSettings]); // Only trigger on bbox changes, not on store state changes
+  }, [
+    bbox, 
+    // Use useMemo to create stable geometry-only hashes
+    geometryOnlyLayersHash,
+    geometryOnlyTerrainHash
+  ]); // Only trigger on geometry-affecting changes, not color changes
 
   return <></>;
 };

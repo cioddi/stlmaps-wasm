@@ -317,26 +317,36 @@ const useLayerStore = create<LayerState>((set) => ({
 
   // Terrain actions
   setTerrainSettings: (settings) => set((state) => ({
-    terrainSettings: { ...state.terrainSettings, ...settings }
+    terrainSettings: { ...state.terrainSettings, ...settings },
+    colorOnlyUpdate: false,
+    layerColorUpdates: {}
   })),
 
   toggleTerrainEnabled: () => set((state) => ({
     terrainSettings: {
       ...state.terrainSettings,
       enabled: !state.terrainSettings.enabled
-    }
+    },
+    colorOnlyUpdate: false,
+    layerColorUpdates: {}
   })),
 
   setTerrainVerticalExaggeration: (value) => set((state) => ({
-    terrainSettings: { ...state.terrainSettings, verticalExaggeration: value }
+    terrainSettings: { ...state.terrainSettings, verticalExaggeration: value },
+    colorOnlyUpdate: false,
+    layerColorUpdates: {}
   })),
 
   setTerrainBaseHeight: (value) => set((state) => ({
-    terrainSettings: { ...state.terrainSettings, baseHeight: value }
+    terrainSettings: { ...state.terrainSettings, baseHeight: value },
+    colorOnlyUpdate: false,
+    layerColorUpdates: {}
   })),
   
   setTerrainColor: (color) => set((state) => ({
-    terrainSettings: { ...state.terrainSettings, color }
+    terrainSettings: { ...state.terrainSettings, color },
+    colorOnlyUpdate: true,
+    layerColorUpdates: { ...state.layerColorUpdates, terrain: new THREE.Color(color) }
   })),
 
   // Building actions

@@ -2,22 +2,34 @@ import { VtDataSet } from "../components/GenerateMeshButton";
 import { TerrainSettings } from "../stores/useLayerStore";
 
 /**
- * Creates a hash representation of terrain settings for comparison
+ * Creates a hash representation of terrain settings for geometry generation
+ * (excludes visual-only properties like color)
  */
 export function hashTerrainConfig(config: TerrainSettings): string {
   return JSON.stringify({
     enabled: config.enabled,
     verticalExaggeration: config.verticalExaggeration,
     baseHeight: config.baseHeight,
-    color: config.color, // Include terrain color in hash calculation
+    // Color is excluded to prevent geometry regeneration on color changes
   });
 }
 
 /**
- * Creates a hash representation of a vector tile layer config for comparison
+ * Creates a hash representation of visual-only properties for terrain
+ */
+export function hashTerrainVisuals(config: TerrainSettings): string {
+  return JSON.stringify({
+    enabled: config.enabled,
+    color: config.color,
+  });
+}
+
+/**
+ * Creates a hash representation of a vector tile layer config for geometry generation
+ * (excludes visual-only properties like color)
  */
 export function hashVtLayerConfig(vtLayer: VtDataSet): string {
-  // Include both geometry-affecting properties and visual properties like color
+  // Only include geometry-affecting properties, exclude visual properties like color
   return JSON.stringify({
     sourceLayer: vtLayer.sourceLayer,
     subClass: vtLayer.subClass,
@@ -29,13 +41,21 @@ export function hashVtLayerConfig(vtLayer: VtDataSet): string {
     heightScaleFactor: vtLayer.heightScaleFactor,
     alignVerticesToTerrain: vtLayer.alignVerticesToTerrain,
     enabled: vtLayer.enabled,
-    // Include color to detect material changes
+    // Color is excluded to prevent geometry regeneration on color changes
+  });
+}
+
+/**
+ * Creates a hash representation of visual-only properties for a vector tile layer
+ */
+export function hashVtLayerVisuals(vtLayer: VtDataSet): string {
+  return JSON.stringify({
+    sourceLayer: vtLayer.sourceLayer,
     color: vtLayer.color ? { 
       r: vtLayer.color.r, 
       g: vtLayer.color.g, 
       b: vtLayer.color.b 
     } : undefined,
-    // Exclude data and geometry as they're the result of processing
   });
 }
 

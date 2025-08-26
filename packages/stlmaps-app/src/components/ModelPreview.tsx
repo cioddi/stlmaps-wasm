@@ -813,15 +813,32 @@ const ModelPreview = ({}: ModelPreviewProps) => {
     const { modelGroup } = sceneDataRef.current;
     
     modelGroup.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.userData?.sourceLayer) {
-        const newColor = layerColorUpdates[child.userData.sourceLayer];
-        if (newColor && child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(mat => {
-              if ('color' in mat) mat.color = newColor.clone();
-            });
-          } else if ('color' in child.material) {
-            child.material.color = newColor.clone();
+      if (child instanceof THREE.Mesh) {
+        // Handle layer color updates
+        if (child.userData?.sourceLayer) {
+          const newColor = layerColorUpdates[child.userData.sourceLayer];
+          if (newColor && child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => {
+                if ('color' in mat) mat.color = newColor.clone();
+              });
+            } else if ('color' in child.material) {
+              child.material.color = newColor.clone();
+            }
+          }
+        }
+        
+        // Handle terrain color updates
+        if (child.name === 'terrain' && layerColorUpdates.terrain) {
+          const terrainColor = layerColorUpdates.terrain;
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => {
+                if ('color' in mat) mat.color = terrainColor.clone();
+              });
+            } else if ('color' in child.material) {
+              child.material.color = terrainColor.clone();
+            }
           }
         }
       }
