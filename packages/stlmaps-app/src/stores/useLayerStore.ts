@@ -178,7 +178,7 @@ const useLayerStore = create<LayerState>((set) => ({
     enabled: true,
     verticalExaggeration: 0.06,
     baseHeight: 5,
-    color: "#383533"
+    color: "#c69639"
   },
   buildingSettings: {
     enabled: true,

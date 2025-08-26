@@ -9,6 +9,7 @@ interface DynamicVectorLayersProps {
 const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(
   () => {
     const vtLayers = useLayerStore((state) => state.vtLayers);
+    const terrainSettings = useLayerStore((state) => state.terrainSettings);
 
     // Create a stable dependency array
     const layerDeps = useMemo(
@@ -26,6 +27,20 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(
     const vectorTileLayers = useMemo(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const layers: any[] = [];
+
+      // Add terrain background layer if terrain is enabled
+      if (terrainSettings.enabled && terrainSettings.color) {
+        layers.push({
+          id: "terrain-background",
+          type: "background",
+          layout: {
+            visibility: "visible",
+          },
+          paint: {
+            "background-color": terrainSettings.color,
+          },
+        });
+      }
 
       for (const layerDep of layerDeps) {
         // Use cached hex color from layerDeps
@@ -105,7 +120,7 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(
       }
 
       return layers;
-    }, [layerDeps]);
+    }, [layerDeps, terrainSettings.enabled, terrainSettings.color]);
 
     return (
       <MlVectorTileLayer
