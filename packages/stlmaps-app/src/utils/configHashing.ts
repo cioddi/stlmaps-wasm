@@ -7,7 +7,7 @@ import { TerrainSettings } from "../stores/useLayerStore";
  */
 export function hashTerrainConfig(config: TerrainSettings): string {
   return JSON.stringify({
-    enabled: config.enabled,
+    // enabled excluded - visibility doesn't affect geometry, only affects 3D preview display
     verticalExaggeration: config.verticalExaggeration,
     // baseHeight excluded - can be updated in real-time
     // Color is excluded to prevent geometry regeneration on color changes
@@ -40,7 +40,7 @@ export function hashVtLayerConfig(vtLayer: VtDataSet): string {
     useAdaptiveScaleFactor: vtLayer.useAdaptiveScaleFactor,
     // heightScaleFactor excluded - can be updated in real-time
     alignVerticesToTerrain: vtLayer.alignVerticesToTerrain,
-    enabled: vtLayer.enabled,
+    // enabled excluded - visibility doesn't affect geometry, only affects 3D preview display
     // Color is excluded to prevent geometry regeneration on color changes
   });
 }
@@ -78,7 +78,7 @@ export function createConfigHash(
   return JSON.stringify({
     bbox: hashBbox(bbox),
     terrain: hashTerrainConfig(terrainSettings),
-    layers: vtLayers.filter(l => l.enabled !== false).map(hashVtLayerConfig)
+    layers: vtLayers.map(hashVtLayerConfig) // Process all layers regardless of enabled state
   });
 }
 
@@ -90,15 +90,11 @@ export function createComponentHashes(
   terrainSettings: TerrainSettings,
   vtLayers: VtDataSet[]
 ) {
-  const terrainHash = terrainSettings.enabled ? 
-    `${hashBbox(bbox)}:${hashTerrainConfig(terrainSettings)}` : 
-    "disabled";
+  const terrainHash = `${hashBbox(bbox)}:${hashTerrainConfig(terrainSettings)}`; // Always process terrain, visibility controlled in 3D preview
   
   const layerHashes = vtLayers.map((layer, index) => ({
     index,
-    hash: layer.enabled !== false ? 
-      `${hashBbox(bbox)}:${hashVtLayerConfig(layer)}` : 
-      "disabled"
+    hash: `${hashBbox(bbox)}:${hashVtLayerConfig(layer)}` // Always calculate hash since all layers are processed
   }));
 
   return {

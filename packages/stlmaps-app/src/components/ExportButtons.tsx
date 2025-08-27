@@ -37,7 +37,7 @@ interface ExportFormat {
 
 const ExportButtons: React.FC = () => {
   // Get geometry data and scene directly from the Zustand store
-  const { geometryDataSets, getCurrentScene } = useLayerStore();
+  const { geometryDataSets, vtLayers, terrainSettings, getCurrentScene } = useLayerStore();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   
@@ -181,8 +181,8 @@ const ExportButtons: React.FC = () => {
       );
     };
 
-    // Add terrain
-    if (geometryDataSets.terrainGeometry) {
+    // Add terrain if enabled
+    if (geometryDataSets.terrainGeometry && terrainSettings.enabled) {
       const geomToUse = validateGeometries ? validateGeometry(geometryDataSets.terrainGeometry) : geometryDataSets.terrainGeometry;
       if (isValidGeometry(geomToUse)) {
         const terrainMaterial = new THREE.MeshStandardMaterial({
@@ -201,7 +201,11 @@ const ExportButtons: React.FC = () => {
         if (!vtDataset?.geometry) {
           return;
         }
-        if (vtDataset.enabled === false) {
+        // Check current enabled state from layer store instead of stored state
+        const currentLayer = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+        const isCurrentlyEnabled = currentLayer?.enabled !== false;
+        
+        if (!isCurrentlyEnabled) {
           return;
         }
         const geomToUse = validateGeometries ? validateGeometry(vtDataset.geometry) : vtDataset.geometry;

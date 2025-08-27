@@ -276,6 +276,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
   // Get geometry data and settings from the Zustand store
   const { 
     geometryDataSets, 
+    vtLayers,
     terrainSettings, 
     renderingSettings, 
     debugSettings, 
@@ -901,8 +902,8 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         }
       }
       
-      // Add terrain if available
-      if (geometryDataSets.terrainGeometry) {
+      // Add terrain if available and enabled
+      if (geometryDataSets.terrainGeometry && terrainSettings.enabled) {
         console.log("Adding terrain geometry to scene:", {
           vertexCount: geometryDataSets.terrainGeometry.attributes?.position?.count || 0,
           valid: !!geometryDataSets.terrainGeometry.attributes?.position?.count
@@ -946,6 +947,10 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
         geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
           if (!geometry) return; // Skip if geometry is undefined
+          
+          // Look up current enabled state from layer store instead of using stored state
+          const currentLayer = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+          const isCurrentlyEnabled = currentLayer?.enabled !== false;
           
           // Check if this is a container geometry with individual geometries
           if (geometry.userData?.isContainer && geometry.userData?.individualGeometries) {
@@ -994,6 +999,9 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               polygonMesh.castShadow = renderingMode === 'quality';
               polygonMesh.receiveShadow = renderingMode === 'quality';
               polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
+              
+              // Control visibility based on current layer enabled state
+              polygonMesh.visible = isCurrentlyEnabled;
               
               // Preserve individual properties for hover interaction
               // Prioritize MVT feature properties over layer configuration
@@ -1058,6 +1066,9 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           polygonMesh.castShadow = renderingMode === 'quality';
           polygonMesh.receiveShadow = renderingMode === 'quality';
           
+          // Control visibility based on current layer enabled state
+          polygonMesh.visible = isCurrentlyEnabled;
+          
           // Attach properties to the geometry and mesh for hover interaction  
           const mvtProperties = geometry.userData?.properties || {};
           console.log('Existing geometry properties from userData:', mvtProperties);
@@ -1091,6 +1102,32 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       setLoading(false);
     }
   }, [geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries, terrainSettings, renderingMode]);
+  
+  // Update mesh visibility when layer enabled states change (without rebuilding geometry)
+  useEffect(() => {
+    if (!sceneDataRef.current) return;
+    
+    const { scene } = sceneDataRef.current;
+    
+    // Update visibility of existing meshes based on current layer enabled states
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.userData?.sourceLayer) {
+        const sourceLayer = object.userData.sourceLayer;
+        const currentLayer = vtLayers.find(layer => layer.sourceLayer === sourceLayer);
+        const isCurrentlyEnabled = currentLayer?.enabled !== false;
+        
+        // Update mesh visibility
+        object.visible = isCurrentlyEnabled;
+      }
+    });
+    
+    // Also handle terrain visibility
+    const terrainMesh = scene.getObjectByName('terrain');
+    if (terrainMesh) {
+      terrainMesh.visible = terrainSettings.enabled;
+    }
+    
+  }, [vtLayers, terrainSettings.enabled]);
   
   // Initialize scene when component mounts
   useEffect(() => {

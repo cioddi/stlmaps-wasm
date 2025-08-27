@@ -186,7 +186,7 @@ export const GenerateMeshButton = function () {
         "%c 🏔️ Terrain configuration changed - regenerating terrain",
         "color: #FF9800;"
       );
-    } else if (terrainSettings.enabled && geometryDataSets.terrainGeometry) {
+    } else if (geometryDataSets.terrainGeometry) {
       console.log(
         "%c ✅ Terrain configuration unchanged - reusing existing terrain geometry",
         "color: #4CAF50;"
@@ -331,10 +331,8 @@ export const GenerateMeshButton = function () {
       // Check for cancellation before generating terrain geometry
       cancellationToken.throwIfCancelled();
 
-      // Check if terrain needs to be regenerated
-      let terrainGeometry = terrainSettings.enabled
-        ? geometryDataSets.terrainGeometry
-        : undefined;
+      // Always process terrain geometry (visibility controlled in 3D preview)
+      let terrainGeometry = geometryDataSets.terrainGeometry;
       let processedElevationGrid = elevationResult.elevationGrid;
       let processedMinElevation = elevationResult.minElevation;
       let processedMaxElevation = elevationResult.maxElevation;
@@ -440,9 +438,10 @@ export const GenerateMeshButton = function () {
       }
       // Set generated geometries based on settings
       console.log("🔄 Setting output geometries:", {
-        terrainEnabled: terrainSettings.enabled,
+        terrainVisibleIn3D: terrainSettings.enabled,
         terrainGeometryExists: !!terrainGeometry,
         buildingsEnabled: buildingSettings.enabled,
+        note: "All layers are processed; visibility controlled in 3D preview",
       });
 
       // Fetch vt data for this bbox
@@ -485,11 +484,9 @@ export const GenerateMeshButton = function () {
           progress: 50 + (i * 40) / vtLayers.length, // 50-90% for layer processing
         });
 
-        // Skip disabled layers
-        if (currentLayer.enabled === false) {
-          console.log(`Skipping disabled layer: ${currentLayer.sourceLayer}`);
-          continue;
-        }
+        // Process all layers regardless of enabled state for 3D preview
+        // (Disabled layers will be hidden in the 3D preview but geometry is still generated)
+        console.log(`Processing layer: ${currentLayer.sourceLayer} (enabled: ${currentLayer.enabled !== false})`);
 
         // Check if this layer's configuration has changed
         const layerNeedsUpdate =
@@ -876,7 +873,7 @@ export const GenerateMeshButton = function () {
       });
 
       setGeometryDataSets({
-        terrainGeometry: terrainSettings.enabled ? terrainGeometry : undefined,
+        terrainGeometry: terrainGeometry, // Always store terrain geometry, visibility controlled in 3D preview
         polygonGeometries: vtPolygonGeometries,
       });
       setIsProcessing(false);

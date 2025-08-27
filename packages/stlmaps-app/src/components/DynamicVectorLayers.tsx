@@ -6,8 +6,7 @@ interface DynamicVectorLayersProps {
   mapId?: string;
 }
 
-const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(
-  () => {
+const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() => {
     const vtLayers = useLayerStore((state) => state.vtLayers);
     const terrainSettings = useLayerStore((state) => state.terrainSettings);
 
@@ -134,7 +133,6 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(
         }}
       />
     );
-  }
-);
+});
 
 export default DynamicVectorLayers;

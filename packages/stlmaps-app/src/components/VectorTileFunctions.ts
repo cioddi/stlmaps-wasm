@@ -201,11 +201,9 @@ export const extractGeojsonFeaturesFromVectorTiles = async (
   const { bbox, vectorTiles, vtDataset, elevationGrid, gridSize } = config;
   const [minLng, minLat, maxLng, maxLat] = bbox;
 
-  // Skip processing if the layer is explicitly disabled
-  if (vtDataset.enabled === false) {
-    console.log(`Skipping disabled layer "${vtDataset.sourceLayer}"`);
-    return [];
-  }
+  // Process all layers regardless of enabled state
+  // (Disabled layers will be hidden in 3D preview but geometry is still generated)
+  console.log(`Processing layer "${vtDataset.sourceLayer}" (enabled: ${vtDataset.enabled !== false})`);
 
   const geometryData: GeometryData[] = [];
 
