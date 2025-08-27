@@ -4,6 +4,7 @@ use crate::bbox_filter::polygon_intersects_bbox;
 use crate::extrude;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
+// Sequential processing for WASM compatibility
 // use csgrs::csg::CSG; // Temporarily commented out - CSG functionality disabled
 use js_sys::{Object, Array, Float32Array};
 use wasm_bindgen::prelude::JsValue;
@@ -936,19 +937,19 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     }
 
     let total_polygons = input.polygons.len();
-    let batch_size = 500; // Process in batches for better performance
+    console_log!("Processing {} polygons sequentially", total_polygons);
     
-    for (i, polygon_data) in input.polygons.iter().enumerate() {
-        // Process in batches and yield control periodically
-        if i % batch_size == 0 && i > 0 {
-            console_log!("Processed {}/{} polygons", i, total_polygons);
-        }
+    // Process polygons sequentially for WASM compatibility
+    let geometries_result: Result<Vec<_>, String> = input.polygons
+        .iter()
+        .enumerate()
+        .map(|(i, polygon_data)| -> Result<Option<BufferGeometry>, String> {
         
         // First, check if this polygon intersects with the bbox at all
         // This ensures any feature with at least one vertex inside the bbox is processed
         if !polygon_intersects_bbox(&polygon_data.geometry, &input.bbox) {
             // Skip polygons that don't intersect with the bbox
-            continue;
+            return Ok(None);
         }
         
         // Debug: log the first few polygon properties to see what's available
@@ -1106,7 +1107,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            continue; // Skip invalid polygons
+            return Ok(None); // Skip invalid polygons
         }
         
         // Determine extrusion height based on geometry type and available data
@@ -1208,7 +1209,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            continue; // Skip flat geometry
+            return Ok(None); // Skip flat geometry
         }
         
         // Apply mesh coordinates transform
@@ -1230,7 +1231,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            continue; // Skip invalid polygon after cleaning
+            return Ok(None); // Skip invalid polygon after cleaning
         }
 
         // Determine if CSG clipping should be used
@@ -1265,7 +1266,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            continue;
+            return Ok(None);
         }
         
         // For polygons with insufficient points, try to reuse the original cleaned points
@@ -1313,7 +1314,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     } else { "no_props".to_string() }
                 } else { "no_props".to_string() };
                 
-                continue;
+                return Ok(None);
             }
         } else {
             clipped_points
@@ -1379,9 +1380,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         );
         
         if geometry.hasData {
-            all_geometries.push(geometry);
+            Ok(Some(geometry))
+        } else {
+            Ok(None)
         }
-    }
+        })
+        .collect();
+    
+    // Handle sequential processing results
+    let sequential_geometries = geometries_result.map_err(|e| format!("Sequential processing error: {}", e))?;
+    let mut all_geometries: Vec<BufferGeometry> = sequential_geometries
+        .into_iter()
+        .filter_map(|opt| opt)
+        .collect();
+    
+    console_log!("Parallel processing completed, {} valid geometries", all_geometries.len());
     
     // Apply CSG union per layer to merge geometries
     if all_geometries.is_empty() {

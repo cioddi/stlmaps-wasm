@@ -1,5 +1,6 @@
 use crate::polygon_geometry::BufferGeometry;
 use std::collections::HashMap;
+use rayon::prelude::*;
 
 // Simple CSG union implementation for merging geometries
 // This is a basic implementation - for production use, consider a more robust CSG library
@@ -119,50 +120,46 @@ pub fn merge_geometries_by_layer(geometries: Vec<BufferGeometry>) -> HashMap<Str
     result
 }
 
-/// Merge geometries with more advanced spatial grouping
+/// Merge geometries with more advanced spatial grouping using parallel processing
 pub fn merge_geometries_with_spatial_grouping(geometries: Vec<BufferGeometry>, max_distance: f32) -> HashMap<String, BufferGeometry> {
     if geometries.is_empty() {
         return HashMap::new();
     }
     
+    // Calculate geometry centers in parallel
+    let geometry_centers: Vec<(BufferGeometry, (f32, f32))> = geometries
+        .into_par_iter()
+        .filter(|geometry| geometry.hasData && geometry.vertices.len() >= 9)
+        .map(|geometry| {
+            let vertex_count = geometry.vertices.len() / 3;
+            let (center_x, center_y) = geometry.vertices
+                .par_chunks_exact(3)
+                .map(|chunk| (chunk[0], chunk[1]))
+                .reduce(|| (0.0, 0.0), |acc, point| (acc.0 + point.0, acc.1 + point.1));
+            
+            let center = (center_x / vertex_count as f32, center_y / vertex_count as f32);
+            (geometry, center)
+        })
+        .collect();
+    
     // Group geometries by spatial proximity
     let mut groups: Vec<Vec<BufferGeometry>> = Vec::new();
     
-    for geometry in geometries.into_iter() {
-        if !geometry.hasData || geometry.vertices.len() < 3 {
-            continue;
-        }
-        
-        // Calculate geometry center
-        let mut center_x = 0.0f32;
-        let mut center_y = 0.0f32;
-        let vertex_count = geometry.vertices.len() / 3;
-        
-        for i in (0..geometry.vertices.len()).step_by(3) {
-            center_x += geometry.vertices[i];
-            center_y += geometry.vertices[i + 1];
-        }
-        center_x /= vertex_count as f32;
-        center_y /= vertex_count as f32;
-        
+    for (geometry, center) in geometry_centers {
         // Find the closest group or create a new one
         let mut added_to_group = false;
         for group in &mut groups {
             if let Some(first_geom) = group.first() {
                 // Calculate center of first geometry in group
-                let mut group_center_x = 0.0f32;
-                let mut group_center_y = 0.0f32;
                 let group_vertex_count = first_geom.vertices.len() / 3;
-                
-                for i in (0..first_geom.vertices.len()).step_by(3) {
-                    group_center_x += first_geom.vertices[i];
-                    group_center_y += first_geom.vertices[i + 1];
-                }
-                group_center_x /= group_vertex_count as f32;
-                group_center_y /= group_vertex_count as f32;
+                let (group_center_x, group_center_y) = first_geom.vertices
+                    .par_chunks_exact(3)
+                    .map(|chunk| (chunk[0], chunk[1]))
+                    .reduce(|| (0.0, 0.0), |acc, point| (acc.0 + point.0, acc.1 + point.1));
+                let group_center = (group_center_x / group_vertex_count as f32, group_center_y / group_vertex_count as f32);
                 
                 // Check distance
-                let distance = ((center_x - group_center_x).powi(2) + (center_y - group_center_y).powi(2)).sqrt();
+                let distance = ((center.0 - group_center.0).powi(2) + (center.1 - group_center.1).powi(2)).sqrt();
                 if distance <= max_distance {
                     group.push(geometry.clone());
                     added_to_group = true;
@@ -176,23 +173,28 @@ pub fn merge_geometries_with_spatial_grouping(geometries: Vec<BufferGeometry>, m
         }
     }
     
-    // Merge each group
-    let mut result = HashMap::new();
-    for (group_idx, group) in groups.into_iter().enumerate() {
-        if group.is_empty() {
-            continue;
-        }
-        
-        let mut union = CSGUnion::new();
-        for geometry in group {
-            union.add_geometry(&geometry);
-        }
-        
-        let merged = union.finish();
-        if merged.hasData {
-            result.insert(format!("group_{}", group_idx), merged);
-        }
-    }
+    // Merge each group in parallel
+    let result: HashMap<String, BufferGeometry> = groups
+        .into_par_iter()
+        .enumerate()
+        .filter_map(|(group_idx, group)| {
+            if group.is_empty() {
+                return None;
+            }
+            
+            let mut union = CSGUnion::new();
+            for geometry in group {
+                union.add_geometry(&geometry);
+            }
+            
+            let merged = union.finish();
+            if merged.hasData {
+                Some((format!("group_{}", group_idx), merged))
+            } else {
+                None
+            }
+        })
+        .collect();
     
     result
 }

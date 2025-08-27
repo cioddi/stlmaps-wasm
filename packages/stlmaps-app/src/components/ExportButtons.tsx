@@ -36,8 +36,8 @@ interface ExportFormat {
 }
 
 const ExportButtons: React.FC = () => {
-  // Get geometry data directly from the Zustand store
-  const { geometryDataSets } = useLayerStore();
+  // Get geometry data and scene directly from the Zustand store
+  const { geometryDataSets, getCurrentScene } = useLayerStore();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   
@@ -158,6 +158,16 @@ const ExportButtons: React.FC = () => {
 
   // Create a scene with all meshes for export, skipping invalid geometries
   const createExportScene = (validateGeometries = false): THREE.Scene => {
+    const currentScene = getCurrentScene();
+    
+    if (currentScene) {
+      // Clone the current scene to preserve all real-time adjustments (positions, scales, colors)
+      console.log("Using current ModelPreview scene with real-time adjustments");
+      return currentScene.clone();
+    }
+    
+    // Fallback to creating scene from geometry data
+    console.warn("No current scene available, creating scene from geometry data");
     const scene = new THREE.Scene();
 
     // Helper to check if geometry is valid for export

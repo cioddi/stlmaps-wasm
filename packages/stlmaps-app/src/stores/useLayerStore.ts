@@ -55,6 +55,9 @@ interface LayerState {
   colorOnlyUpdate: boolean;
   layerColorUpdates: Record<string, THREE.Color>;
   
+  // Export scene access
+  sceneGetter: (() => THREE.Scene | null) | null;
+  
   // Config hashes for smart regeneration
   configHashes: ConfigHashes;
   processedTerrainData: ProcessedTerrainData;
@@ -117,6 +120,10 @@ interface LayerState {
   
   // Actions for color updates
   clearColorOnlyUpdate: () => void;
+  
+  // Export scene access
+  getCurrentScene: () => THREE.Scene | null;
+  setCurrentSceneGetter: (getter: () => THREE.Scene | null) => void;
 
   // Geometry actions
   setGeometryDataSets: (geometryDataSets: {
@@ -200,6 +207,9 @@ const useLayerStore = create<LayerState>((set) => ({
   // Color update tracking
   colorOnlyUpdate: false,
   layerColorUpdates: {},
+  
+  // Export scene access
+  sceneGetter: null,
 
 
   // Layer actions
@@ -270,7 +280,16 @@ const useLayerStore = create<LayerState>((set) => ({
       ...updatedLayers[index],
       zOffset: value
     };
-    return { vtLayers: updatedLayers };
+    
+    // Track this as a real-time update
+    const layerColorUpdates = { ...state.layerColorUpdates };
+    layerColorUpdates[`${updatedLayers[index].sourceLayer}_zOffset`] = value;
+    
+    return { 
+      vtLayers: updatedLayers,
+      colorOnlyUpdate: true,
+      layerColorUpdates
+    };
   }),
 
   setLayerBufferSize: (index, value) => set((state) => {
@@ -306,7 +325,16 @@ const useLayerStore = create<LayerState>((set) => ({
       ...updatedLayers[index],
       heightScaleFactor: value
     };
-    return { vtLayers: updatedLayers };
+    
+    // Track this as a real-time update
+    const layerColorUpdates = { ...state.layerColorUpdates };
+    layerColorUpdates[`${updatedLayers[index].sourceLayer}_heightScaleFactor`] = value;
+    
+    return { 
+      vtLayers: updatedLayers,
+      colorOnlyUpdate: true,
+      layerColorUpdates
+    };
   }),
 
   setLayerCsgClipping: (index: number, value: boolean) => set((state) => {
@@ -339,8 +367,8 @@ const useLayerStore = create<LayerState>((set) => ({
 
   setTerrainBaseHeight: (value) => set((state) => ({
     terrainSettings: { ...state.terrainSettings, baseHeight: value },
-    colorOnlyUpdate: false,
-    layerColorUpdates: {}
+    colorOnlyUpdate: true,
+    layerColorUpdates: { ...state.layerColorUpdates, terrainBaseHeight: value }
   })),
   
   setTerrainColor: (color) => set((state) => ({
@@ -412,6 +440,14 @@ const useLayerStore = create<LayerState>((set) => ({
     layerColorUpdates: {}
   })),
 
+  // Export scene access actions
+  getCurrentScene: () => {
+    const state = useLayerStore.getState();
+    return state.sceneGetter ? state.sceneGetter() : null;
+  },
+  
+  setCurrentSceneGetter: (getter) => set({ sceneGetter: getter }),
+
   // Bbox action
   setBbox: (bbox) => set({ bbox }),
 
@@ -465,7 +501,8 @@ const useLayerStore = create<LayerState>((set) => ({
       processedMaxElevation: 0
     },
     colorOnlyUpdate: false,
-    layerColorUpdates: {}
+    layerColorUpdates: {},
+    sceneGetter: null
   })
 }));
 

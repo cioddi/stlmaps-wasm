@@ -27,6 +27,8 @@ geozero = { version = "0.10.0", features = ["geo-types", "with-mvt"], default-fe
 uuid = { version = "1.16.0", features = ["js"] }
 nalgebra = "0.32.3"
 earcutr = "0.4.2"
+rayon = "1.8"
+num_cpus = "1.16"
 
 # Use the latest geo crate from main branch for unreleased buffer features
 geo = { git = "https://github.com/georust/geo", features = ["use-serde"] }

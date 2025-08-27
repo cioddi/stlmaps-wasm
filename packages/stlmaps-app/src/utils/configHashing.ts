@@ -9,7 +9,7 @@ export function hashTerrainConfig(config: TerrainSettings): string {
   return JSON.stringify({
     enabled: config.enabled,
     verticalExaggeration: config.verticalExaggeration,
-    baseHeight: config.baseHeight,
+    // baseHeight excluded - can be updated in real-time
     // Color is excluded to prevent geometry regeneration on color changes
   });
 }
@@ -29,16 +29,16 @@ export function hashTerrainVisuals(config: TerrainSettings): string {
  * (excludes visual-only properties like color)
  */
 export function hashVtLayerConfig(vtLayer: VtDataSet): string {
-  // Only include geometry-affecting properties, exclude visual properties like color
+  // Only include geometry-affecting properties, exclude visual properties and real-time adjustable properties
   return JSON.stringify({
     sourceLayer: vtLayer.sourceLayer,
     subClass: vtLayer.subClass,
     extrusionDepth: vtLayer.extrusionDepth,
-    zOffset: vtLayer.zOffset,
+    // zOffset excluded - can be updated in real-time
     bufferSize: vtLayer.bufferSize,
     filter: vtLayer.filter,
     useAdaptiveScaleFactor: vtLayer.useAdaptiveScaleFactor,
-    heightScaleFactor: vtLayer.heightScaleFactor,
+    // heightScaleFactor excluded - can be updated in real-time
     alignVerticesToTerrain: vtLayer.alignVerticesToTerrain,
     enabled: vtLayer.enabled,
     // Color is excluded to prevent geometry regeneration on color changes

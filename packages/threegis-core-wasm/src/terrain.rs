@@ -1,10 +1,11 @@
-// Terrain geometry generation module
+// Terrain geometry generation module with sequential processing for WASM compatibility
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use js_sys::{Float32Array, Uint32Array, Array, Object};
 use std::collections::HashMap;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen::closure::Closure;
+// Sequential processing for WASM compatibility
 
 use crate::module_state::{ModuleState};
 use crate::elevation::{ElevationProcessingResult, GridSize};
@@ -32,14 +33,14 @@ pub struct TerrainGeometryResult {
     pub processed_max_elevation: f64,
 }
 
-// Function to smooth the elevation grid using a gaussian kernel
+// Function to smooth the elevation grid using a gaussian kernel with parallel processing
 fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Vec<Vec<f64>> {
     let mut result = vec![vec![0.0; width]; height];
     let kernel_size = 3; // Smaller 3x3 kernel for less smoothing (was 5)
     let kernel_radius = kernel_size / 2;
     let sigma = 0.8; // Reduced sigma for sharper falloff (was 1.0)
     
-    
+    console_log!("Starting sequential terrain smoothing for {}x{} grid", width, height);
     
     // Precompute gaussian weights for optimization
     let mut kernel_weights = vec![vec![0.0; kernel_size]; kernel_size];
@@ -64,7 +65,7 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
         }
     }
     
-    // Apply the kernel to each grid cell
+    // Process grid sequentially for WASM compatibility
     for y in 0..height {
         for x in 0..width {
             let mut weighted_sum = 0.0;
@@ -98,42 +99,39 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
         }
     }
     
+    console_log!("Sequential terrain smoothing completed");
     result
 }
 
-// Function to remove outliers from the elevation data
+// Function to remove outliers from the elevation data with sequential processing
 fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) -> (Vec<Vec<f64>>, f64, f64) {
     let width = grid[0].len();
     let height = grid.len();
-    let mut result = vec![vec![0.0; width]; height];
+    console_log!("Starting sequential outlier removal for {}x{} grid", width, height);
     
     // Calculate the range and derive reasonable thresholds
     let range = max_elevation - min_elevation;
     
-    // Calculate mean and standard deviation
-    let mut sum = 0.0;
-    let mut count = 0;
-    for row in &grid {
-        for &val in row {
-            if val.is_finite() {
-                sum += val;
-                count += 1;
-            }
-        }
-    }
+    // Calculate mean and standard deviation sequentially  
+    let (sum, count): (f64, usize) = grid.iter()
+        .map(|row| {
+            row.iter()
+                .filter(|val| val.is_finite())
+                .fold((0.0, 0), |acc, &val| (acc.0 + val, acc.1 + 1))
+        })
+        .fold((0.0, 0), |acc, item| (acc.0 + item.0, acc.1 + item.1));
     
     let mean = if count > 0 { sum / count as f64 } else { (min_elevation + max_elevation) / 2.0 };
     
-    // Calculate standard deviation
-    let mut sum_sq_diff = 0.0;
-    for row in &grid {
-        for &val in row {
-            if val.is_finite() {
-                let diff = val - mean;
-                sum_sq_diff += diff * diff;
-            }
-        }
-    }
+    // Calculate standard deviation sequentially
+    let sum_sq_diff: f64 = grid.iter()
+        .map(|row| {
+            row.iter()
+                .filter(|val| val.is_finite())
+                .map(|&val| (val - mean).powi(2))
+                .sum::<f64>()
+        })
+        .sum();
     
     let std_dev = if count > 0 { (sum_sq_diff / count as f64).sqrt() } else { range / 4.0 };
     
@@ -141,44 +139,44 @@ fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) 
     let lower_threshold = mean - 2.5 * std_dev;
     let upper_threshold = mean + 2.5 * std_dev;
     
+    console_log!("Outlier thresholds: {:.2} to {:.2} (mean: {:.2}, std: {:.2})", 
+                lower_threshold, upper_threshold, mean, std_dev);
     
+    // Apply clipping sequentially
+    let result: Vec<Vec<f64>> = grid.iter()
+        .map(|row| {
+            row.iter()
+                .map(|&val| val.max(lower_threshold).min(upper_threshold))
+                .collect()
+        })
+        .collect();
     
-    
-    // Apply clipping
-    let mut new_min = f64::INFINITY;
-    let mut new_max = f64::NEG_INFINITY;
-    
-    for y in 0..height {
-        for x in 0..width {
-            let val = grid[y][x];
-            // Clamp value to thresholds
-            let clamped_val = val.max(lower_threshold).min(upper_threshold);
-            result[y][x] = clamped_val;
-            
-            // Track new min/max
-            if clamped_val.is_finite() {
-                new_min = new_min.min(clamped_val);
-                new_max = new_max.max(clamped_val);
-            }
-        }
-    }
+    // Find new min/max sequentially
+    let (_new_min, _new_max) = result.iter()
+        .map(|row| {
+            row.iter()
+                .filter(|val| val.is_finite())
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &val| {
+                    (acc.0.min(val), acc.1.max(val))
+                })
+        })
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, item| (acc.0.min(item.0), acc.1.max(item.1)));
     
     // Apply a second smoothing pass after outlier removal to blend the clamped values
     let final_result = smooth_elevation_grid(result, width, height);
     
-    // Recalculate min/max after the second smoothing
-    let mut final_min = f64::INFINITY;
-    let mut final_max = f64::NEG_INFINITY;
+    // Recalculate min/max after the second smoothing sequentially
+    let (final_min, final_max) = final_result.iter()
+        .map(|row| {
+            row.iter()
+                .filter(|val| val.is_finite())
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &val| {
+                    (acc.0.min(val), acc.1.max(val))
+                })
+        })
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, item| (acc.0.min(item.0), acc.1.max(item.1)));
     
-    for row in &final_result {
-        for &val in row {
-            if val.is_finite() {
-                final_min = final_min.min(val);
-                final_max = final_max.max(val);
-            }
-        }
-    }
-    
+    console_log!("Sequential outlier removal completed");
     (final_result, final_min, final_max)
 }
 
@@ -372,58 +370,89 @@ fn generate_terrain_mesh(
     let mut top_positions: Vec<f32> = Vec::with_capacity(width * height * 3);
     let mut bottom_positions: Vec<f32> = Vec::with_capacity(width * height * 3);
     
-    // Generate top vertices (terrain)
-    for y in 0..height {
+    // Generate vertices sequentially for WASM compatibility
+    console_log!("Starting sequential vertex generation for {}x{} terrain", width, height);
+    
+    let vertex_results: Vec<(Vec<f32>, Vec<f32>, Vec<f32>, f64)> = (0..height)
+        .map(|y| {
+            let mut row_top_positions = Vec::with_capacity(width * 3);
+            let mut row_bottom_positions = Vec::with_capacity(width * 3);
+            let mut row_colors = Vec::with_capacity(width * 6);
+            let mut row_min_z = f64::INFINITY;
+            let mut row_max_z = f64::NEG_INFINITY;
+            
+            for x in 0..width {
+                // Convert grid position to mesh coordinates
+                let mesh_x = (x as f32 / (width - 1) as f32 - 0.5) * 200.0;
+                let mesh_y = (y as f32 / (height - 1) as f32 - 0.5) * 200.0;
+                
+                // Calculate normalized elevation value
+                let normalized_z = (elevation_data.elevation_grid[y][x] - elevation_data.min_elevation) /
+                                   f64::max(1.0, elevation_data.max_elevation - elevation_data.min_elevation);
+                
+                // Apply vertical exaggeration and base height
+                let mesh_z = (terrain_base_height + normalized_z * (200.0 * 0.2) * vertical_exaggeration) as f32;
+                
+                // Track row elevation ranges
+                row_min_z = f64::min(row_min_z, mesh_z as f64);
+                row_max_z = f64::max(row_max_z, mesh_z as f64);
+                
+                // Store top vertex position
+                row_top_positions.push(mesh_x);
+                row_top_positions.push(mesh_y);
+                row_top_positions.push(mesh_z);
+                
+                // Store bottom vertex position (flat at z=0)
+                row_bottom_positions.push(mesh_x);
+                row_bottom_positions.push(mesh_y);
+                row_bottom_positions.push(0.0);
+                
+                // Calculate terrain color (similar to JavaScript implementation)
+                // Light brown to dark brown gradient based on height
+                let light_brown = [0.82, 0.71, 0.55]; // rgb for #d2b48c
+                let dark_brown = [0.66, 0.48, 0.30];  // rgb for #a87b4d
+                
+                let normalized_z_f32 = normalized_z as f32;
+                let r = light_brown[0] * (1.0 - normalized_z_f32) + dark_brown[0] * normalized_z_f32;
+                let g = light_brown[1] * (1.0 - normalized_z_f32) + dark_brown[1] * normalized_z_f32;
+                let b = light_brown[2] * (1.0 - normalized_z_f32) + dark_brown[2] * normalized_z_f32;
+                
+                // Add color for top vertex
+                row_colors.push(r);
+                row_colors.push(g);
+                row_colors.push(b);
+                
+                // Add color for bottom vertex (same as top)
+                row_colors.push(r);
+                row_colors.push(g);
+                row_colors.push(b);
+            }
+            
+            (row_top_positions, row_bottom_positions, row_colors, row_min_z)
+        })
+        .collect();
+    
+    // Combine results from sequential processing
+    for (y, (row_top, row_bottom, row_colors, row_min_z)) in vertex_results.into_iter().enumerate() {
+        top_positions.extend_from_slice(&row_top);
+        bottom_positions.extend_from_slice(&row_bottom);
+        colors.extend_from_slice(&row_colors);
+        
+        // Track global min/max
+        processed_min_elevation = f64::min(processed_min_elevation, row_min_z);
+        
+        // Update processed elevation grid
         for x in 0..width {
-            // Convert grid position to mesh coordinates
-            let mesh_x = (x as f32 / (width - 1) as f32 - 0.5) * 200.0;
-            let mesh_y = (y as f32 / (height - 1) as f32 - 0.5) * 200.0;
-            
-            // Calculate normalized elevation value
-            let normalized_z = (elevation_data.elevation_grid[y][x] - elevation_data.min_elevation) /
-                               f64::max(1.0, elevation_data.max_elevation - elevation_data.min_elevation);
-            
-            // Apply vertical exaggeration and base height
-            let mesh_z = (terrain_base_height + normalized_z * (200.0 * 0.2) * vertical_exaggeration) as f32;
-            
-            // Track processed elevation ranges
-            processed_min_elevation = f64::min(processed_min_elevation, mesh_z as f64);
-            processed_max_elevation = f64::max(processed_max_elevation, mesh_z as f64);
-            
-            // Store processed elevation
-            processed_elevation_grid[y][x] = mesh_z as f64;
-            
-            // Store top vertex position
-            top_positions.push(mesh_x);
-            top_positions.push(mesh_y);
-            top_positions.push(mesh_z);
-            
-            // Store bottom vertex position (flat at z=0)
-            bottom_positions.push(mesh_x);
-            bottom_positions.push(mesh_y);
-            bottom_positions.push(0.0);
-            
-            // Calculate terrain color (similar to JavaScript implementation)
-            // Light brown to dark brown gradient based on height
-            let light_brown = [0.82, 0.71, 0.55]; // rgb for #d2b48c
-            let dark_brown = [0.66, 0.48, 0.30];  // rgb for #a87b4d
-            
-            let normalized_z_f32 = normalized_z as f32;
-            let r = light_brown[0] * (1.0 - normalized_z_f32) + dark_brown[0] * normalized_z_f32;
-            let g = light_brown[1] * (1.0 - normalized_z_f32) + dark_brown[1] * normalized_z_f32;
-            let b = light_brown[2] * (1.0 - normalized_z_f32) + dark_brown[2] * normalized_z_f32;
-            
-            // Add color for top vertex
-            colors.push(r);
-            colors.push(g);
-            colors.push(b);
-            
-            // Add color for bottom vertex (same as top)
-            colors.push(r);
-            colors.push(g);
-            colors.push(b);
+            let z_idx = x * 3 + 2;
+            if z_idx < row_top.len() {
+                let mesh_z = row_top[z_idx] as f64;
+                processed_elevation_grid[y][x] = mesh_z;
+                processed_max_elevation = f64::max(processed_max_elevation, mesh_z);
+            }
         }
     }
+    
+    console_log!("Sequential vertex generation completed: {} vertices", top_positions.len() / 3);
     
     // Combine top and bottom vertices into one array
     positions.extend_from_slice(&top_positions);

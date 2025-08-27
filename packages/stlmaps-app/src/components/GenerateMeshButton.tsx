@@ -324,8 +324,8 @@ export const GenerateMeshButton = function () {
 
       // Update processing status
       updateProcessingState({
-        status: "Generating terrain geometry...",
-        progress: 40,
+        status: "Processing terrain elevation data...",
+        progress: 30,
       });
 
       // Check for cancellation before generating terrain geometry
@@ -353,6 +353,10 @@ export const GenerateMeshButton = function () {
         currentTerrainHashHere !== configHashes.terrainHash;
 
       // Generate three.js geometry from elevation grid using WASM
+      updateProcessingState({
+        status: "Generating terrain geometry...",
+        progress: 40,
+      });
       console.log("🗻 Creating terrain geometry with WASM...");
 
       try {
@@ -477,8 +481,8 @@ export const GenerateMeshButton = function () {
 
         const currentLayer = vtLayers[i];
         updateProcessingState({
-          status: "Processing " + currentLayer.sourceLayer + " layer",
-          progress: 75 + (i * 10) / vtLayers.length,
+          status: `Processing ${currentLayer.sourceLayer} layer (${i + 1}/${vtLayers.length})`,
+          progress: 50 + (i * 40) / vtLayers.length, // 50-90% for layer processing
         });
 
         // Skip disabled layers
@@ -865,6 +869,12 @@ export const GenerateMeshButton = function () {
       cancellationToken.throwIfCancelled();
 
       // Update the Zustand store with our geometries
+      // Final step - updating 3D model
+      updateProcessingState({
+        status: "Updating 3D model...",
+        progress: 95,
+      });
+
       setGeometryDataSets({
         terrainGeometry: terrainSettings.enabled ? terrainGeometry : undefined,
         polygonGeometries: vtPolygonGeometries,

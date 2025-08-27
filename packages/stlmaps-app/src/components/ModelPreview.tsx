@@ -286,7 +286,8 @@ const ModelPreview = ({}: ModelPreviewProps) => {
     setHoveredMesh,
     setMousePosition,
     clearHover,
-    clearColorOnlyUpdate
+    clearColorOnlyUpdate,
+    setCurrentSceneGetter
   } = useLayerStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -741,6 +742,9 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         handleMouseLeave
       };
 
+      // Register scene getter for export functionality
+      setCurrentSceneGetter(() => sceneDataRef.current?.scene || null);
+
       // Add event listeners
       if (containerRef.current) {
         containerRef.current.addEventListener('mousemove', handleMouseMove);
@@ -839,6 +843,29 @@ const ModelPreview = ({}: ModelPreviewProps) => {
             } else if ('color' in child.material) {
               child.material.color = terrainColor.clone();
             }
+          }
+        }
+
+        // Handle terrain base height updates (real-time z-translation)
+        if (child.name === 'terrain' && layerColorUpdates.terrainBaseHeight !== undefined) {
+          const baseHeight = layerColorUpdates.terrainBaseHeight as number;
+          child.position.z = baseHeight;
+        }
+
+        // Handle layer z-offset updates (real-time z-translation)
+        if (child.userData?.sourceLayer) {
+          const zOffsetKey = `${child.userData.sourceLayer}_zOffset`;
+          const heightScaleKey = `${child.userData.sourceLayer}_heightScaleFactor`;
+          
+          if (layerColorUpdates[zOffsetKey] !== undefined) {
+            const zOffset = layerColorUpdates[zOffsetKey] as number;
+            child.position.z = zOffset;
+          }
+
+          // Handle height scale factor updates (real-time scaling)
+          if (layerColorUpdates[heightScaleKey] !== undefined) {
+            const heightScale = layerColorUpdates[heightScaleKey] as number;
+            child.scale.z = heightScale;
           }
         }
       }
