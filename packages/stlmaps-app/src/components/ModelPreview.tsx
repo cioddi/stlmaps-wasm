@@ -691,7 +691,8 @@ const ModelPreview = ({}: ModelPreviewProps) => {
                 color: 0xffff00,
                 emissive: 0x444400,
                 transparent: true,
-                opacity: 0.8
+                opacity: 0.8,
+                side: THREE.DoubleSide
               });
             }
           });
@@ -708,7 +709,8 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               color: 0xffff00,
               emissive: 0x444400,
               transparent: true,
-              opacity: 0.8
+              opacity: 0.8,
+              side: THREE.DoubleSide
             });
           }
         }
@@ -945,16 +947,16 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       
       // Process polygon geometries
       if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
-        geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
+        geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}, polyIndex) => {
           if (!geometry) return; // Skip if geometry is undefined
           
           // Look up current enabled state from layer store instead of using stored state
           const currentLayer = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
           const isCurrentlyEnabled = currentLayer?.enabled !== false;
           
+          
           // Check if this is a container geometry with individual geometries
           if (geometry.userData?.isContainer && geometry.userData?.individualGeometries) {
-            console.log(`Processing container with ${geometry.userData.geometryCount} individual geometries for ${vtDataset.sourceLayer}`);
             
             // Process each individual geometry as a separate mesh
             const individualGeometries = geometry.userData.individualGeometries as THREE.BufferGeometry[];
@@ -1003,6 +1005,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               // Control visibility based on current layer enabled state
               polygonMesh.visible = isCurrentlyEnabled;
               
+              
               // Preserve individual properties for hover interaction
               // Prioritize MVT feature properties over layer configuration
               const mvtProperties = individualGeometry.userData?.properties || {};
@@ -1014,6 +1017,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
                 _layerType: "solid",
                 _geometryIndex: index,
               };
+              
               
               individualGeometry.userData = { properties };
               polygonMesh.userData = { properties, sourceLayer: vtDataset.sourceLayer };
@@ -1069,6 +1073,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           // Control visibility based on current layer enabled state
           polygonMesh.visible = isCurrentlyEnabled;
           
+          
           // Attach properties to the geometry and mesh for hover interaction  
           const mvtProperties = geometry.userData?.properties || {};
           console.log('Existing geometry properties from userData:', mvtProperties);
@@ -1081,6 +1086,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
             _sourceLayer: vtDataset.sourceLayer,
             _layerType: "solid",
           };
+          
           
           geometry.userData = { properties };
           polygonMesh.userData = { properties, sourceLayer: vtDataset.sourceLayer };

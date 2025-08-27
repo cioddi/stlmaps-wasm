@@ -246,6 +246,14 @@ pub fn extrude_geometry_native(
     raw_shapes: Vec<RawShape>,
     opts: ExtrudeOptions,
 ) -> Result<JsValue, JsValue> {
+    extrude_geometry_native_with_options(raw_shapes, opts, false)
+}
+
+pub fn extrude_geometry_native_with_options(
+    raw_shapes: Vec<RawShape>,
+    opts: ExtrudeOptions,
+    skip_bottom_face: bool,
+) -> Result<JsValue, JsValue> {
     let mut vertices_array: Vec<f32> = Vec::new();
     let mut uv_array: Vec<f32> = Vec::new();
     let mut indices_array: Vec<u32> = Vec::new();
@@ -597,19 +605,21 @@ pub fn extrude_geometry_native(
             );
         }
 
-        // Bottom faces
-        for face in &faces {
-            add_triangle(
-                &mut indices_array,
-                &mut vertices_array,
-                &mut normals_array,
-                &mut uv_array,
-                vertex_count,
-                &placeholder,
-                face[2],
-                face[1],
-                face[0],
-            );
+        // Bottom faces (skip for buildings to avoid duplicate geometry)
+        if !skip_bottom_face {
+            for face in &faces {
+                add_triangle(
+                    &mut indices_array,
+                    &mut vertices_array,
+                    &mut normals_array,
+                    &mut uv_array,
+                    vertex_count,
+                    &placeholder,
+                    face[2],
+                    face[1],
+                    face[0],
+                );
+            }
         }
 
         // Top faces
@@ -735,6 +745,15 @@ pub fn extrude_shape(
     depth: f64,
     steps: u32,
 ) -> Result<JsValue, JsValue> {
+    extrude_shape_with_options(shapes, depth, steps, false)
+}
+
+pub fn extrude_shape_with_options(
+    shapes: Vec<Vec<Vec<[f64; 2]>>>,
+    depth: f64,
+    steps: u32,
+    skip_bottom_face: bool,
+) -> Result<JsValue, JsValue> {
     // Convert the shapes to RawShapes
     let raw_shapes: Vec<RawShape> = shapes.into_iter()
         .map(|shape| RawShape(shape))
@@ -749,5 +768,5 @@ pub fn extrude_shape(
     };
     
     // Call the native implementation
-    extrude_geometry_native(raw_shapes, opts)
+    extrude_geometry_native_with_options(raw_shapes, opts, skip_bottom_face)
 }

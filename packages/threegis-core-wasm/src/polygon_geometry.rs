@@ -717,7 +717,9 @@ fn create_extruded_shape(
     };
     
     // Call the extrude_shape function with native Rust types
-    let extruded_js = match extrude::extrude_shape(shapes, height, 1) {
+    // Skip bottom faces for buildings to avoid duplicate geometry
+    let skip_bottom_face = source_layer == Some("building");
+    let extruded_js = match extrude::extrude_shape_with_options(shapes, height, 1, skip_bottom_face) {
         Ok(val) => val,
         Err(e) => {
             

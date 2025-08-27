@@ -24,6 +24,14 @@ import ExportButtons from "./ExportButtons";
 import ProcessingIndicator from "./ProcessingIndicator";
 import useLayerStore from "../stores/useLayerStore";
 
+// Define processing step type to match ProcessingIndicator
+interface ProcessingStep {
+  id: string;
+  label: string;
+  status: 'not-started' | 'in-progress' | 'completed';
+  order: number;
+}
+
 // View mode types
 export type ViewMode = "split" | "map" | "model";
 
@@ -53,8 +61,70 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
-  const { isProcessing, processingStatus, processingProgress } =
+  const { isProcessing, processingStatus, processingProgress, vtLayers } =
     useLayerStore();
+
+  // Create dynamic processing steps based on current progress
+  const getProcessingSteps = (): ProcessingStep[] => {
+    const steps: ProcessingStep[] = [];
+    
+    // Initial terrain/elevation processing (0-50% progress)
+    const terrainStatus = 
+      !processingProgress ? 'not-started' :
+      processingProgress < 50 ? 'in-progress' : 'completed';
+    
+    steps.push({
+      id: "terrain",
+      label: "Processing terrain and elevation data",
+      status: terrainStatus,
+      order: 0,
+    });
+    
+    // Individual layer processing (50-90% progress)
+    vtLayers.forEach((layer, index) => {
+      const layerProgressStart = 50 + (index * 40) / vtLayers.length;
+      const layerProgressEnd = 50 + ((index + 1) * 40) / vtLayers.length;
+      
+      const layerStatus = 
+        !processingProgress || processingProgress < layerProgressStart ? 'not-started' :
+        processingProgress < layerProgressEnd ? 'in-progress' : 'completed';
+      
+      steps.push({
+        id: `layer-${layer.sourceLayer}`,
+        label: `Processing ${layer.sourceLayer} layer`,
+        status: layerStatus,
+        order: index + 1,
+      });
+    });
+    
+    // Final step - model assembly (90-100% progress)
+    const finalStatus = 
+      !processingProgress || processingProgress < 90 ? 'not-started' :
+      processingProgress < 100 ? 'in-progress' : 'completed';
+      
+    steps.push({
+      id: "finalization",
+      label: "Finalizing 3D model",
+      status: finalStatus,
+      order: vtLayers.length + 1,
+    });
+    
+    return steps;
+  };
+
+  // Determine active step based on current processing status
+  const getActiveStepId = (): string | null => {
+    if (!isProcessing || !processingProgress) return null;
+    
+    if (processingProgress < 50) return "terrain";
+    if (processingProgress < 90) {
+      // Find which layer is currently being processed
+      const layerIndex = Math.floor((processingProgress - 50) / (40 / vtLayers.length));
+      const clampedIndex = Math.min(layerIndex, vtLayers.length - 1);
+      return `layer-${vtLayers[clampedIndex]?.sourceLayer}`;
+    }
+    return "finalization";
+  };
 
   return (
     <AppBar
@@ -167,15 +237,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           title="Processing 3D Model"
           progress={processingProgress}
           statusMessage={processingStatus}
-          steps={[
-            {
-              id: "preparation",
-              label: "Preparing model data",
-              status: isProcessing ? "in-progress" : "not-started",
-              order: 0,
-            },
-          ]}
-          activeStepId={isProcessing ? "preparation" : null}
+          steps={getProcessingSteps()}
+          activeStepId={getActiveStepId()}
         />
       </Toolbar>
     </AppBar>
