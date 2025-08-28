@@ -400,7 +400,7 @@ pub fn merge_geometries_with_csg_union(geometries_json: &str) -> Result<JsValue,
     // Convert to output format with sequential optimization
     let result: Vec<crate::polygon_geometry::BufferGeometry> = merged_by_layer
         .into_iter()
-        .map(|(layer_name, geometry)| {
+        .map(|(_layer_name, geometry)| {
             csg_union::optimize_geometry(geometry, 0.01) // 1cm tolerance
         })
         .collect();
@@ -520,7 +520,7 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
 
     // Retrieve cached features for this bbox and layer, preferring feature_data_cache populated by extract_features_from_vector_tiles
     let state = ModuleState::global();
-    let mut state = state.lock().unwrap();
+    let state = state.lock().unwrap();
     // Assemble inner cache key using central function (no filter currently)
     let inner_key = make_inner_key_from_filter(
         source_layer, 

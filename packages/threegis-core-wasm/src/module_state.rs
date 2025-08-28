@@ -6,7 +6,6 @@ use wasm_bindgen::prelude::*;
 // Removed JsValue import: storing JSON strings instead
 
 // We need JsValue for caching objects
-use js_sys::Uint8Array;
 use crate::vectortile::ParsedMvtTile;
 
 // Import the console_log macro
@@ -14,6 +13,7 @@ use crate::vectortile::ParsedMvtTile;
 use crate::console_log;
 
 // Cache size limit
+#[allow(dead_code)]
 pub const CACHE_SIZE_LIMIT: usize = 100;
 
 // Define the tile data structure
@@ -156,6 +156,7 @@ impl ModuleState {
     }
     
     // Add a vector tile to the cache
+    #[allow(dead_code)] // Public API method for future use
     pub fn add_vector_tile(&mut self, key: TileKey, features: Vec<VectorTileData>) {
         // If we're at capacity, remove a random tile (simple strategy)
         if self.vector_tiles.len() >= self.max_vector_tiles && !self.vector_tiles.contains_key(&key) {
@@ -168,6 +169,7 @@ impl ModuleState {
     }
     
     // Get a vector tile from the cache
+    #[allow(dead_code)] // Public API method for future use
     pub fn get_vector_tile(&mut self, key: &TileKey) -> Option<&Vec<VectorTileData>> {
         if self.vector_tiles.contains_key(key) {
             self.cache_hits += 1;
@@ -189,7 +191,7 @@ impl ModuleState {
     }
     
     // Get tile data from cache
-    pub fn get_tile_data(&self, key: &str) -> Option<TileData> {
+    pub fn get_tile_data(&self, _key: &str) -> Option<TileData> {
         // For now, just return None to make the compiler happy
         // In a real implementation, this would retrieve the tile from a HashMap
         
@@ -197,7 +199,7 @@ impl ModuleState {
     }
     
     // Set tile data in cache
-    pub fn set_tile_data(&mut self, key: &str, _tile_data: TileData) {
+    pub fn set_tile_data(&mut self, _key: &str, _tile_data: TileData) {
         // In a real implementation, this would store the tile in a HashMap
         
     }
@@ -275,6 +277,7 @@ impl ModuleState {
     }
     
     // Get cached geometry data for a specific layer and bbox key
+    #[allow(dead_code)] // Public API method for future use
     pub fn get_cached_geometry_data(&self, bbox_key: &str, source_layer: &str) -> Option<Vec<crate::polygon_geometry::GeometryData>> {
         // Get data using the proper bbox_key format used throughout the app
         
@@ -325,14 +328,16 @@ impl ModuleState {
     }
     
     // Add a cached object (for general-purpose caching)
-    pub fn add_cached_object(&mut self, key: &str, _value: JsValue) {
+    #[allow(dead_code)] // Public API method for future use
+    pub fn add_cached_object(&mut self, _key: &str, _value: JsValue) {
         // In a real implementation, you would store this in a HashMap<String, JsValue>
         // For now, we'll just log it since we're not implementing the full cache
         
     }
     
     // Get a cached object
-    pub fn get_cached_object(&self, key: &str) -> Option<JsValue> {
+    #[allow(dead_code)] // Public API method for future use
+    pub fn get_cached_object(&self, _key: &str) -> Option<JsValue> {
         // In a real implementation, you would retrieve from a HashMap<String, JsValue>
         // For now, we'll just return None
         None

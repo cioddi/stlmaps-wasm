@@ -1,5 +1,4 @@
 // filepath: /home/tobi/project/stlmaps/packages/threegis-core-wasm/src/bbox_filter.rs
-use crate::console_log;
 
 // Function to check if a point is inside a bounding box
 pub fn point_in_bbox(point: &[f64], bbox: &[f64]) -> bool {

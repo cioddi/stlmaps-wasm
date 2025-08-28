@@ -8,6 +8,7 @@ pub struct CancellationToken {
     pub is_cancelled: Arc<Mutex<bool>>,
 }
 
+#[allow(dead_code)]
 impl CancellationToken {
     pub fn new(id: String) -> Self {
         Self {
@@ -39,6 +40,7 @@ pub struct CancellationManager {
     tokens: HashMap<String, CancellationToken>,
 }
 
+#[allow(dead_code)]
 impl CancellationManager {
     pub fn new() -> Self {
         Self {
@@ -116,6 +118,7 @@ pub fn cleanup_cancellation_token(id: &str) -> bool {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_cancellation_token(id: &str) -> Option<CancellationToken> {
     if let Ok(manager) = GLOBAL_CANCELLATION_MANAGER.lock() {
         manager.get_token(id).cloned()

@@ -372,7 +372,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       rendererRef.current.shadowMap.type = renderingMode === 'quality' 
         ? THREE.PCFSoftShadowMap 
         : THREE.BasicShadowMap;
-      rendererRef.current.outputEncoding = THREE.sRGBEncoding;
+      rendererRef.current.outputColorSpace = THREE.SRGBColorSpace;
       rendererRef.current.toneMapping = renderingMode === 'quality'
         ? THREE.ACESFilmicToneMapping
         : THREE.LinearToneMapping;

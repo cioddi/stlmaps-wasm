@@ -1,11 +1,11 @@
 use wasm_bindgen::prelude::*;
-use js_sys::{Promise, Uint8Array, Object, Date};
+use js_sys::{Uint8Array, Date};
 use wasm_bindgen_futures::JsFuture;
 use serde::{Serialize, Deserialize};
 use serde_wasm_bindgen::to_value;
 
-use crate::module_state::{ModuleState, TileKey, TileData, create_tile_key};
-use crate::{console_log, fetch};
+use crate::module_state::{ModuleState, TileData, create_tile_key};
+use crate::fetch;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TileRequest {
@@ -110,7 +110,7 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
             20
         );
         sample_slice.copy_to(&mut sample_bytes[..]);
-        let bytes_str = sample_bytes.iter()
+        let _bytes_str = sample_bytes.iter()
             .map(|b| format!("{:02x}", b))
             .collect::<Vec<String>>()
             .join(" ");
@@ -197,7 +197,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
                 Ok(tile_data) => {
                     tile_data_array.push(tile_data);
                 },
-                Err(e) => {
+                Err(_e) => {
                     // Continue with available tiles
                 }
             }
@@ -346,7 +346,7 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
             // Create a mapping for debugging
             
             // List all keys in cache for debugging 
-            let keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
+            let _keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
         } else {
         }
     }

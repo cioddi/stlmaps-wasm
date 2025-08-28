@@ -1,7 +1,7 @@
 use flate2::read::GzDecoder;
-use geozero::mvt::tile::{GeomType, Value};
+use geozero::mvt::tile::Value;
 use geozero::mvt::{Message, Tile};
-use js_sys::{Date, Math, Uint8Array};
+use js_sys::{Date, Uint8Array};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value, to_value};
 use std::collections::HashMap;
@@ -57,9 +57,9 @@ pub struct GeometryData {
 #[derive(Serialize, Deserialize)]
 pub struct ExtractFeaturesInput {
     pub bbox: Vec<f64>,                   // [minLng, minLat, maxLng, maxLat]
-    pub vtDataSet: VtDataSet,             // Configuration for the layer
-    pub bboxKey: String,                  // Cache key for vector tiles
-    pub elevationBBoxKey: Option<String>, // ID to find cached elevation data
+    pub vt_data_set: VtDataSet,             // Configuration for the layer
+    pub bbox_key: String,                  // Cache key for vector tiles
+    pub elevation_bbox_key: Option<String>, // ID to find cached elevation data
 }
 
 // Feature geometry types
@@ -129,6 +129,7 @@ fn get_tiles_for_bbox(
 }
 
 // Calculate the number of tiles that would be needed
+#[allow(dead_code)]
 pub fn calculate_tile_count(
     min_lng: f64,
     min_lat: f64,
@@ -196,7 +197,6 @@ fn calculate_base_elevation(
 
 // Evaluate if a feature matches a filter expression
 fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
-    use serde_json::Value;
     
     // If no filter, always pass
     if filter.is_null() {
@@ -532,7 +532,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     let min_lat = bbox[1];
     let max_lng = bbox[2];
     let max_lat = bbox[3];
-    let vt_dataset = &input.vtDataSet;
+    let vt_dataset = &input.vt_data_set;
 
     // Log VtDataSet to check if filter is arriving
 
@@ -540,17 +540,17 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     let bbox_key = cache_keys::make_bbox_key(min_lng, min_lat, max_lng, max_lat);
 
     // Log if input.bbox_key was in a non-standard format
-    if input.bboxKey != bbox_key {
+    if input.bbox_key != bbox_key {
         console_log!(
             "Converting non-standard key to standard bbox_key format: {} -> {}",
-            input.bboxKey,
+            input.bbox_key,
             bbox_key
         );
     }
 
     console_log!(
         "Starting feature extraction for layer '{}' using cache key: {}",
-        vt_dataset.sourceLayer,
+        vt_dataset.source_layer,
         bbox_key
     );
 
@@ -573,7 +573,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     // Get cached elevation data if available
     // Use the specific elevation_bbox_key provided in the input
-    let elevation_data = match &input.elevationBBoxKey {
+    let elevation_data = match &input.elevation_bbox_key {
         Some(key) => {
             
             module_state.get_elevation_data(key)
@@ -686,11 +686,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         };
 
         // Find the requested layer in the newly parsed tile
-        let layer = match parsed_tile.layers.get(&vt_dataset.sourceLayer) {
+        let layer = match parsed_tile.layers.get(&vt_dataset.source_layer) {
             Some(layer_data) => {
                 console_log!(
                     "📊 Layer '{}' received {} features from tile {}/{}/{}",
-                    vt_dataset.sourceLayer,
+                    vt_dataset.source_layer,
                     layer_data.features.len(),
                     tile_z,
                     tile_x,
@@ -714,7 +714,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                 
                 console_log!(
                     "📊 received Layer '{}' classes: {}",
-                    vt_dataset.sourceLayer,
+                    vt_dataset.source_layer,
                     class_stats.join(", ")
                 );
                 
@@ -746,7 +746,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         // Log statistics for this layer
         
         
-        for (class, count) in &class_stats {
+        for (_class, _count) in &class_stats {
             
         }
         
@@ -835,7 +835,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                         if !transformed_ring.is_empty() {
                             // 
-                            let base_elevation = calculate_base_elevation(
+                            let _base_elevation = calculate_base_elevation(
                                 &transformed_ring,
                                 &elevation_grid,
                                 grid_size.0 as usize,
@@ -851,7 +851,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 geometry: transformed_ring, // Store transformed coords
                                 r#type: Some("Polygon".to_string()),
                                 height: Some(height),
-                                layer: Some(vt_dataset.sourceLayer.clone()),
+                                layer: Some(vt_dataset.source_layer.clone()),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
@@ -864,12 +864,12 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     // For LineString: contains 1 line
                     // For MultiLineString: contains multiple lines
                     
-                    let class_value = feature.properties.get("class")
+                    let _class_value = feature.properties.get("class")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
                     
                     
-                    for (line_index, line_tile_coords) in feature.geometry.iter().enumerate() {
+                    for (_line_index, line_tile_coords) in feature.geometry.iter().enumerate() {
                         let mut transformed_line: Vec<Vec<f64>> = Vec::with_capacity(line_tile_coords.len());
                         
                         // Transform each point in the line from tile coordinates to lat/lng
@@ -905,7 +905,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 geometry: transformed_line,
                                 r#type: Some("LineString".to_string()), // Always output as LineString
                                 height: Some(height),
-                                layer: Some(vt_dataset.sourceLayer.clone()),
+                                layer: Some(vt_dataset.source_layer.clone()),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
@@ -930,7 +930,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 let transformed_point = vec![lng, lat];
                                 // 
 
-                                let base_elevation = calculate_base_elevation(
+                                let _base_elevation = calculate_base_elevation(
                                     &vec![transformed_point.clone()], // Pass as vec of points
                                     &elevation_grid,
                                     grid_size.0 as usize,
@@ -946,7 +946,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                     geometry: vec![transformed_point], // Store as [[lng, lat]]
                                     r#type: Some("Point".to_string()),
                                     height: Some(height), // Height might represent magnitude for points
-                                    layer: Some(vt_dataset.sourceLayer.clone()),
+                                    layer: Some(vt_dataset.source_layer.clone()),
                                     tags: None,
                                     properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                                 });
@@ -975,7 +975,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         }
 
                         if !transformed_ring.is_empty() {
-                            let base_elevation = calculate_base_elevation(
+                            let _base_elevation = calculate_base_elevation(
                                 &transformed_ring,
                                 &elevation_grid,
                                 grid_size.0 as usize,
@@ -990,7 +990,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 geometry: transformed_ring,
                                 r#type: Some("Polygon".to_string()), // Convert MultiPolygon to individual Polygons
                                 height: Some(height),
-                                layer: Some(vt_dataset.sourceLayer.clone()),
+                                layer: Some(vt_dataset.source_layer.clone()),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
@@ -1052,7 +1052,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     console_log!(
         "📊 Layer '{}': {} features → {} geometries after filtering",
-        vt_dataset.sourceLayer, 
+        vt_dataset.source_layer, 
         feature_count, 
         geometry_data_list.len()
     );
@@ -1060,7 +1060,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     // Cache the extracted feature data for later use
     {
         // Build inner cache key using central function
-        let inner_key = cache_keys::make_inner_key_from_filter(&vt_dataset.sourceLayer, input.vtDataSet.filter.as_ref());
+        let inner_key = cache_keys::make_inner_key_from_filter(&vt_dataset.source_layer, input.vt_data_set.filter.as_ref());
         let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
         module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str.clone());
     }
@@ -1143,7 +1143,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             // Extract the raw data array - we need to access the "rawData" property
             // since our JS helper function returns a TileFetchResponse object
             let raw_data_value = js_sys::Reflect::get(&fetch_result, &JsValue::from_str("rawData"))
-                .map_err(|e| {
+                .map_err(|_e| {
                     
                     JsValue::from_str("Failed to extract rawData from fetch result")
                 })?;
@@ -1170,7 +1170,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 
                 let mut decoder = GzDecoder::new(&data_vec[..]);
                 let mut decompressed_data = Vec::new();
-                decoder.read_to_end(&mut decompressed_data).map_err(|e| {
+                decoder.read_to_end(&mut decompressed_data).map_err(|_e| {
                     
                     JsValue::from_str("Decompression error")
                 })?;
@@ -1201,8 +1201,8 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                         tile.y
                     );
                     // Log the number of layers found
-                    let layer_count = parsed.layers.len();
-                    let layer_names: Vec<String> = parsed.layers.keys().cloned().collect();
+                    let _layer_count = parsed.layers.len();
+                    let _layer_names: Vec<String> = parsed.layers.keys().cloned().collect();
                     
 
                     // Convert Rust-parsed features to the legacy format for compatibility
@@ -1250,7 +1250,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
 
                     Some((parsed, legacy_layers))
                 }
-                Err(e) => {
+                Err(_e) => {
                     
                     None
                 }
@@ -1263,7 +1263,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             );
 
             // Create a hex dump of a small sample of the raw data
-            let hex_sample = if data_vec.len() > 32 {
+            let _hex_sample = if data_vec.len() > 32 {
                 format!("{:02X?}", &data_vec[0..32])
             } else {
                 format!("{:02X?}", &data_vec)
@@ -1371,7 +1371,7 @@ fn enhanced_parse_mvt_data(
     );
 
     // Print first 32 bytes of the raw data to verify what we're getting
-    let raw_preview = if tile_data.len() >= 32 {
+    let _raw_preview = if tile_data.len() >= 32 {
         format!("{:02X?}", &tile_data[0..32])
     } else {
         format!("{:02X?}", &tile_data)
@@ -1434,7 +1434,7 @@ fn enhanced_parse_mvt_data(
     };
 
     // Show first 32 bytes for debugging
-    let preview = if data.len() >= 32 {
+    let _preview = if data.len() >= 32 {
         format!("{:02X?}", &data[0..32])
     } else {
         format!("{:02X?}", &data)
@@ -1491,7 +1491,7 @@ fn enhanced_parse_mvt_data(
                 };
 
                 // Get the layer extent (usually 4096) - Use default if not available
-                let extent = 4096; // layer.extent seems unavailable in mvt crate API here
+                let _extent = 4096; // layer.extent seems unavailable in mvt crate API here
 
                 // Process each feature in the layer
                 for feature in layer.features {

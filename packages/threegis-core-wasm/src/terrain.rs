@@ -1,15 +1,11 @@
 // Terrain geometry generation module with sequential processing for WASM compatibility
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
-use js_sys::{Float32Array, Uint32Array, Array, Object};
-use std::collections::HashMap;
-use wasm_bindgen_futures::JsFuture;
-use wasm_bindgen::closure::Closure;
+use js_sys::{Float32Array, Uint32Array, Object};
 // Sequential processing for WASM compatibility
 
 use crate::module_state::{ModuleState};
-use crate::elevation::{ElevationProcessingResult, GridSize};
-use crate::console_log;
+use crate::elevation::ElevationProcessingResult;
 
 #[derive(Serialize, Deserialize)]
 pub struct TerrainGeometryParams {
@@ -190,12 +186,12 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     
     
     // List all keys in cache for debugging
-    let keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
+    let _keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
     
     
     // Create the bbox_key format - this is the same format used in elevation.rs
     let bbox_key = format!("{}_{}_{}_{}", params.min_lng, params.min_lat, params.max_lng, params.max_lat);
-    let has_bbox_key = state.elevation_grids.contains_key(&bbox_key);
+    let _has_bbox_key = state.elevation_grids.contains_key(&bbox_key);
     
     
     
@@ -243,11 +239,11 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                                     break;
                                 }
                             },
-                            Err(e) => {
+                            Err(_e) => {
                                 
                                 if attempt < max_retries {
                                     // Exponential backoff: wait 500ms * 2^(attempt-1)
-                                    let delay_ms = 500 * (1 << (attempt - 1));
+                                    let _delay_ms = 500 * (1 << (attempt - 1));
                                     
                                     // Simple delay - just log the delay for now
                                     // In a real implementation, you might want to add actual delay
@@ -255,7 +251,7 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                             }
                         }
                     },
-                    Err(e) => {
+                    Err(_e) => {
                         break;
                     }
                 }

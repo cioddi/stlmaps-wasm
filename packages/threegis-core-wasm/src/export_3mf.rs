@@ -1,5 +1,4 @@
 use wasm_bindgen::prelude::*;
-use js_sys::Uint8Array;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]

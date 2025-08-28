@@ -1,14 +1,12 @@
-use crate::console_log;
-use crate::module_state::ModuleState;
 use crate::bbox_filter::polygon_intersects_bbox;
 use crate::extrude;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 // Sequential processing for WASM compatibility
 // use csgrs::csg::CSG; // Temporarily commented out - CSG functionality disabled
-use js_sys::{Object, Array, Float32Array};
+use js_sys::{Array, Float32Array};
 use wasm_bindgen::prelude::JsValue;
-use serde_wasm_bindgen::{from_value, to_value};
+use serde_wasm_bindgen::to_value;
 
 
 // Constants ported from TypeScript
@@ -47,15 +45,15 @@ pub struct GridSize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VtDataSet {
     #[serde(default)]
-    pub sourceLayer: String,
+    pub source_layer: String,
     #[serde(default = "default_color")]
     pub color: String,
-    pub extrusionDepth: Option<f64>,
-    pub minExtrusionDepth: Option<f64>,
-    pub heightScaleFactor: Option<f64>,
-    pub useAdaptiveScaleFactor: Option<bool>,
-    pub zOffset: Option<f64>,
-    pub alignVerticesToTerrain: Option<bool>,
+    pub extrusion_depth: Option<f64>,
+    pub min_extrusion_depth: Option<f64>,
+    pub height_scale_factor: Option<f64>,
+    pub use_adaptive_scale_factor: Option<bool>,
+    pub z_offset: Option<f64>,
+    pub align_vertices_to_terrain: Option<bool>,
     pub filter: Option<serde_json::Value>,
 }
 
@@ -69,17 +67,19 @@ fn default_color() -> String {
 pub struct PolygonGeometryInput {
     pub bbox: Vec<f64>,  // [minLng, minLat, maxLng, maxLat]
     pub polygons: Vec<GeometryData>,
-    pub terrainBaseHeight: f64,
-    pub elevationGrid: Vec<Vec<f64>>,
-    pub gridSize: GridSize,
-    pub minElevation: f64,
-    pub maxElevation: f64,
-    pub vtDataSet: VtDataSet,
+    #[allow(dead_code)] // Part of public API structure
+    pub terrain_base_height: f64,
+    pub elevation_grid: Vec<Vec<f64>>,
+    pub grid_size: GridSize,
+    pub min_elevation: f64,
+    pub max_elevation: f64,
+    pub vt_data_set: VtDataSet,
     #[serde(default)]
-    pub useSameZOffset: bool,
+    pub use_same_z_offset: bool,
+    #[allow(dead_code)] // Part of public API structure  
     pub bbox_key: String,
     // Optionally override CSG clipping for this request
-    pub csgClipping: Option<bool>,
+    pub csg_clipping: Option<bool>,
 }
 
 // Output struct for the polygon geometry
@@ -90,8 +90,8 @@ pub struct BufferGeometry {
     pub colors: Option<Vec<f32>>,
     pub indices: Option<Vec<u32>>,
     pub uvs: Option<Vec<f32>>,
-    #[serde(rename = "hasData")]
-    pub hasData: bool,
+    #[serde(rename = "has_data")]
+    pub has_data: bool,
     // Add properties from MVT data for debugging and interaction
     pub properties: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
@@ -106,14 +106,14 @@ fn sample_terrain_elevation_at_point(
     min_elevation: f64,
     max_elevation: f64,
 ) -> f64 {
-    let minLng = bbox[0];
-    let minLat = bbox[1];
-    let maxLng = bbox[2];
-    let maxLat = bbox[3];
+    let min_lng = bbox[0];
+    let min_lat = bbox[1];
+    let max_lng = bbox[2];
+    let max_lat = bbox[3];
     
     // Normalize coordinates to 0-1 range within the grid
-    let nx = (lng - minLng) / (maxLng - minLng);
-    let ny = (lat - minLat) / (maxLat - minLat);
+    let nx = (lng - min_lng) / (max_lng - min_lng);
+    let ny = (lat - min_lat) / (max_lat - min_lat);
     
     // Convert to grid indices
     let grid_width = grid_size.width as usize;
@@ -152,14 +152,14 @@ fn sample_terrain_elevation_at_point(
 
 // Transform geographic coordinates to mesh coordinates
 fn transform_to_mesh_coordinates(lng: f64, lat: f64, bbox: &[f64]) -> [f64; 2] {
-    let minLng = bbox[0];
-    let minLat = bbox[1];
-    let maxLng = bbox[2];
-    let maxLat = bbox[3];
+    let min_lng = bbox[0];
+    let min_lat = bbox[1];
+    let max_lng = bbox[2];
+    let max_lat = bbox[3];
     
     // Convert from geographic coords to normalized 0-1 space
-    let normalized_x = (lng - minLng) / (maxLng - minLng);
-    let normalized_y = (lat - minLat) / (maxLat - minLat);
+    let normalized_x = (lng - min_lng) / (max_lng - min_lng);
+    let normalized_y = (lat - min_lat) / (max_lat - min_lat);
     
     // Convert to mesh coordinates (assuming mesh is 200x200 units centered at origin)
     let mesh_size = 200.0;
@@ -188,13 +188,13 @@ fn calculate_meters_to_units_scale(
     max_lat: f64,
 ) -> f64 {
     // Geographic extent calculation
-    let R = 6371.0; // Earth radius in km
+    let r = 6371.0; // Earth radius in km
     let lat_extent_rad = (max_lat - min_lat) * std::f64::consts::PI / 180.0;
     let lat_center_rad = ((min_lat + max_lat) / 2.0) * std::f64::consts::PI / 180.0;
     let lng_extent_rad = (max_lng - min_lng) * std::f64::consts::PI / 180.0;
     
-    let width_km = R * lng_extent_rad * lat_center_rad.cos();
-    let height_km = R * lat_extent_rad;
+    let width_km = r * lng_extent_rad * lat_center_rad.cos();
+    let height_km = r * lat_extent_rad;
     
     // Calculate real-world dimensions in meters
     let width_m = width_km * 1000.0;
@@ -584,7 +584,7 @@ fn create_extruded_shape(
             colors: None,
             indices: None,
             uvs: None,
-            hasData: false,
+            has_data: false,
             properties,
         };
     }
@@ -622,7 +622,7 @@ fn create_extruded_shape(
                     colors: None,
                     indices: None,
                     uvs: None,
-                    hasData: false,
+                    has_data: false,
                     properties: None,
                 };
             }
@@ -655,12 +655,12 @@ fn create_extruded_shape(
             colors: None,
             indices: None,
             uvs: None,
-            hasData: false,
+            has_data: false,
             properties: None,
         };
     }
     
-    let unique_points_count = unique_shape_points.len();
+    let _unique_points_count = unique_shape_points.len();
     // 
     // 
     // Convert the points to the format expected by extrude_geometry
@@ -684,9 +684,9 @@ fn create_extruded_shape(
     });
     
     // Convert inputs to JsValue
-    let shapes_js = match to_value(&shapes) {
+    let _shapes_js = match to_value(&shapes) {
         Ok(val) => val,
-        Err(e) => {
+        Err(_e) => {
             
             return BufferGeometry {
                 vertices: Vec::new(),
@@ -694,15 +694,15 @@ fn create_extruded_shape(
                 colors: None,
                 indices: None,
                 uvs: None,
-                hasData: false,
+                has_data: false,
                 properties: None,
             };
         }
     };
     
-    let options_js = match to_value(&options) {
+    let _options_js = match to_value(&options) {
         Ok(val) => val,
-        Err(e) => {
+        Err(_e) => {
             
             return BufferGeometry {
                 vertices: Vec::new(),
@@ -710,7 +710,7 @@ fn create_extruded_shape(
                 colors: None,
                 indices: None,
                 uvs: None,
-                hasData: false,
+                has_data: false,
                 properties: None,
             };
         }
@@ -721,7 +721,7 @@ fn create_extruded_shape(
     let skip_bottom_face = source_layer == Some("building");
     let extruded_js = match extrude::extrude_shape_with_options(shapes, height, 1, skip_bottom_face) {
         Ok(val) => val,
-        Err(e) => {
+        Err(_e) => {
             
             return BufferGeometry {
                 vertices: Vec::new(),
@@ -729,7 +729,7 @@ fn create_extruded_shape(
                 colors: None,
                 indices: None,
                 uvs: None,
-                hasData: false,
+                has_data: false,
                 properties: None,
             };
         }
@@ -747,7 +747,7 @@ fn create_extruded_shape(
                 colors: None,
                 indices: None,
                 uvs: None,
-                hasData: false,
+                has_data: false,
                 properties: None,
             };
         }
@@ -866,7 +866,7 @@ fn create_extruded_shape(
         indices: if indices.is_empty() { None } else { Some(indices) },
         colors: None,
         uvs: if uvs.is_empty() { None } else { Some(uvs) },
-        hasData: has_data,
+        has_data: has_data,
         properties,
     }
 }
@@ -895,22 +895,19 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             let sample_lat = input.bbox[1] + (input.bbox[3] - input.bbox[1]) * t_j;
             let elev = sample_terrain_elevation_at_point(
                 sample_lng, sample_lat,
-                &input.elevationGrid, &input.gridSize,
-                &input.bbox, input.minElevation, input.maxElevation,
+                &input.elevation_grid, &input.grid_size,
+                &input.bbox, input.min_elevation, input.max_elevation,
             );
             dataset_lowest_z = dataset_lowest_z.min(elev);
             dataset_highest_z = dataset_highest_z.max(elev);
         }
     }
-    let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
-    let use_same_z_offset = input.useSameZOffset;
-
+    let _dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
     
     // Dataset terrain extremes for fallback and shared Z offset
-    let dataset_lowest_z = input.minElevation;
-    let dataset_highest_z = input.maxElevation;
-    let dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
-    let use_same_z_offset = input.useSameZOffset;
+    let dataset_lowest_z = input.min_elevation;
+    let dataset_highest_z = input.max_elevation;
+    let _dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
     
     if input.polygons.is_empty() {
         
@@ -920,16 +917,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             colors: None,
             indices: None,
             uvs: None,
-            hasData: false,
+            has_data: false,
             properties: None,
         }).unwrap());
     }
     
     // Convert all polygons to Vector2 format
-    let mut all_geometries: Vec<BufferGeometry> = Vec::new();
+    let _all_geometries: Vec<BufferGeometry> = Vec::new();
     
     // Debug: Log geometry types for transportation layer
-    if input.vtDataSet.sourceLayer == "transportation" {
+    if input.vt_data_set.source_layer == "transportation" {
         let mut geometry_types = HashMap::new();
         for feature in &input.polygons {
             let geom_type = feature.r#type.as_deref().unwrap_or("unknown");
@@ -938,7 +935,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         
     }
 
-    let total_polygons = input.polygons.len();
+    let _total_polygons = input.polygons.len();
+    let use_same_z_offset = input.use_same_z_offset;
     
     // Process polygons sequentially for WASM compatibility
     let geometries_result: Result<Vec<_>, String> = input.polygons
@@ -979,7 +977,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Handle both Polygon and LineString geometries
         let points: Vec<Vector2> = if polygon_data.r#type.as_deref() == Some("LineString") {
             // Extract transportation class for better debugging
-            let transportation_class = if let Some(ref props) = polygon_data.properties {
+            let _transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
                         class.clone()
@@ -1062,7 +1060,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                                 Vec::new()
                             }
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             
                             Vec::new()
                         }
@@ -1090,7 +1088,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         
         if points.len() < 3 {
             // Debug: Track why roads might be skipped - THIS IS A MAJOR FILTER
-            let transportation_class = if let Some(ref props) = polygon_data.properties {
+            let _transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
                         class.clone()
@@ -1102,7 +1100,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         }
         
         // Determine extrusion height based on geometry type and available data
-        let mut height = if let Some(d) = input.vtDataSet.extrusionDepth {
+        let mut height = if let Some(d) = input.vt_data_set.extrusion_depth {
             // Use explicitly set extrusion depth
             d
         } else if let Some(h) = polygon_data.height.filter(|h| *h > 0.0) {
@@ -1151,7 +1149,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             }
         };
         // Enforce minimum extrusion depth
-        if let Some(min_d) = input.vtDataSet.minExtrusionDepth {
+        if let Some(min_d) = input.vt_data_set.min_extrusion_depth {
             if height < min_d {
                 height = min_d;
             }
@@ -1159,14 +1157,14 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Clamp to reasonable bounds
         height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
         // Apply meter-based scaling to convert from meters to visualization units
-        if input.vtDataSet.useAdaptiveScaleFactor.unwrap_or(false) {
+        if input.vt_data_set.use_adaptive_scale_factor.unwrap_or(false) {
             // Get the meters-to-units conversion factor
             let meters_to_units = calculate_meters_to_units_scale(
                 input.bbox[0], input.bbox[1], input.bbox[2], input.bbox[3]
             );
             
             // Get geometry class for logging
-            let geometry_class = if let Some(ref props) = polygon_data.properties {
+            let _geometry_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     obj.get("class")
                         .and_then(|v| v.as_str())
@@ -1179,18 +1177,18 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             };
             
             // Apply the conversion - height is assumed to be in meters
-            let original_height = height;
+            let _original_height = height;
             height *= meters_to_units;
             
             // Debug logging for height scaling
         }
         
         // Apply heightScaleFactor as a multiplier (if provided)
-        if let Some(scale_factor) = input.vtDataSet.heightScaleFactor {
+        if let Some(scale_factor) = input.vt_data_set.height_scale_factor {
             height *= scale_factor;
         }
         if height <= 0.0 {
-            let transportation_class = if let Some(ref props) = polygon_data.properties {
+            let _transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
                         class.clone()
@@ -1212,7 +1210,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Clean and validate the polygon
         let cleaned_points = clean_polygon_footprint(&mesh_points);
         if cleaned_points.is_empty() {
-            let transportation_class = if let Some(ref props) = polygon_data.properties {
+            let _transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
                         class.clone()
@@ -1224,7 +1222,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         }
 
         // Determine if CSG clipping should be used
-        let use_csg = input.csgClipping
+        let use_csg = input.csg_clipping
             .unwrap_or(false);
 
         // Clip against the overall terrain tile bounds (include any shape that overlaps)
@@ -1247,7 +1245,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         
         // Skip polygons that truly have no valid representation after clipping
         if clipped_points.is_empty() {
-            let transportation_class = if let Some(ref props) = polygon_data.properties {
+            let _transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
                         class.clone()
@@ -1295,7 +1293,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 }
             } else {
                 // Not visible, skip
-                let transportation_class = if let Some(ref props) = polygon_data.properties {
+                let _transportation_class = if let Some(ref props) = polygon_data.properties {
                     if let serde_json::Value::Object(obj) = props {
                         if let Some(serde_json::Value::String(class)) = obj.get("class") {
                             class.clone()
@@ -1310,7 +1308,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         };
 
         // SUCCESS: This geometry made it through all filters
-        let transportation_class = if let Some(ref props) = polygon_data.properties {
+        let _transportation_class = if let Some(ref props) = polygon_data.properties {
             if let serde_json::Value::Object(obj) = props {
                 if let Some(serde_json::Value::String(class)) = obj.get("class") {
                     class.clone()
@@ -1321,22 +1319,22 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
         // Compute per-polygon terrain extremes for base alignment
         let mut lowest_terrain_z = f64::INFINITY;
-        let mut highest_terrain_z = f64::NEG_INFINITY;
+        let mut _highest_terrain_z = f64::NEG_INFINITY;
         for pt in &points {
             let tz = sample_terrain_elevation_at_point(
-                pt.x, pt.y, &input.elevationGrid, &input.gridSize,
-                &input.bbox, input.minElevation, input.maxElevation,
+                pt.x, pt.y, &input.elevation_grid, &input.grid_size,
+                &input.bbox, input.min_elevation, input.max_elevation,
             );
             lowest_terrain_z = lowest_terrain_z.min(tz);
-            highest_terrain_z = highest_terrain_z.max(tz);
+            _highest_terrain_z = _highest_terrain_z.max(tz);
         }
         // Optionally use dataset-wide extremes
         if use_same_z_offset {
             lowest_terrain_z = dataset_lowest_z;
-            highest_terrain_z = dataset_highest_z;
+            _highest_terrain_z = dataset_highest_z;
         }
         // Base z offset: position bottom face at terrain surface minus submerge
-        let z_offset = lowest_terrain_z + input.vtDataSet.zOffset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
+        let z_offset = lowest_terrain_z + input.vt_data_set.z_offset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
         
         // Extract properties from polygon_data for attaching to geometry
         let properties = if let Some(ref props) = polygon_data.properties {
@@ -1359,16 +1357,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             height, 
             z_offset, 
             properties.clone(),
-            input.vtDataSet.alignVerticesToTerrain.unwrap_or(false),
-            Some(&input.elevationGrid),
-            Some(&input.gridSize),
+            input.vt_data_set.align_vertices_to_terrain.unwrap_or(false),
+            Some(&input.elevation_grid),
+            Some(&input.grid_size),
             Some(&input.bbox),
-            Some(input.minElevation),
-            Some(input.maxElevation),
-            Some(&input.vtDataSet.sourceLayer)
+            Some(input.min_elevation),
+            Some(input.max_elevation),
+            Some(&input.vt_data_set.source_layer)
         );
         
-        if geometry.hasData {
+        if geometry.has_data {
             Ok(Some(geometry))
         } else {
             Ok(None)
@@ -1378,7 +1376,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     
     // Handle sequential processing results
     let sequential_geometries = geometries_result.map_err(|e| format!("Sequential processing error: {}", e))?;
-    let mut all_geometries: Vec<BufferGeometry> = sequential_geometries
+    let all_geometries: Vec<BufferGeometry> = sequential_geometries
         .into_iter()
         .filter_map(|opt| opt)
         .collect();
@@ -1391,16 +1389,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     
     // Group geometries by layer and apply CSG union
     let merged_geometries = if all_geometries.len() > 1 {
-        let initial_count = all_geometries.len();
+        let _initial_count = all_geometries.len();
         
         // Merge geometries using CSG union
         let layer_merged = crate::csg_union::merge_geometries_by_layer(all_geometries);
         
         // Extract merged geometries, optimizing each one
         let mut final_geometries = Vec::new();
-        for (layer_name, geometry) in layer_merged {
+        for (_layer_name, geometry) in layer_merged {
             let optimized = crate::csg_union::optimize_geometry(geometry, 0.01); // 1cm tolerance
-            if optimized.hasData {
+            if optimized.has_data {
                 final_geometries.push(optimized);
             }
         }
@@ -1410,7 +1408,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Single geometry, just optimize it
         if let Some(geometry) = all_geometries.into_iter().next() {
             let optimized = crate::csg_union::optimize_geometry(geometry, 0.01);
-            if optimized.hasData {
+            if optimized.has_data {
                 vec![optimized]
             } else {
                 Vec::new()

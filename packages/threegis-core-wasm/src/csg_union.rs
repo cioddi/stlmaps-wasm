@@ -26,7 +26,7 @@ impl CSGUnion {
     
     /// Add a geometry to the union
     pub fn add_geometry(&mut self, geometry: &BufferGeometry) {
-        if !geometry.hasData || geometry.vertices.is_empty() {
+        if !geometry.has_data || geometry.vertices.is_empty() {
             return;
         }
         
@@ -79,7 +79,7 @@ impl CSGUnion {
             colors: if self.colors.is_empty() { None } else { Some(self.colors) },
             indices: if self.indices.is_empty() { None } else { Some(self.indices) },
             uvs: None,
-            hasData: has_data,
+            has_data: has_data,
             properties: None,
         }
     }
@@ -97,7 +97,7 @@ pub fn merge_geometries_by_layer(geometries: Vec<BufferGeometry>) -> HashMap<Str
     let mut geometry_count = 0;
     
     for geometry in geometries.into_iter() {
-        if !geometry.hasData {
+        if !geometry.has_data {
             continue;
         }
         
@@ -113,7 +113,7 @@ pub fn merge_geometries_by_layer(geometries: Vec<BufferGeometry>) -> HashMap<Str
     let mut result = HashMap::new();
     let merged_geometry = union.finish();
     
-    if merged_geometry.hasData {
+    if merged_geometry.has_data {
         result.insert("merged_layer".to_string(), merged_geometry);
     }
     
@@ -121,6 +121,7 @@ pub fn merge_geometries_by_layer(geometries: Vec<BufferGeometry>) -> HashMap<Str
 }
 
 /// Merge geometries with more advanced spatial grouping using parallel processing
+#[allow(dead_code)]
 pub fn merge_geometries_with_spatial_grouping(geometries: Vec<BufferGeometry>, max_distance: f32) -> HashMap<String, BufferGeometry> {
     if geometries.is_empty() {
         return HashMap::new();
@@ -129,7 +130,7 @@ pub fn merge_geometries_with_spatial_grouping(geometries: Vec<BufferGeometry>, m
     // Calculate geometry centers in parallel
     let geometry_centers: Vec<(BufferGeometry, (f32, f32))> = geometries
         .into_par_iter()
-        .filter(|geometry| geometry.hasData && geometry.vertices.len() >= 9)
+        .filter(|geometry| geometry.has_data && geometry.vertices.len() >= 9)
         .map(|geometry| {
             let vertex_count = geometry.vertices.len() / 3;
             let (center_x, center_y) = geometry.vertices
@@ -188,7 +189,7 @@ pub fn merge_geometries_with_spatial_grouping(geometries: Vec<BufferGeometry>, m
             }
             
             let merged = union.finish();
-            if merged.hasData {
+            if merged.has_data {
                 Some((format!("group_{}", group_idx), merged))
             } else {
                 None
@@ -200,8 +201,8 @@ pub fn merge_geometries_with_spatial_grouping(geometries: Vec<BufferGeometry>, m
 }
 
 /// Simple spatial optimization: merge nearby vertices to reduce geometry complexity
-pub fn optimize_geometry(mut geometry: BufferGeometry, tolerance: f32) -> BufferGeometry {
-    if !geometry.hasData || geometry.vertices.len() < 9 {
+pub fn optimize_geometry(geometry: BufferGeometry, tolerance: f32) -> BufferGeometry {
+    if !geometry.has_data || geometry.vertices.len() < 9 {
         return geometry;
     }
     
@@ -277,7 +278,7 @@ pub fn optimize_geometry(mut geometry: BufferGeometry, tolerance: f32) -> Buffer
         colors: if merged_colors.is_empty() { None } else { Some(merged_colors) },
         indices: if new_indices.is_empty() { None } else { Some(new_indices) },
         uvs: None,
-        hasData: has_data,
+        has_data: has_data,
         properties: geometry.properties,
     }
 }

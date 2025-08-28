@@ -3,8 +3,10 @@ name = "threegis_core_wasm"
 version = "0.1.0"
 edition = "2021"
 description = "WebAssembly core implementation for threegis geometry processing"
-authors = [""]
+authors = ["STLMaps Team"]
 license = "MIT"
+repository = "https://github.com/stlmaps/stlmaps"
+homepage = "https://stlmaps.com"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -36,9 +38,6 @@ geo = { git = "https://github.com/georust/geo", features = ["use-serde"] }
 [dev-dependencies]
 wasm-bindgen-test = "0.3.37"
 
-[profile.release]
-opt-level = 3
-lto = true
 
 [features]
 default = ["console_error_panic_hook"]

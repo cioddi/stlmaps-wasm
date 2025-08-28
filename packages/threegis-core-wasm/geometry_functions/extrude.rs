@@ -1,10 +1,8 @@
 use earcutr::earcut;
 use js_sys::{Array, Float32Array, Object};
 use serde::{Deserialize, Serialize};
-use std::f64::consts::PI;
 use wasm_bindgen::prelude::*;
 
-use crate::console_log;
 
 const EPSILON: f64 = 1e-10;
 
@@ -15,6 +13,7 @@ struct Vector2 {
     y: f64,
 }
 
+#[allow(dead_code)]
 impl Vector2 {
     fn new(x: f64, y: f64) -> Self {
         Self { x, y }
@@ -43,6 +42,7 @@ struct Vector3 {
     z: f64,
 }
 
+#[allow(dead_code)]
 impl Vector3 {
     fn new(x: f64, y: f64, z: f64) -> Self {
         Self { x, y, z }
@@ -105,13 +105,13 @@ impl Default for ExtrudeOptions {
 #[derive(Deserialize)]
 struct ExtrudeOptionsJson {
     #[serde(default = "default_curve_segments")]
-    curveSegments: u32,
+    curve_segments: u32,
     #[serde(default = "default_steps")]
     steps: u32,
     #[serde(default = "default_depth")]
     depth: f64,
     #[serde(skip)]
-    extrudePath: Option<()>,
+    extrude_path: Option<()>,
 }
 
 // Default values for JSON options
@@ -230,10 +230,10 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
     
     // Convert to our native Rust struct
     let opts = ExtrudeOptions {
-        curve_segments: options_json.curveSegments,
+        curve_segments: options_json.curve_segments,
         steps: options_json.steps,
         depth: options_json.depth,
-        extrude_path: options_json.extrudePath,
+        extrude_path: options_json.extrude_path,
     };
     
     // Call the native implementation
@@ -395,7 +395,7 @@ pub fn extrude_geometry_native_with_options(
         }
 
         // Add faces
-        let vertex_count = vertices_array.len() / 3;
+        let _vertex_count = vertices_array.len() / 3;
 
         // Define a function to add triangular faces
         fn add_triangle(
@@ -403,7 +403,7 @@ pub fn extrude_geometry_native_with_options(
             vertices_array: &mut Vec<f32>,
             normals_array: &mut Vec<f32>,
             uv_array: &mut Vec<f32>,
-            vertex_count: usize,
+            _vertex_count: usize,
             placeholder: &[f32],
             a: usize,
             b: usize,
@@ -571,7 +571,7 @@ pub fn extrude_geometry_native_with_options(
             vertices_array: &mut Vec<f32>,
             normals_array: &mut Vec<f32>,
             uv_array: &mut Vec<f32>,
-            vertex_count: usize,
+            _vertex_count: usize,
             placeholder: &[f32],
             a: usize,
             b: usize,
@@ -584,7 +584,7 @@ pub fn extrude_geometry_native_with_options(
                 vertices_array,
                 normals_array,
                 uv_array,
-                vertex_count,
+                0,
                 placeholder,
                 a,
                 b,
@@ -597,7 +597,7 @@ pub fn extrude_geometry_native_with_options(
                 vertices_array,
                 normals_array,
                 uv_array,
-                vertex_count,
+                0,
                 placeholder,
                 b,
                 c,
@@ -613,7 +613,7 @@ pub fn extrude_geometry_native_with_options(
                     &mut vertices_array,
                     &mut normals_array,
                     &mut uv_array,
-                    vertex_count,
+                    0,
                     &placeholder,
                     face[2],
                     face[1],
@@ -630,7 +630,7 @@ pub fn extrude_geometry_native_with_options(
                 &mut vertices_array,
                 &mut normals_array,
                 &mut uv_array,
-                vertex_count,
+                0,
                 &placeholder,
                 face[0] + offset_top,
                 face[1] + offset_top,
@@ -660,7 +660,7 @@ pub fn extrude_geometry_native_with_options(
                     &mut vertices_array,
                     &mut normals_array,
                     &mut uv_array,
-                    vertex_count,
+                    0,
                     &placeholder,
                     a,
                     b,
@@ -694,7 +694,7 @@ pub fn extrude_geometry_native_with_options(
                         &mut vertices_array,
                         &mut normals_array,
                         &mut uv_array,
-                        vertex_count,
+                        0,
                         &placeholder,
                         a,
                         b,

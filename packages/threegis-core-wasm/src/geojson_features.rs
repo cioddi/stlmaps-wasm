@@ -1,4 +1,3 @@
-use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 
 // Structure for the GeometryData that we extract from geojson features

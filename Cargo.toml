@@ -1,4 +1,9 @@
 [workspace]
+resolver = "2"
 members = [
     "packages/threegis-core-wasm"
 ]
+
+[profile.release]
+opt-level = 3
+lto = true

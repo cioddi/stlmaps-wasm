@@ -5,11 +5,13 @@ use lazy_static::lazy_static;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Simple LRU cache implementation
+#[allow(dead_code)]
 struct LruCache<T> {
     capacity: usize,
     data: HashMap<String, (T, u64)>, // value, timestamp
 }
 
+#[allow(dead_code)]
 impl<T> LruCache<T> {
     fn new(capacity: usize) -> Self {
         Self {
@@ -54,12 +56,14 @@ impl<T> LruCache<T> {
     }
 }
 
+#[allow(dead_code)]
 pub struct CacheGroup {
     elevation_grid_cache: LruCache<Vec<Vec<f64>>>,
     vector_tile_cache: LruCache<Vec<u8>>,
     geometry_cache: LruCache<Vec<u8>>, // Pre-processed geometry data
 }
 
+#[allow(dead_code)]
 impl CacheGroup {
     pub fn new() -> Self {
         Self {
@@ -104,6 +108,7 @@ pub struct CacheManager {
     groups: HashMap<String, CacheGroup>,
 }
 
+#[allow(dead_code)]
 impl CacheManager {
     pub fn new() -> Self {
         Self { groups: HashMap::new() }
