@@ -447,8 +447,9 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       envTexture.mapping = THREE.EquirectangularReflectionMapping;
       
       const envMap = pmremGenerator.fromEquirectangular(envTexture).texture;
-      scene.environment = envMap;
-      scene.background = envMap;
+      // Remove global environment mapping for matte materials - keep only background
+      scene.environment = null; // No global environment reflections
+      scene.background = envMap;  // Keep gradient background for aesthetics
       
       pmremGenerator.dispose();
       
@@ -908,28 +909,13 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         // Create terrain material based on rendering mode
         let terrainMaterial;
         
-        if (renderingMode === 'quality') {
-          // High-quality material with more complex properties
-          terrainMaterial = new THREE.MeshStandardMaterial({
-            //vertexColors: terrainSettings.color ? false : true,
-            color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
-            roughness: 2.8,
-            //metalness: 0.01,
-            precision: "highp",
-            //envMapIntensity: 0.4,
-            //flatShading: true,
-            side: THREE.DoubleSide,
-
-          });
-        } else {
-          // Performance-optimized material with simpler properties
-          terrainMaterial = new THREE.MeshLambertMaterial({
-            vertexColors: terrainSettings.color ? false : true,
-            color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
-            flatShading: true,
-            side: THREE.DoubleSide
-          });
-        }
+        // Use the same matte material approach for both modes - just like performance mode works
+        terrainMaterial = new THREE.MeshLambertMaterial({
+          vertexColors: terrainSettings.color ? false : true,
+          color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
+          flatShading: true,
+          side: THREE.DoubleSide
+        });
         
         // Apply the material to the terrain mesh
         const geometryMesh = new THREE.Mesh(
@@ -972,26 +958,12 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
               enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
               
-              // Create material based on rendering mode
-              let polygonMaterial;
-              if (renderingMode === 'quality') {
-                polygonMaterial = new THREE.MeshPhysicalMaterial({
-                  color: enhancedColor,
-                  roughness: 0.35,
-                  metalness: 0.01,
-                  clearcoat: 0.06,
-                  clearcoatRoughness: 2,
-                  side: THREE.DoubleSide
-                });
-              } else {
-                polygonMaterial = new THREE.MeshStandardMaterial({
-                  color: enhancedColor,
-                  roughness: 0.35,
-                  metalness: 0,
-                  flatShading: true,
-                  side: THREE.DoubleSide
-                });
-              }
+              // Use simple Lambert material like performance mode - it works perfectly
+              const polygonMaterial = new THREE.MeshLambertMaterial({
+                color: enhancedColor,
+                flatShading: true,
+                side: THREE.DoubleSide
+              });
               
               // Create mesh
               const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
@@ -1036,31 +1008,12 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
           enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
           
-          // Create material based on rendering mode
-          let polygonMaterial;
-          
-          if (renderingMode === 'quality') {
-            // High-quality material with physically-based properties
-            polygonMaterial = new THREE.MeshPhysicalMaterial({
-              color: enhancedColor,
-              roughness: 0.35,
-              metalness: 0.01,
-              clearcoat: 0.06,
-              clearcoatRoughness: 2,
-              envMapIntensity: 0.7,
-              flatShading: false,
-              side: THREE.DoubleSide
-            });
-          } else {
-            // Performance-optimized simpler material
-            polygonMaterial = new THREE.MeshStandardMaterial({
-              color: enhancedColor,
-              roughness: 0.5,
-              metalness: 0,
-              flatShading: true,
-              side: THREE.DoubleSide
-            });
-          }
+          // Use simple Lambert material like performance mode - it works perfectly
+          const polygonMaterial = new THREE.MeshLambertMaterial({
+            color: enhancedColor,
+            flatShading: true,
+            side: THREE.DoubleSide
+          });
           
           // Create mesh
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);

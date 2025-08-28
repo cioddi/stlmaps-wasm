@@ -66,6 +66,7 @@ interface LayerState {
   isProcessing: boolean;
   processingStatus: string | null;
   processingProgress: number | null;
+  _forceUpdate?: number; // Internal field to force React updates
 
   // Geometry data
   geometryDataSets: {
@@ -136,6 +137,9 @@ interface LayerState {
   setProcessingStatus: (status: string | null) => void;
   setProcessingProgress: (progress: number | null) => void;
   updateProcessingState: (state: { isProcessing?: boolean; status?: string | null; progress?: number | null }) => void;
+
+  // Centralized progress update that forces React updates
+  updateProgress: (status: string, progress: number) => void;
 
   // Reset actions
   resetToDefaults: () => void;
@@ -451,15 +455,51 @@ const useLayerStore = create<LayerState>((set) => ({
   // Bbox action
   setBbox: (bbox) => set({ bbox }),
 
-  // Processing state actions
-  setIsProcessing: (isProcessing) => set({ isProcessing }),
-  setProcessingStatus: (processingStatus) => set({ processingStatus }),
-  setProcessingProgress: (processingProgress) => set({ processingProgress }),
-  updateProcessingState: (state) => set((currentState) => ({
-    isProcessing: state.isProcessing !== undefined ? state.isProcessing : currentState.isProcessing,
-    processingStatus: state.status !== undefined ? state.status : currentState.processingStatus,
-    processingProgress: state.progress !== undefined ? state.progress : currentState.processingProgress
-  })),
+  // Processing state actions - CENTRALIZED
+  setIsProcessing: (isProcessing: boolean) => {
+    console.log('🔄 Setting isProcessing:', isProcessing);
+    set({ isProcessing });
+  },
+  setProcessingStatus: (processingStatus: string | null) => {
+    console.log('🔄 Setting processingStatus:', processingStatus);
+    set({ processingStatus });
+  },
+  setProcessingProgress: (processingProgress: number | null) => {
+    console.log('🔄 Setting processingProgress:', processingProgress);
+    set({ processingProgress });
+  },
+  updateProcessingState: (updates: { isProcessing?: boolean; status?: string | null; progress?: number | null }) => {
+    console.log('🔄 Updating processing state:', updates);
+    set((state) => ({
+      isProcessing: updates.isProcessing !== undefined ? updates.isProcessing : state.isProcessing,
+      processingStatus: updates.status !== undefined ? updates.status : state.processingStatus,
+      processingProgress: updates.progress !== undefined ? updates.progress : state.processingProgress,
+    }));
+  },
+
+  // Centralized progress update that FORCES React to update
+  updateProgress: (status: string, progress: number) => {
+    console.log('🚀 FORCE UPDATE - Progress:', progress, 'Status:', status);
+    // Force a complete state change by creating a new object
+    set(() => ({
+      isProcessing: true,
+      processingStatus: status,
+      processingProgress: progress,
+      // Force React to see this as a new state by adding timestamp
+      _forceUpdate: Date.now(),
+    }));
+    
+    // Also force a second update to ensure React catches it
+    setTimeout(() => {
+      console.log('🚀 SECOND UPDATE - Progress:', progress, 'Status:', status);
+      set((state) => ({
+        ...state,
+        processingStatus: status,
+        processingProgress: progress,
+        _forceUpdate: Date.now(),
+      }));
+    }, 0);
+  },
 
   // Reset to defaults
   resetToDefaults: () => set({

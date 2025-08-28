@@ -73,6 +73,7 @@ const App: React.FC = () => {
     processingProgress,
   } = useLayerStore();
 
+
   // Handle city selection to update both center and bbox
   const handleCitySelect = (city: any) => {
     if (city) {
@@ -205,46 +206,32 @@ const App: React.FC = () => {
       }}
     />
     
-    {/* Single Line Processing Indicator */}
+    {/* Clean Processing Indicator */}
     {isProcessing && (
       <Paper
-        elevation={4}
+        elevation={6}
         sx={{
           position: 'fixed',
-          bottom: '8px',
-          right: '8px',
-          padding: '6px 12px',
-          borderRadius: '6px',
-          backgroundColor: 'rgba(25, 25, 25, 0.9)',
+          bottom: '16px',
+          right: '16px',
+          padding: '8px 16px',
+          borderRadius: '8px',
+          backgroundColor: 'rgba(30, 30, 30, 0.95)',
           color: '#fff',
           zIndex: 9999,
           display: 'flex',
           alignItems: 'center',
-          gap: 1,
-          minWidth: '200px',
-          maxWidth: '300px',
+          gap: 2,
+          minWidth: '250px',
+          maxWidth: '350px',
         }}
       >
-        <Typography variant="caption" sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+        <Typography variant="body2" sx={{ flexGrow: 1 }}>
           {processingStatus || "Processing..."}
         </Typography>
-        <LinearProgress 
-          variant={processingProgress !== null ? "determinate" : "indeterminate"} 
-          value={processingProgress !== null ? processingProgress : undefined}
-          sx={{
-            flexGrow: 1,
-            height: '2px',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            '& .MuiLinearProgress-bar': {
-              backgroundColor: '#42a5f5',
-            },
-          }}
-        />
-        {processingProgress !== null && (
-          <Typography variant="caption" sx={{ fontSize: '0.7rem', minWidth: '30px' }}>
-            {Math.round(processingProgress)}%
-          </Typography>
-        )}
+        <Typography variant="body2" sx={{ fontWeight: 'bold', minWidth: '35px' }}>
+          {processingProgress !== null ? `${Math.round(processingProgress)}%` : "0%"}
+        </Typography>
       </Paper>
     )}
   </>
