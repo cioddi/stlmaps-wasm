@@ -535,11 +535,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     let vt_dataset = &input.vtDataSet;
 
     // Log VtDataSet to check if filter is arriving
-    console_log!(
-        "🔍 VtDataSet received - sourceLayer: '{}', filter: {:?}",
-        vt_dataset.sourceLayer,
-        vt_dataset.filter
-    );
 
     // Compute consistent bbox_key using central function
     let bbox_key = cache_keys::make_bbox_key(min_lng, min_lat, max_lng, max_lat);
@@ -873,8 +868,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
                     
-                    console_log!("🛣️ Processing {} with {} line(s) for class '{}'", 
-                        geometry_type_str, feature.geometry.len(), class_value);
                     
                     for (line_index, line_tile_coords) in feature.geometry.iter().enumerate() {
                         let mut transformed_line: Vec<Vec<f64>> = Vec::with_capacity(line_tile_coords.len());
@@ -907,8 +900,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 elev_max_lat,
                             );
                             
-                            console_log!("✅ Created LineString geometry for class '{}' line {} with {} points", 
-                                class_value, line_index, transformed_line.len());
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_line,
@@ -919,8 +910,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
                         } else {
-                            console_log!("⚠️ Skipping line {} for class '{}': only {} points (need ≥2)", 
-                                line_index, class_value, transformed_line.len());
                         }
                     }
                 }

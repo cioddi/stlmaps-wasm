@@ -7,6 +7,9 @@ import {
   useMediaQuery,
   useTheme,
   Drawer,
+  Paper,
+  Typography,
+  LinearProgress,
 } from "@mui/material";
 import useLayerStore from "./stores/useLayerStore";
 import { Sidebar } from "./components/Sidebar";
@@ -64,7 +67,10 @@ const App: React.FC = () => {
 
   // Get layer settings and geometries from Zustand store
   const {
-    setBbox
+    setBbox,
+    isProcessing,
+    processingStatus,
+    processingProgress,
   } = useLayerStore();
 
   // Handle city selection to update both center and bbox
@@ -198,6 +204,49 @@ const App: React.FC = () => {
         setBbox(geojson);
       }}
     />
+    
+    {/* Single Line Processing Indicator */}
+    {isProcessing && (
+      <Paper
+        elevation={4}
+        sx={{
+          position: 'fixed',
+          bottom: '8px',
+          right: '8px',
+          padding: '6px 12px',
+          borderRadius: '6px',
+          backgroundColor: 'rgba(25, 25, 25, 0.9)',
+          color: '#fff',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          minWidth: '200px',
+          maxWidth: '300px',
+        }}
+      >
+        <Typography variant="caption" sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+          {processingStatus || "Processing..."}
+        </Typography>
+        <LinearProgress 
+          variant={processingProgress !== null ? "determinate" : "indeterminate"} 
+          value={processingProgress !== null ? processingProgress : undefined}
+          sx={{
+            flexGrow: 1,
+            height: '2px',
+            backgroundColor: 'rgba(255, 255, 255, 0.2)',
+            '& .MuiLinearProgress-bar': {
+              backgroundColor: '#42a5f5',
+            },
+          }}
+        />
+        {processingProgress !== null && (
+          <Typography variant="caption" sx={{ fontSize: '0.7rem', minWidth: '30px' }}>
+            {Math.round(processingProgress)}%
+          </Typography>
+        )}
+      </Paper>
+    )}
   </>
   );
 };

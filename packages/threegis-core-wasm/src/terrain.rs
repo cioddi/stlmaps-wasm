@@ -40,7 +40,6 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
     let kernel_radius = kernel_size / 2;
     let sigma = 0.8; // Reduced sigma for sharper falloff (was 1.0)
     
-    console_log!("Starting sequential terrain smoothing for {}x{} grid", width, height);
     
     // Precompute gaussian weights for optimization
     let mut kernel_weights = vec![vec![0.0; kernel_size]; kernel_size];
@@ -99,7 +98,6 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
         }
     }
     
-    console_log!("Sequential terrain smoothing completed");
     result
 }
 
@@ -107,7 +105,6 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
 fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) -> (Vec<Vec<f64>>, f64, f64) {
     let width = grid[0].len();
     let height = grid.len();
-    console_log!("Starting sequential outlier removal for {}x{} grid", width, height);
     
     // Calculate the range and derive reasonable thresholds
     let range = max_elevation - min_elevation;
@@ -139,8 +136,6 @@ fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) 
     let lower_threshold = mean - 2.5 * std_dev;
     let upper_threshold = mean + 2.5 * std_dev;
     
-    console_log!("Outlier thresholds: {:.2} to {:.2} (mean: {:.2}, std: {:.2})", 
-                lower_threshold, upper_threshold, mean, std_dev);
     
     // Apply clipping sequentially
     let result: Vec<Vec<f64>> = grid.iter()
@@ -176,7 +171,6 @@ fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) 
         })
         .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, item| (acc.0.min(item.0), acc.1.max(item.1)));
     
-    console_log!("Sequential outlier removal completed");
     (final_result, final_min, final_max)
 }
 
@@ -188,9 +182,6 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     
     
     
-    console_log!("🏔️ [Terrain] Terrain params: bbox=[{}, {}, {}, {}], vertical_exaggeration={}, base_height={}", 
-                params.min_lng, params.min_lat, params.max_lng, params.max_lat, 
-                params.vertical_exaggeration, params.terrain_base_height);
     
     // Get module state to access cached elevation data
     let state = ModuleState::global();
@@ -213,10 +204,8 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     let elevation_grid = {
         // First try to get existing elevation data
         if let Some(grid) = state.get_elevation_grid(&bbox_key) {
-            console_log!("🏔️ Found cached elevation data for bbox_key: {}", bbox_key);
             grid.clone()
         } else {
-            console_log!("🔄 No cached elevation data found for bbox_key: {}, attempting retry...", bbox_key);
             
             // Release the lock before async operations
             drop(state);
@@ -226,7 +215,6 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
             let mut elevation_grid: Option<Vec<Vec<f64>>> = None;
             
             for attempt in 1..=max_retries {
-                console_log!("🔄 Elevation data retry attempt {} of {}", attempt, max_retries);
                 
                 // Create elevation processing input
                 let elevation_input = crate::elevation::ElevationProcessingInput {
@@ -246,7 +234,6 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                         // Attempt to process elevation data
                         match crate::elevation::process_elevation_data_async(&input_json).await {
                             Ok(_) => {
-                                console_log!("✅ Elevation processing succeeded on attempt {}", attempt);
                                 
                                 // Check if we now have the data
                                 let state = ModuleState::global();
@@ -257,22 +244,18 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                                 }
                             },
                             Err(e) => {
-                                console_log!("❌ Elevation processing failed on attempt {}: {:?}", attempt, e);
                                 
                                 if attempt < max_retries {
                                     // Exponential backoff: wait 500ms * 2^(attempt-1)
                                     let delay_ms = 500 * (1 << (attempt - 1));
-                                    console_log!("⏳ Waiting {}ms before retry...", delay_ms);
                                     
                                     // Simple delay - just log the delay for now
                                     // In a real implementation, you might want to add actual delay
-                                    console_log!("⏳ Retry delay would be {}ms", delay_ms);
                                 }
                             }
                         }
                     },
                     Err(e) => {
-                        console_log!("❌ Failed to serialize elevation input: {}", e);
                         break;
                     }
                 }
@@ -280,7 +263,6 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
             
             match elevation_grid {
                 Some(grid) => {
-                    console_log!("✅ Successfully retrieved elevation data after retry");
                     grid
                 },
                 None => {
@@ -320,8 +302,6 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     // Remove extreme values by clamping outliers
     let (cleaned_grid, clean_min, clean_max) = remove_outliers(smoothed_grid, min_elevation, max_elevation);
     
-    console_log!("Terrain smoothing applied: min:{:.2} -> {:.2}, max:{:.2} -> {:.2}", 
-                min_elevation, clean_min, max_elevation, clean_max);
     
     let elevation_result = ElevationProcessingResult {
         elevation_grid: cleaned_grid,
@@ -371,7 +351,6 @@ fn generate_terrain_mesh(
     let mut bottom_positions: Vec<f32> = Vec::with_capacity(width * height * 3);
     
     // Generate vertices sequentially for WASM compatibility
-    console_log!("Starting sequential vertex generation for {}x{} terrain", width, height);
     
     let vertex_results: Vec<(Vec<f32>, Vec<f32>, Vec<f32>, f64)> = (0..height)
         .map(|y| {
@@ -452,7 +431,6 @@ fn generate_terrain_mesh(
         }
     }
     
-    console_log!("Sequential vertex generation completed: {} vertices", top_positions.len() / 3);
     
     // Combine top and bottom vertices into one array
     positions.extend_from_slice(&top_positions);

@@ -80,21 +80,16 @@ export const TopBar: React.FC<TopBarProps> = ({
       order: 0,
     });
     
-    // Individual layer processing (50-90% progress)
-    vtLayers.forEach((layer, index) => {
-      const layerProgressStart = 50 + (index * 40) / vtLayers.length;
-      const layerProgressEnd = 50 + ((index + 1) * 40) / vtLayers.length;
-      
-      const layerStatus = 
-        !processingProgress || processingProgress < layerProgressStart ? 'not-started' :
-        processingProgress < layerProgressEnd ? 'in-progress' : 'completed';
-      
-      steps.push({
-        id: `layer-${layer.sourceLayer}`,
-        label: `Processing ${layer.sourceLayer} layer`,
-        status: layerStatus,
-        order: index + 1,
-      });
+    // Vector processing step (50-90% progress)  
+    const vectorProcessingStatus = 
+      !processingProgress || processingProgress < 50 ? 'not-started' :
+      processingProgress < 90 ? 'in-progress' : 'completed';
+    
+    steps.push({
+      id: 'vector-processing',
+      label: 'Processing vector data',
+      status: vectorProcessingStatus,
+      order: 1,
     });
     
     // Final step - model assembly (90-100% progress)

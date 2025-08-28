@@ -939,7 +939,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     }
 
     let total_polygons = input.polygons.len();
-    console_log!("Processing {} polygons sequentially", total_polygons);
     
     // Process polygons sequentially for WASM compatibility
     let geometries_result: Result<Vec<_>, String> = input.polygons
@@ -956,8 +955,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         
         // Debug: log the first few polygon properties to see what's available
         if i < 3 {
-            console_log!("🔍 Polygon {} data: properties = {:?}, type = {:?}", 
-                i, polygon_data.properties, polygon_data.r#type);
         }
         
         // Debug: Track primary and secondary roads specifically
@@ -965,8 +962,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             if let serde_json::Value::Object(obj) = props {
                 if let Some(serde_json::Value::String(class)) = obj.get("class") {
                     if class == "primary" || class == "secondary" {
-                        console_log!("🛣️ Processing {} road: properties = {:?}, type = {:?}", 
-                            class, polygon_data.properties, polygon_data.r#type);
                     }
                 }
             }
@@ -992,8 +987,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
-            console_log!("🛣️ Processing LineString for '{}' road with {} points", 
-                transportation_class, polygon_data.geometry.len());
             
             // CLEAN SOLUTION: Only process if we have enough points for a valid line
             if polygon_data.geometry.len() >= 2 {
@@ -1025,8 +1018,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     };
                     
                     // Call the WASM buffer_line_string function
-                    console_log!("🛣️ Buffering with distance {:.6} for {} road", 
-                        buffer_distance, transportation_class);
                     
                     let result_json = crate::buffer_line_string(&geojson_feature.to_string(), buffer_distance);
                     
@@ -1056,8 +1047,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                                             }
                                         }
                                         
-                                        console_log!("✅ Successfully buffered {} road: {} → {} points", 
-                                            transportation_class, line_coordinates.len(), buffered_points.len());
                                         
                                         buffered_points
                                     } else {
@@ -1194,8 +1183,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             height *= meters_to_units;
             
             // Debug logging for height scaling
-            console_log!("🏗️ Meter scaling: class={}, height_m={:.1}, meters_to_units={:.6}, final_height={:.3}", 
-                geometry_class, original_height, meters_to_units, height);
         }
         
         // Apply heightScaleFactor as a multiplier (if provided)
@@ -1396,7 +1383,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         .filter_map(|opt| opt)
         .collect();
     
-    console_log!("Parallel processing completed, {} valid geometries", all_geometries.len());
     
     // Apply CSG union per layer to merge geometries
     if all_geometries.is_empty() {
@@ -1406,7 +1392,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // Group geometries by layer and apply CSG union
     let merged_geometries = if all_geometries.len() > 1 {
         let initial_count = all_geometries.len();
-        console_log!("Applying CSG union to {} geometries for layer: {}", initial_count, input.vtDataSet.sourceLayer);
         
         // Merge geometries using CSG union
         let layer_merged = crate::csg_union::merge_geometries_by_layer(all_geometries);
@@ -1414,15 +1399,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         // Extract merged geometries, optimizing each one
         let mut final_geometries = Vec::new();
         for (layer_name, geometry) in layer_merged {
-            console_log!("Optimizing merged geometry for layer: {}", layer_name);
             let optimized = crate::csg_union::optimize_geometry(geometry, 0.01); // 1cm tolerance
             if optimized.hasData {
                 final_geometries.push(optimized);
             }
         }
         
-        console_log!("CSG union complete. Reduced {} geometries to {} merged geometries", 
-                    initial_count, final_geometries.len());
         final_geometries
     } else {
         // Single geometry, just optimize it

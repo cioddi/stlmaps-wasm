@@ -75,8 +75,6 @@ pub fn start() {
         state.max_raster_tiles = 200;
         state.max_vector_tiles = 100;
         
-        // Log that the module has been initialized
-        console_log!("WASM module initialized successfully");
     });
 }
 
@@ -216,7 +214,6 @@ pub fn add(a: i32, b: i32) -> i32 {
 // Returns a serialized array of polygon coordinates.
 #[wasm_bindgen]
 pub fn buffer_line_string_direct(coordinates: &[f64], dist: f64) -> String {
-    console_log!("Buffering LineString with {} coordinates, distance: {}", coordinates.len() / 2, dist);
 
     // Defensive: non-positive or NaN distances return empty geometry
     if !dist.is_finite() || dist == 0.0 || coordinates.len() < 4 {
@@ -253,9 +250,7 @@ pub fn buffer_line_string_direct(coordinates: &[f64], dist: f64) -> String {
         })
         .collect();
 
-    let result = serde_json::to_string(&coords_array).unwrap_or_else(|_| "[]".to_string());
-    console_log!("Buffering completed, result size: {} bytes", result.len());
-    result
+    serde_json::to_string(&coords_array).unwrap_or_else(|_| "[]".to_string())
 }
 
 // Legacy buffer function for backward compatibility - uses direct coordinate processing
@@ -391,30 +386,25 @@ pub fn free_cache_group(group_id: &str) -> Result<(), JsValue> {
 // Export CSG union functionality with parallel processing
 #[wasm_bindgen]
 pub fn merge_geometries_with_csg_union(geometries_json: &str) -> Result<JsValue, JsValue> {
-    console_log!("Starting CSG union with parallel processing");
     
     // Parse input geometries
     let geometries: Vec<crate::polygon_geometry::BufferGeometry> = 
         serde_json::from_str(geometries_json)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse geometries: {}", e)))?;
     
-    console_log!("Parsed {} geometries for CSG union", geometries.len());
     
     // Merge geometries by layer
     let merged_by_layer = csg_union::merge_geometries_by_layer(geometries);
     
-    console_log!("Merged into {} layers", merged_by_layer.len());
     
     // Convert to output format with sequential optimization
     let result: Vec<crate::polygon_geometry::BufferGeometry> = merged_by_layer
         .into_iter()
         .map(|(layer_name, geometry)| {
-            console_log!("Optimizing geometry for layer: {}", layer_name);
             csg_union::optimize_geometry(geometry, 0.01) // 1cm tolerance
         })
         .collect();
     
-    console_log!("Optimization complete, {} final geometries", result.len());
     
     // Serialize result
     let json = serde_json::to_string(&result)
@@ -426,7 +416,6 @@ pub fn merge_geometries_with_csg_union(geometries_json: &str) -> Result<JsValue,
 // Batch buffer multiple LineStrings in parallel for optimal performance
 #[wasm_bindgen]
 pub fn buffer_line_strings_batch(geojson_features_json: &str, dist: f64) -> String {
-    console_log!("Starting batch LineString buffering with distance: {}", dist);
     
     // Parse input features
     let features: Vec<serde_json::Value> = match serde_json::from_str(geojson_features_json) {
@@ -434,7 +423,6 @@ pub fn buffer_line_strings_batch(geojson_features_json: &str, dist: f64) -> Stri
         Err(_) => return "[]".to_string()
     };
     
-    console_log!("Processing {} features sequentially", features.len());
     
     // Process features sequentially
     let buffered_results: Vec<String> = features
@@ -474,7 +462,6 @@ pub fn buffer_line_strings_batch(geojson_features_json: &str, dist: f64) -> Stri
         })
         .collect();
     
-    console_log!("Batch buffering completed, {} results", buffered_results.len());
     
     // Combine all results into a single array
     serde_json::to_string(&buffered_results).unwrap_or_else(|_| "[]".to_string())

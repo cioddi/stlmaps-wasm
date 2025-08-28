@@ -142,10 +142,6 @@ export const GenerateMeshButton = function () {
       progress: 0,
     });
 
-    console.log(
-      "%c 🏗️ STARTING 3D MODEL GENERATION",
-      "background: #4CAF50; color: white; padding: 4px; font-weight: bold;"
-    );
 
     // Generate configuration hashes for efficiency checks
     const currentFullConfigHash = createConfigHash(
@@ -158,17 +154,9 @@ export const GenerateMeshButton = function () {
 
     // Skip full regeneration if configuration hasn't changed
     if (currentFullConfigHash === configHashes.fullConfigHash) {
-      console.log(
-        "%c ✅ SKIPPING 3D MODEL GENERATION - No config changes detected",
-        "background: #2196F3; color: white; padding: 4px; font-weight: bold;"
-      );
       return;
     }
 
-    // Log what components have changed
-    console.log("Generating 3D model for:", bbox);
-    console.log("Using terrain settings:", terrainSettings);
-    console.log("Using building settings:", buildingSettings);
 
     // Check which specific components need regeneration
     const terrainChanged = currentTerrainHash !== configHashes.terrainHash;
@@ -181,27 +169,6 @@ export const GenerateMeshButton = function () {
       })
       .map((lh) => lh.index);
 
-    if (terrainChanged) {
-      console.log(
-        "%c 🏔️ Terrain configuration changed - regenerating terrain",
-        "color: #FF9800;"
-      );
-    } else if (geometryDataSets.terrainGeometry) {
-      console.log(
-        "%c ✅ Terrain configuration unchanged - reusing existing terrain geometry",
-        "color: #4CAF50;"
-      );
-    }
-
-    if (changedLayerIndices.length > 0) {
-      console.log(
-        "%c 🔄 Changed layers:",
-        "color: #FF9800;",
-        changedLayerIndices
-          .map((i) => vtLayers[i]?.sourceLayer || `Layer ${i}`)
-          .join(", ")
-      );
-    }
 
     try {
       // Extract bbox coordinates from the feature
@@ -245,7 +212,6 @@ export const GenerateMeshButton = function () {
         zoom--;
       }
 
-      console.log(`Using zoom level ${zoom} for the 3D model`);
 
       // Update processing status
       updateProcessingState({
@@ -255,7 +221,6 @@ export const GenerateMeshButton = function () {
 
       // Get tile coordinates
       const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-      console.log(`Using ${tiles.length} tiles for elevation data`);
 
       // Update processing status
       updateProcessingState({
@@ -271,16 +236,8 @@ export const GenerateMeshButton = function () {
       const bboxChanged = currentBboxHash !== lastProcessedBboxHash;
 
       if (bboxChanged) {
-        console.log(
-          "%c 🔄 New bbox detected - previous cache will be freed automatically",
-          "color: #FF9800;"
-        );
         setLastProcessedBboxHash(currentBboxHash);
       } else {
-        console.log(
-          "%c ♻️ Using existing cached elevation data for bbox",
-          "color: #4CAF50;"
-        );
       }
 
       // Only attempt to process elevation data if WASM is initialized
@@ -289,13 +246,9 @@ export const GenerateMeshButton = function () {
       }
 
       // Use the WASM-based elevation processing with the bboxHash as bbox_key
-      console.log(
-        "🌍 Processing elevation data with WASM for bbox:",
-        currentBboxHash
-      );
 
       updateProcessingState({
-        status: "Processing elevation data with WASM...",
+        status: "Fetching elevation data...",
         progress: 25,
       });
       let elevationResult;
@@ -304,9 +257,10 @@ export const GenerateMeshButton = function () {
         // This will automatically register the data with this ID in the WASM context
         elevationResult = await processElevationForBbox(bbox, currentBboxHash);
 
-        console.log(
-          "✅ Successfully processed and stored elevation data in WASM context"
-        );
+        updateProcessingState({
+          status: "Processing elevation data...",
+          progress: 35,
+        });
 
         // Store just the metadata for JavaScript-side operations, the actual grid
         // remains in WASM memory and is accessible via the bbox_key (currentBboxHash)
@@ -321,12 +275,6 @@ export const GenerateMeshButton = function () {
           `Elevation processing failed: ${error instanceof Error ? error.message : String(error)}`
         );
       }
-
-      // Update processing status
-      updateProcessingState({
-        status: "Processing terrain elevation data...",
-        progress: 30,
-      });
 
       // Check for cancellation before generating terrain geometry
       cancellationToken.throwIfCancelled();
@@ -352,10 +300,9 @@ export const GenerateMeshButton = function () {
 
       // Generate three.js geometry from elevation grid using WASM
       updateProcessingState({
-        status: "Generating terrain geometry...",
+        status: "Generating terrain mesh...",
         progress: 40,
       });
-      console.log("🗻 Creating terrain geometry with WASM...");
 
       try {
         // Get the WASM module instance
@@ -363,10 +310,6 @@ export const GenerateMeshButton = function () {
 
         // First, we need to process and register the elevation data with the bbox_key
         // This step is crucial - create_terrain_geometry expects this data to be pre-registered
-        console.log(
-          "Registering elevation data with bbox_key:",
-          currentBboxHash
-        );
 
         // We need to explicitly register the elevation data again for terrain generation
         // Even though processElevationForBbox was called earlier, we need to ensure
@@ -374,13 +317,7 @@ export const GenerateMeshButton = function () {
         try {
           // Call processElevationForBbox again to ensure the data is properly registered
           // This will register the data with the same bbox_key (currentBboxHash)
-          console.log(
-            "Re-registering elevation data for terrain generation..."
-          );
           await processElevationForBbox(bbox, currentBboxHash);
-          console.log(
-            "✅ Successfully re-registered elevation data for terrain generation"
-          );
         } catch (error) {
           console.error(
             "Failed to register elevation data for terrain:",
@@ -426,10 +363,6 @@ export const GenerateMeshButton = function () {
         processedMinElevation = wasmTerrainResult.processedMinElevation;
         processedMaxElevation = wasmTerrainResult.processedMaxElevation;
 
-        console.log("✅ Terrain geometry created successfully with WASM:", {
-          geometryExists: !!terrainGeometry,
-          vertexCount: terrainGeometry?.attributes?.position?.count || 0,
-        });
       } catch (error) {
         console.error("Error creating terrain geometry with WASM:", error);
         throw new Error(
@@ -437,12 +370,6 @@ export const GenerateMeshButton = function () {
         );
       }
       // Set generated geometries based on settings
-      console.log("🔄 Setting output geometries:", {
-        terrainVisibleIn3D: terrainSettings.enabled,
-        terrainGeometryExists: !!terrainGeometry,
-        buildingsEnabled: buildingSettings.enabled,
-        note: "All layers are processed; visibility controlled in 3D preview",
-      });
 
       // Fetch vt data for this bbox
       await fetchVtData({
@@ -474,14 +401,20 @@ export const GenerateMeshButton = function () {
         .map((lh) => lh.index);
 
       // Process vector tile layers
+      const totalLayers = vtLayers.length;
       for (let i = 0; i < vtLayers.length; i++) {
         // Check for cancellation before processing each layer
         cancellationToken.throwIfCancelled();
 
         const currentLayer = vtLayers[i];
+        const baseProgress = 50 + (i * 40) / totalLayers;
+        const nextLayerProgress = 50 + ((i + 1) * 40) / totalLayers;
+        const layerProgressRange = nextLayerProgress - baseProgress;
+
+        // Step 1: Fetching data
         updateProcessingState({
-          status: `Processing ${currentLayer.sourceLayer} layer (${i + 1}/${vtLayers.length})`,
-          progress: 50 + (i * 40) / vtLayers.length, // 50-90% for layer processing
+          status: "Processing vector data...",
+          progress: baseProgress,
         });
 
         // Process all layers regardless of enabled state for 3D preview
@@ -522,6 +455,12 @@ export const GenerateMeshButton = function () {
         // Check for cancellation before fetching layer data
         cancellationToken.throwIfCancelled();
 
+        // Step 2: Extracting features
+        updateProcessingState({
+          status: "Processing vector data...",
+          progress: baseProgress + layerProgressRange * 0.2,
+        });
+
         // First, extract and cache features using WASM
         console.log(`Extracting and caching ${currentLayer.sourceLayer} features...`);
         
@@ -539,6 +478,12 @@ export const GenerateMeshButton = function () {
           console.error(`Failed to extract features for ${currentLayer.sourceLayer}:`, error);
           continue; // Skip this layer if feature extraction fails
         }
+
+        // Step 3: Creating geometry
+        updateProcessingState({
+          status: "Creating geometry...",
+          progress: baseProgress + layerProgressRange * 0.6,
+        });
 
         // Check for cancellation before creating polygon geometry
         cancellationToken.throwIfCancelled();
@@ -788,6 +733,12 @@ export const GenerateMeshButton = function () {
           ...currentLayer,
           // Initially use an empty geometry that will be replaced later
           geometry: new THREE.BufferGeometry(),
+        });
+
+        // Step 4: Layer completed
+        updateProcessingState({
+          status: "Creating geometry...",
+          progress: nextLayerProgress,
         });
       }
 

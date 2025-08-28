@@ -64,7 +64,6 @@ const getBatteryPenalty = (): number => {
  * Improved algorithm that better distinguishes between capable and less capable devices
  */
 const detectDeviceCapabilities = (): 'quality' | 'performance' => {
-  console.log("Detecting device capabilities for optimal rendering mode");
   
   // Device classification
   const userAgent = navigator.userAgent.toLowerCase();
@@ -82,7 +81,6 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   const devicePixelRatio = window.devicePixelRatio || 1;
   const effectivePixels = pixelCount * devicePixelRatio;
   
-  console.log(`Device info: ${isMobile ? 'Mobile' : isTablet ? 'Tablet' : 'Desktop'}, RAM: ${deviceMemory}GB, Cores: ${cpuCores}, Resolution: ${window.screen.width}x${window.screen.height}, DPR: ${devicePixelRatio}`);
   
   // GPU Performance Assessment
   let gpuCapabilityScore = 0;
@@ -99,7 +97,6 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
       if (debugInfo) {
         // @ts-expect-error - This constant exists when the extension is available
         gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
-        console.log("Detected GPU:", gpuRenderer);
         
         // High-end desktop GPUs
         const highEndDesktopGPUs = [
@@ -190,7 +187,6 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
         gpuCapabilityScore += 0.5;
       }
       
-      console.log(`GPU benchmark: ${drawCalls} draw calls in 16ms, extensions: ${supportedModernExtensions.length}/${modernExtensions.length}`);
     }
   } catch (e) {
     console.warn("Error during GPU capability detection:", e);
@@ -253,7 +249,6 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
     }
   }
   
-  console.log(`Capability scores - Base: ${isDesktop ? 3 : isTablet ? 1 : 0}, Memory: ${deviceMemory >= 8 ? 3 : deviceMemory >= 6 ? 2 : deviceMemory >= 4 ? 1 : 0}, CPU: ${cpuCores >= 8 ? 2 : cpuCores >= 6 ? 1 : cpuCores >= 4 ? 0.5 : 0}, GPU: ${gpuCapabilityScore}, Battery: ${batteryPenalty}, Total: ${totalScore}`);
   
   // Special rule: Non-mobile devices with limited specs always get performance mode
   // This ensures older desktops/laptops with 4 cores and ≤8GB RAM don't get quality mode
@@ -410,9 +405,9 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         // Add bloom effect (quality mode only)
         const bloomPass = new UnrealBloomPass(
           new THREE.Vector2(width, height),
-          0.3,
-          0.35,
-          0.9
+          0.15,
+          0.25,
+          1.2
         );
         composer.addPass(bloomPass);
         
@@ -916,13 +911,15 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         if (renderingMode === 'quality') {
           // High-quality material with more complex properties
           terrainMaterial = new THREE.MeshStandardMaterial({
-            vertexColors: terrainSettings.color ? false : true,
+            //vertexColors: terrainSettings.color ? false : true,
             color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
-            roughness: 0.8,
-            metalness: 0.01,
-            envMapIntensity: 0.4,
-            flatShading: true,
-            side: THREE.DoubleSide
+            roughness: 2.8,
+            //metalness: 0.01,
+            precision: "highp",
+            //envMapIntensity: 0.4,
+            //flatShading: true,
+            side: THREE.DoubleSide,
+
           });
         } else {
           // Performance-optimized material with simpler properties
