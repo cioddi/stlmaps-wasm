@@ -76,7 +76,7 @@ function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
     useAdaptiveScaleFactor: jsVtDataSet.useAdaptiveScaleFactor ?? null,
     zOffset: jsVtDataSet.zOffset ?? null,
     alignVerticesToTerrain: jsVtDataSet.alignVerticesToTerrain ?? null,
-    csgClipping: jsVtDataSet.csgClipping ?? null,
+    csgClipping: jsVtDataSet.useCsgClipping ?? null,
     filter: jsVtDataSet.filter ?? null, // Pass the filter to Rust
   };
 }

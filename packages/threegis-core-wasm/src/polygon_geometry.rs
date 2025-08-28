@@ -44,15 +44,21 @@ pub struct GridSize {
 // Struct to match VtDataSet from TypeScript
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VtDataSet {
-    #[serde(default)]
+    #[serde(default, rename = "sourceLayer")]
     pub source_layer: String,
     #[serde(default = "default_color")]
     pub color: String,
+    #[serde(rename = "extrusionDepth")]
     pub extrusion_depth: Option<f64>,
+    #[serde(rename = "minExtrusionDepth")]
     pub min_extrusion_depth: Option<f64>,
+    #[serde(rename = "heightScaleFactor")]
     pub height_scale_factor: Option<f64>,
+    #[serde(rename = "useAdaptiveScaleFactor")]
     pub use_adaptive_scale_factor: Option<bool>,
+    #[serde(rename = "zOffset")]
     pub z_offset: Option<f64>,
+    #[serde(rename = "alignVerticesToTerrain")]
     pub align_vertices_to_terrain: Option<bool>,
     pub filter: Option<serde_json::Value>,
 }
@@ -68,17 +74,24 @@ pub struct PolygonGeometryInput {
     pub bbox: Vec<f64>,  // [minLng, minLat, maxLng, maxLat]
     pub polygons: Vec<GeometryData>,
     #[allow(dead_code)] // Part of public API structure
+    #[serde(rename = "terrainBaseHeight")]
     pub terrain_base_height: f64,
+    #[serde(rename = "elevationGrid")]
     pub elevation_grid: Vec<Vec<f64>>,
+    #[serde(rename = "gridSize")]
     pub grid_size: GridSize,
+    #[serde(rename = "minElevation")]
     pub min_elevation: f64,
+    #[serde(rename = "maxElevation")]
     pub max_elevation: f64,
+    #[serde(rename = "vtDataSet")]
     pub vt_data_set: VtDataSet,
-    #[serde(default)]
+    #[serde(default, rename = "useSameZOffset")]
     pub use_same_z_offset: bool,
-    #[allow(dead_code)] // Part of public API structure  
+    #[allow(dead_code)] // Part of public API structure
     pub bbox_key: String,
     // Optionally override CSG clipping for this request
+    #[serde(rename = "csgClipping")]
     pub csg_clipping: Option<bool>,
 }
 
@@ -90,7 +103,7 @@ pub struct BufferGeometry {
     pub colors: Option<Vec<f32>>,
     pub indices: Option<Vec<u32>>,
     pub uvs: Option<Vec<f32>>,
-    #[serde(rename = "has_data")]
+    #[serde(rename = "hasData")]
     pub has_data: bool,
     // Add properties from MVT data for debugging and interaction
     pub properties: Option<std::collections::HashMap<String, serde_json::Value>>,
@@ -873,7 +886,6 @@ fn create_extruded_shape(
 
 // Process the polygon geometry input and produce a buffer geometry output
 pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
-    // 
     // Parse the input JSON
     let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
         Ok(data) => data,

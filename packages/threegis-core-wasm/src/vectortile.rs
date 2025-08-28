@@ -57,8 +57,11 @@ pub struct GeometryData {
 #[derive(Serialize, Deserialize)]
 pub struct ExtractFeaturesInput {
     pub bbox: Vec<f64>,                   // [minLng, minLat, maxLng, maxLat]
+    #[serde(rename = "vtDataSet")]
     pub vt_data_set: VtDataSet,             // Configuration for the layer
+    #[serde(rename = "bboxKey")]
     pub bbox_key: String,                  // Cache key for vector tiles
+    #[serde(rename = "elevationBBoxKey")]
     pub elevation_bbox_key: Option<String>, // ID to find cached elevation data
 }
 

@@ -1,24 +1,24 @@
 export const developmentConfig = {
   // API Configuration
   api: {
-    baseUrl: 'http://localhost:3000',
-    timeout: 30000,
-    retryAttempts: 3,
-    retryDelay: 1000,
+    baseUrl: 'https://cioddi.github.io/stlmaps-wasm/',
+    timeout: 15000,
+    retryAttempts: 2,
+    retryDelay: 2000,
   },
 
   // Tile Server Configuration
   tileServers: {
     vectorTiles: {
-      url: 'https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key={accessToken}',
+      url: 'https://wms.wheregroup.com/tileserver/tile/world-0-14/{z}/{x}/{y}.pbf',
       maxZoom: 14,
       minZoom: 0,
-      attribution: '© MapTiler © OpenStreetMap contributors',
+      attribution: '© OpenStreetMap contributors',
     },
     elevation: {
-      url: 'https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token={accessToken}',
+      url: 'https://wms.wheregroup.com/dem_tileserver/raster_dem/{z}/{x}/{y}.webp',
       maxZoom: 15,
-      attribution: '© Mapbox',
+      attribution: '',
     },
   },
 
@@ -41,8 +41,8 @@ export const developmentConfig = {
 
   // Memory Configuration
   memory: {
-    maxGeometryCache: 100 * 1024 * 1024, // 100MB
-    maxTileCache: 50 * 1024 * 1024, // 50MB
+    maxGeometryCache: 1000 * 1024 * 1024, // 1000MB
+    maxTileCache: 500 * 1024 * 1024, // 500MB
     gcThreshold: 0.8,
   },
 

@@ -41,6 +41,7 @@ interface CombinedState {
   processingProgress: ReturnType<typeof useProcessingStore>['processingProgress'];
   _forceUpdate?: ReturnType<typeof useProcessingStore>['_forceUpdate'];
   setProcessing: ReturnType<typeof useProcessingStore>['setProcessing'];
+  setIsProcessing: ReturnType<typeof useProcessingStore>['setProcessing']; // Legacy alias
   updateProgress: ReturnType<typeof useProcessingStore>['updateProgress'];
   resetProcessing: ReturnType<typeof useProcessingStore>['resetProcessing'];
 
@@ -118,6 +119,7 @@ export const useCombinedStore = create<CombinedState>()(
       processingProgress: processingStore.processingProgress,
       _forceUpdate: processingStore._forceUpdate,
       setProcessing: processingStore.setProcessing,
+      setIsProcessing: processingStore.setProcessing, // Legacy alias
       updateProgress: processingStore.updateProgress,
       resetProcessing: processingStore.resetProcessing,
 
