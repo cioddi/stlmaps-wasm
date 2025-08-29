@@ -27,18 +27,164 @@ pub struct TerrainGeometryResult {
     pub processed_elevation_grid: Vec<Vec<f64>>,
     pub processed_min_elevation: f64,
     pub processed_max_elevation: f64,
+    pub original_min_elevation: f64,
+    pub original_max_elevation: f64,
 }
 
-// Function to smooth the elevation grid using a gaussian kernel with parallel processing
+// Optimized function to generate terrain triangle indices
+fn generate_terrain_indices(indices: &mut Vec<u32>, width: usize, height: usize) {
+    let bottom_offset = (width * height) as u32;
+    
+    // Pre-calculate exact capacity needed
+    let surface_triangles = (width - 1) * (height - 1) * 2 * 2; // top and bottom surfaces
+    let side_triangles = ((width - 1) + (height - 1)) * 2 * 2; // 4 side walls
+    indices.reserve(surface_triangles * 3 + side_triangles * 3);
+    
+    // Generate top surface triangles (optimized loop unrolling)
+    for y in 0..(height - 1) {
+        let row_start = (y * width) as u32;
+        let next_row_start = ((y + 1) * width) as u32;
+        
+        for x in 0..(width - 1) {
+            let idx = row_start + x as u32;
+            let next_idx = next_row_start + x as u32;
+            
+            // Triangle 1
+            indices.extend_from_slice(&[idx, next_idx + 1, next_idx]);
+            // Triangle 2  
+            indices.extend_from_slice(&[idx, idx + 1, next_idx + 1]);
+        }
+    }
+    
+    // Generate bottom surface triangles (reversed winding)
+    for y in 0..(height - 1) {
+        let row_start = bottom_offset + (y * width) as u32;
+        let next_row_start = bottom_offset + ((y + 1) * width) as u32;
+        
+        for x in 0..(width - 1) {
+            let idx = row_start + x as u32;
+            let next_idx = next_row_start + x as u32;
+            
+            // Triangle 1 (reversed)
+            indices.extend_from_slice(&[idx, next_idx, next_idx + 1]);
+            // Triangle 2 (reversed)
+            indices.extend_from_slice(&[idx, next_idx + 1, idx + 1]);
+        }
+    }
+    
+    // Generate side wall indices (optimized)
+    generate_side_walls(indices, width, height, bottom_offset);
+}
+
+// Optimized function to generate side wall indices
+fn generate_side_walls(indices: &mut Vec<u32>, width: usize, height: usize, bottom_offset: u32) {
+    // Left and right walls
+    for y in 0..(height - 1) {
+        // Left wall
+        let top_left = (y * width) as u32;
+        let bottom_left = bottom_offset + top_left;
+        let top_next = ((y + 1) * width) as u32;
+        let bottom_next = bottom_offset + top_next;
+        
+        indices.extend_from_slice(&[top_left, bottom_next, bottom_left]);
+        indices.extend_from_slice(&[top_left, top_next, bottom_next]);
+        
+        // Right wall
+        let top_right = (y * width + width - 1) as u32;
+        let bottom_right = bottom_offset + top_right;
+        let top_right_next = ((y + 1) * width + width - 1) as u32;
+        let bottom_right_next = bottom_offset + top_right_next;
+        
+        indices.extend_from_slice(&[top_right, bottom_right, bottom_right_next]);
+        indices.extend_from_slice(&[top_right, bottom_right_next, top_right_next]);
+    }
+    
+    // Top and bottom walls
+    for x in 0..(width - 1) {
+        // Top wall
+        let top_idx = x as u32;
+        let bottom_idx = bottom_offset + top_idx;
+        let top_next = (x + 1) as u32;
+        let bottom_next = bottom_offset + top_next;
+        
+        indices.extend_from_slice(&[top_idx, bottom_idx, bottom_next]);
+        indices.extend_from_slice(&[top_idx, bottom_next, top_next]);
+        
+        // Bottom wall
+        let bottom_edge_top = ((height - 1) * width + x) as u32;
+        let bottom_edge_bottom = bottom_offset + bottom_edge_top;
+        let bottom_edge_top_next = bottom_edge_top + 1;
+        let bottom_edge_bottom_next = bottom_offset + bottom_edge_top_next;
+        
+        indices.extend_from_slice(&[bottom_edge_top, bottom_edge_bottom_next, bottom_edge_bottom]);
+        indices.extend_from_slice(&[bottom_edge_top, bottom_edge_top_next, bottom_edge_bottom_next]);
+    }
+}
+
+// Optimized function to generate terrain normals
+fn generate_terrain_normals(normals: &mut Vec<f32>, positions: &[f32], width: usize, height: usize) {
+    let vertex_count = width * height * 2;
+    normals.reserve(vertex_count * 3);
+    
+    // Generate normals for top vertices (terrain surface)
+    for y in 0..height {
+        for x in 0..width {
+            // Calculate normal using cross product of adjacent vertices
+            let normal = if x < width - 1 && y < height - 1 {
+                calculate_vertex_normal(positions, x, y, width)
+            } else {
+                [0.0, 0.0, 1.0] // Default up-facing normal for edge vertices
+            };
+            
+            normals.extend_from_slice(&normal);
+        }
+    }
+    
+    // Generate normals for bottom vertices (all pointing down)
+    for _ in 0..(width * height) {
+        normals.extend_from_slice(&[0.0, 0.0, -1.0]);
+    }
+}
+
+// Calculate vertex normal using cross product of adjacent edges
+fn calculate_vertex_normal(positions: &[f32], x: usize, y: usize, width: usize) -> [f32; 3] {
+    let idx = (y * width + x) * 3;
+    let right_idx = (y * width + x + 1) * 3;
+    let down_idx = ((y + 1) * width + x) * 3;
+    
+    // Get vertex positions
+    let v = [positions[idx], positions[idx + 1], positions[idx + 2]];
+    let vr = [positions[right_idx], positions[right_idx + 1], positions[right_idx + 2]];
+    let vd = [positions[down_idx], positions[down_idx + 1], positions[down_idx + 2]];
+    
+    // Calculate edges
+    let edge_right = [vr[0] - v[0], vr[1] - v[1], vr[2] - v[2]];
+    let edge_down = [vd[0] - v[0], vd[1] - v[1], vd[2] - v[2]];
+    
+    // Calculate cross product (normal)
+    let normal = [
+        edge_right[1] * edge_down[2] - edge_right[2] * edge_down[1],
+        edge_right[2] * edge_down[0] - edge_right[0] * edge_down[2],
+        edge_right[0] * edge_down[1] - edge_right[1] * edge_down[0],
+    ];
+    
+    // Normalize
+    let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    if length > 0.0 {
+        [normal[0] / length, normal[1] / length, normal[2] / length]
+    } else {
+        [0.0, 0.0, 1.0]
+    }
+}
+
+// Function to smooth the elevation grid using a gaussian kernel with optimized processing
 fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Vec<Vec<f64>> {
-    let mut result = vec![vec![0.0; width]; height];
-    let kernel_size = 3; // Smaller 3x3 kernel for less smoothing (was 5)
+    let kernel_size = 3;
     let kernel_radius = kernel_size / 2;
-    let sigma = 0.8; // Reduced sigma for sharper falloff (was 1.0)
+    let sigma = 0.8;
     
-    
-    // Precompute gaussian weights for optimization
-    let mut kernel_weights = vec![vec![0.0; kernel_size]; kernel_size];
+    // Precompute gaussian weights for optimization (flattened for better cache performance)
+    let mut kernel_weights = vec![0.0; kernel_size * kernel_size];
     let mut weight_sum = 0.0;
     
     for ky in 0..kernel_size {
@@ -46,50 +192,58 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
             let dx = (kx as isize - kernel_radius as isize) as f64;
             let dy = (ky as isize - kernel_radius as isize) as f64;
             let dist_sq = dx * dx + dy * dy;
-            // Gaussian function: e^(-(d²/2σ²))
             let weight = (-dist_sq / (2.0 * sigma * sigma)).exp();
-            kernel_weights[ky][kx] = weight;
+            kernel_weights[ky * kernel_size + kx] = weight;
             weight_sum += weight;
         }
     }
     
     // Normalize weights
-    for ky in 0..kernel_size {
-        for kx in 0..kernel_size {
-            kernel_weights[ky][kx] /= weight_sum;
-        }
+    for weight in &mut kernel_weights {
+        *weight /= weight_sum;
     }
     
-    // Process grid sequentially for WASM compatibility
-    for y in 0..height {
-        for x in 0..width {
-            let mut weighted_sum = 0.0;
-            let mut total_weight = 0.0;
+    // Process grid in chunks for better cache locality and potential parallelization
+    let mut result = vec![vec![0.0; width]; height];
+    let chunk_size = 32; // Process in 32x32 chunks for better cache performance
+    
+    for chunk_y in (0..height).step_by(chunk_size) {
+        let end_y = (chunk_y + chunk_size).min(height);
+        
+        for chunk_x in (0..width).step_by(chunk_size) {
+            let end_x = (chunk_x + chunk_size).min(width);
             
-            for ky in 0..kernel_size {
-                let grid_y = y as isize + (ky as isize - kernel_radius as isize);
-                if grid_y < 0 || grid_y >= height as isize {
-                    continue;
-                }
-                
-                for kx in 0..kernel_size {
-                    let grid_x = x as isize + (kx as isize - kernel_radius as isize);
-                    if grid_x < 0 || grid_x >= width as isize {
-                        continue;
+            // Process chunk
+            for y in chunk_y..end_y {
+                for x in chunk_x..end_x {
+                    let mut weighted_sum = 0.0;
+                    let mut total_weight = 0.0;
+                    
+                    for ky in 0..kernel_size {
+                        let grid_y = y as isize + (ky as isize - kernel_radius as isize);
+                        if grid_y < 0 || grid_y >= height as isize {
+                            continue;
+                        }
+                        
+                        for kx in 0..kernel_size {
+                            let grid_x = x as isize + (kx as isize - kernel_radius as isize);
+                            if grid_x < 0 || grid_x >= width as isize {
+                                continue;
+                            }
+                            
+                            let weight = kernel_weights[ky * kernel_size + kx];
+                            weighted_sum += grid[grid_y as usize][grid_x as usize] * weight;
+                            total_weight += weight;
+                        }
                     }
                     
-                    let weight = kernel_weights[ky][kx];
-                    weighted_sum += grid[grid_y as usize][grid_x as usize] * weight;
-                    total_weight += weight;
+                    // Normalize by the actual weights used (for edge pixels)
+                    result[y][x] = if total_weight > 0.0 {
+                        weighted_sum / total_weight
+                    } else {
+                        grid[y][x] // Fall back to original value
+                    };
                 }
-            }
-            
-            // Normalize by the actual weights used (for edge pixels)
-            if total_weight > 0.0 {
-                result[y][x] = weighted_sum / total_weight;
-            } else {
-                // Fall back to original value if no valid neighbors (shouldn't happen)
-                result[y][x] = grid[y][x];
             }
         }
     }
@@ -97,75 +251,60 @@ fn smooth_elevation_grid(grid: Vec<Vec<f64>>, width: usize, height: usize) -> Ve
     result
 }
 
-// Function to remove outliers from the elevation data with sequential processing
+// Function to remove outliers from the elevation data with optimized processing
 fn remove_outliers(grid: Vec<Vec<f64>>, min_elevation: f64, max_elevation: f64) -> (Vec<Vec<f64>>, f64, f64) {
     let width = grid[0].len();
     let height = grid.len();
     
-    // Calculate the range and derive reasonable thresholds
-    let range = max_elevation - min_elevation;
+    // Use a more efficient percentile-based approach instead of standard deviation
+    // Collect all valid values for percentile calculation
+    let mut all_values: Vec<f64> = Vec::with_capacity(width * height);
+    for row in &grid {
+        for &val in row {
+            if val.is_finite() {
+                all_values.push(val);
+            }
+        }
+    }
     
-    // Calculate mean and standard deviation sequentially  
-    let (sum, count): (f64, usize) = grid.iter()
-        .map(|row| {
-            row.iter()
-                .filter(|val| val.is_finite())
-                .fold((0.0, 0), |acc, &val| (acc.0 + val, acc.1 + 1))
-        })
-        .fold((0.0, 0), |acc, item| (acc.0 + item.0, acc.1 + item.1));
+    if all_values.is_empty() {
+        return (grid, min_elevation, max_elevation);
+    }
     
-    let mean = if count > 0 { sum / count as f64 } else { (min_elevation + max_elevation) / 2.0 };
+    // Sort for percentile calculation (using unstable sort for better performance)
+    all_values.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     
-    // Calculate standard deviation sequentially
-    let sum_sq_diff: f64 = grid.iter()
-        .map(|row| {
-            row.iter()
-                .filter(|val| val.is_finite())
-                .map(|&val| (val - mean).powi(2))
-                .sum::<f64>()
-        })
-        .sum();
+    let len = all_values.len();
     
-    let std_dev = if count > 0 { (sum_sq_diff / count as f64).sqrt() } else { range / 4.0 };
+    // Use 5th and 95th percentiles for more robust outlier detection
+    let lower_threshold = all_values[(len as f64 * 0.05) as usize];
+    let upper_threshold = all_values[(len as f64 * 0.95) as usize];
     
-    // Set thresholds for clipping (mean ± 2.5 standard deviations)
-    let lower_threshold = mean - 2.5 * std_dev;
-    let upper_threshold = mean + 2.5 * std_dev;
+    // Apply clipping with optimized memory allocation
+    let mut result = Vec::with_capacity(height);
+    for row in &grid {
+        let processed_row: Vec<f64> = row.iter()
+            .map(|&val| {
+                if val.is_finite() {
+                    val.clamp(lower_threshold, upper_threshold)
+                } else {
+                    (min_elevation + max_elevation) / 2.0 // Replace invalid values
+                }
+            })
+            .collect();
+        result.push(processed_row);
+    }
     
-    
-    // Apply clipping sequentially
-    let result: Vec<Vec<f64>> = grid.iter()
-        .map(|row| {
-            row.iter()
-                .map(|&val| val.max(lower_threshold).min(upper_threshold))
-                .collect()
-        })
-        .collect();
-    
-    // Find new min/max sequentially
-    let (_new_min, _new_max) = result.iter()
-        .map(|row| {
-            row.iter()
-                .filter(|val| val.is_finite())
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &val| {
-                    (acc.0.min(val), acc.1.max(val))
-                })
-        })
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, item| (acc.0.min(item.0), acc.1.max(item.1)));
-    
-    // Apply a second smoothing pass after outlier removal to blend the clamped values
+    // Apply a single smoothing pass after outlier removal to blend clamped values
     let final_result = smooth_elevation_grid(result, width, height);
     
-    // Recalculate min/max after the second smoothing sequentially
+    // Find min/max in a single optimized pass
     let (final_min, final_max) = final_result.iter()
-        .map(|row| {
-            row.iter()
-                .filter(|val| val.is_finite())
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &val| {
-                    (acc.0.min(val), acc.1.max(val))
-                })
-        })
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, item| (acc.0.min(item.0), acc.1.max(item.1)));
+        .flat_map(|row| row.iter())
+        .filter(|val| val.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &val| {
+            (min.min(val), max.max(val))
+        });
     
     (final_result, final_min, final_max)
 }
@@ -322,7 +461,7 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     Ok(js_result)
 }
 
-// The core function that generates the terrain mesh from elevation data
+// The core function that generates the terrain mesh from elevation data with optimized performance
 fn generate_terrain_mesh(
     elevation_data: &ElevationProcessingResult,
     vertical_exaggeration: f64,
@@ -331,232 +470,73 @@ fn generate_terrain_mesh(
     let width = elevation_data.grid_size.width as usize;
     let height = elevation_data.grid_size.height as usize;
     
-    // Initialize result arrays
-    let mut positions: Vec<f32> = Vec::with_capacity(width * height * 6); // x,y,z for both top and bottom
-    let mut colors: Vec<f32> = Vec::with_capacity(width * height * 6); // r,g,b for both top and bottom 
-    let mut indices: Vec<u32> = Vec::new();
-    let mut normals: Vec<f32> = Vec::with_capacity(width * height * 6);
+    // Pre-calculate array sizes for optimal memory allocation
+    let vertex_count = width * height * 2; // top and bottom vertices
+    let triangle_count = (width - 1) * (height - 1) * 12; // 12 triangles per quad (2 for top + 10 for sides)
+    
+    // Initialize result arrays with precise capacity
+    let mut positions: Vec<f32> = Vec::with_capacity(vertex_count * 3);
+    let mut colors: Vec<f32> = Vec::with_capacity(vertex_count * 3);
+    let mut indices: Vec<u32> = Vec::with_capacity(triangle_count * 3);
+    let mut normals: Vec<f32> = Vec::with_capacity(vertex_count * 3);
     
     // Store processed elevation data
-    let mut processed_elevation_grid: Vec<Vec<f64>> = vec![vec![0.0; width]; height];
+    let mut processed_elevation_grid: Vec<Vec<f64>> = Vec::with_capacity(height);
     let mut processed_min_elevation = f64::INFINITY;
     let mut processed_max_elevation = f64::NEG_INFINITY;
     
-    // Generate top vertices (terrain surface)
-    let mut top_positions: Vec<f32> = Vec::with_capacity(width * height * 3);
-    let mut bottom_positions: Vec<f32> = Vec::with_capacity(width * height * 3);
+    // Pre-calculate constants to avoid repeated calculations
+    let elevation_range = f64::max(1.0, elevation_data.max_elevation - elevation_data.min_elevation);
+    let scale_factor = (200.0 * 0.2) * vertical_exaggeration;
+    let light_brown = [0.82f32, 0.71f32, 0.55f32]; // rgb for #d2b48c
+    let dark_brown = [0.66f32, 0.48f32, 0.30f32];  // rgb for #a87b4d
     
-    // Generate vertices sequentially for WASM compatibility
-    
-    let vertex_results: Vec<(Vec<f32>, Vec<f32>, Vec<f32>, f64)> = (0..height)
-        .map(|y| {
-            let mut row_top_positions = Vec::with_capacity(width * 3);
-            let mut row_bottom_positions = Vec::with_capacity(width * 3);
-            let mut row_colors = Vec::with_capacity(width * 6);
-            let mut row_min_z = f64::INFINITY;
-            let mut row_max_z = f64::NEG_INFINITY;
-            
-            for x in 0..width {
-                // Convert grid position to mesh coordinates
-                let mesh_x = (x as f32 / (width - 1) as f32 - 0.5) * 200.0;
-                let mesh_y = (y as f32 / (height - 1) as f32 - 0.5) * 200.0;
-                
-                // Calculate normalized elevation value
-                let normalized_z = (elevation_data.elevation_grid[y][x] - elevation_data.min_elevation) /
-                                   f64::max(1.0, elevation_data.max_elevation - elevation_data.min_elevation);
-                
-                // Apply vertical exaggeration and base height
-                let mesh_z = (terrain_base_height + normalized_z * (200.0 * 0.2) * vertical_exaggeration) as f32;
-                
-                // Track row elevation ranges
-                row_min_z = f64::min(row_min_z, mesh_z as f64);
-                row_max_z = f64::max(row_max_z, mesh_z as f64);
-                
-                // Store top vertex position
-                row_top_positions.push(mesh_x);
-                row_top_positions.push(mesh_y);
-                row_top_positions.push(mesh_z);
-                
-                // Store bottom vertex position (flat at z=0)
-                row_bottom_positions.push(mesh_x);
-                row_bottom_positions.push(mesh_y);
-                row_bottom_positions.push(0.0);
-                
-                // Calculate terrain color (similar to JavaScript implementation)
-                // Light brown to dark brown gradient based on height
-                let light_brown = [0.82, 0.71, 0.55]; // rgb for #d2b48c
-                let dark_brown = [0.66, 0.48, 0.30];  // rgb for #a87b4d
-                
-                let normalized_z_f32 = normalized_z as f32;
-                let r = light_brown[0] * (1.0 - normalized_z_f32) + dark_brown[0] * normalized_z_f32;
-                let g = light_brown[1] * (1.0 - normalized_z_f32) + dark_brown[1] * normalized_z_f32;
-                let b = light_brown[2] * (1.0 - normalized_z_f32) + dark_brown[2] * normalized_z_f32;
-                
-                // Add color for top vertex
-                row_colors.push(r);
-                row_colors.push(g);
-                row_colors.push(b);
-                
-                // Add color for bottom vertex (same as top)
-                row_colors.push(r);
-                row_colors.push(g);
-                row_colors.push(b);
-            }
-            
-            (row_top_positions, row_bottom_positions, row_colors, row_min_z)
-        })
-        .collect();
-    
-    // Combine results from sequential processing
-    for (y, (row_top, row_bottom, row_colors, row_min_z)) in vertex_results.into_iter().enumerate() {
-        top_positions.extend_from_slice(&row_top);
-        bottom_positions.extend_from_slice(&row_bottom);
-        colors.extend_from_slice(&row_colors);
+    // Generate vertices with optimized single-pass approach
+    for y in 0..height {
+        let mesh_y = (y as f32 / (height - 1) as f32 - 0.5) * 200.0;
+        let mut row_elevation = Vec::with_capacity(width);
         
-        // Track global min/max
-        processed_min_elevation = f64::min(processed_min_elevation, row_min_z);
-        
-        // Update processed elevation grid
         for x in 0..width {
-            let z_idx = x * 3 + 2;
-            if z_idx < row_top.len() {
-                let mesh_z = row_top[z_idx] as f64;
-                processed_elevation_grid[y][x] = mesh_z;
-                processed_max_elevation = f64::max(processed_max_elevation, mesh_z);
-            }
+            let mesh_x = (x as f32 / (width - 1) as f32 - 0.5) * 200.0;
+            
+            // Calculate normalized elevation value
+            let elevation = elevation_data.elevation_grid[y][x];
+            let normalized_z = (elevation - elevation_data.min_elevation) / elevation_range;
+            
+            // Apply vertical exaggeration and base height
+            let mesh_z = (terrain_base_height + normalized_z * scale_factor) as f32;
+            
+            // Track processed elevation
+            row_elevation.push(elevation);
+            processed_min_elevation = processed_min_elevation.min(mesh_z as f64);
+            processed_max_elevation = processed_max_elevation.max(mesh_z as f64);
+            
+            // Store top vertex position
+            positions.push(mesh_x);
+            positions.push(mesh_y);
+            positions.push(mesh_z);
+            
+            // Store bottom vertex position (flat at z=0)
+            positions.push(mesh_x);
+            positions.push(mesh_y);
+            positions.push(0.0);
+            
+            // Calculate terrain color using linear interpolation
+            let normalized_z_f32 = normalized_z as f32;
+            let inv_norm = 1.0 - normalized_z_f32;
+            let r = light_brown[0] * inv_norm + dark_brown[0] * normalized_z_f32;
+            let g = light_brown[1] * inv_norm + dark_brown[1] * normalized_z_f32;
+            let b = light_brown[2] * inv_norm + dark_brown[2] * normalized_z_f32;
+            
+            // Add colors for both top and bottom vertices
+            colors.extend_from_slice(&[r, g, b, r, g, b]);
         }
+        processed_elevation_grid.push(row_elevation);
     }
     
-    
-    // Combine top and bottom vertices into one array
-    positions.extend_from_slice(&top_positions);
-    positions.extend_from_slice(&bottom_positions);
-    
-    // Bottom surface starts at this offset
-    let bottom_offset = (width * height) as u32;
-    
-    // Build top surface indices (triangles)
-    for y in 0..(height - 1) {
-        for x in 0..(width - 1) {
-            let tl = (y * width + x) as u32;
-            let tr = tl + 1;
-            let bl = tl + width as u32;
-            let br = bl + 1;
-            
-            // Two triangles per grid cell for the top
-            indices.push(tl);
-            indices.push(tr);
-            indices.push(bl);
-            
-            indices.push(bl);
-            indices.push(tr);
-            indices.push(br);
-        }
-    }
-    
-    // Build bottom surface indices (triangles with opposite winding)
-    for y in 0..(height - 1) {
-        for x in 0..(width - 1) {
-            let tl = bottom_offset + (y * width + x) as u32;
-            let tr = tl + 1;
-            let bl = tl + width as u32;
-            let br = bl + 1;
-            
-            // Two triangles per grid cell for the bottom (reversed winding)
-            indices.push(tl);
-            indices.push(bl);
-            indices.push(tr);
-            
-            indices.push(tr);
-            indices.push(bl);
-            indices.push(br);
-        }
-    }
-    
-    // Build side walls - right edge
-    for y in 0..(height - 1) {
-        let top_idx_top = (y * width + (width - 1)) as u32;
-        let bottom_idx_top = bottom_offset + top_idx_top;
-        let top_idx_bot = ((y + 1) * width + (width - 1)) as u32;
-        let bottom_idx_bot = bottom_offset + top_idx_bot;
-        
-        // Two triangles for the side wall
-        indices.push(top_idx_top);
-        indices.push(bottom_idx_top);
-        indices.push(bottom_idx_bot);
-        
-        indices.push(top_idx_top);
-        indices.push(bottom_idx_bot);
-        indices.push(top_idx_bot);
-    }
-    
-    // Build side walls - left edge
-    for y in 0..(height - 1) {
-        let left_top_idx = (y * width) as u32;
-        let left_bottom_idx = bottom_offset + left_top_idx;
-        let left_top_next = ((y + 1) * width) as u32;
-        let left_bottom_next = bottom_offset + left_top_next;
-        
-        // Two triangles for the side wall
-        indices.push(left_top_idx);
-        indices.push(left_bottom_next);
-        indices.push(left_bottom_idx);
-        
-        indices.push(left_top_idx);
-        indices.push(left_top_next);
-        indices.push(left_bottom_next);
-    }
-    
-    // Build side walls - top edge
-    for x in 0..(width - 1) {
-        let top_edge_idx = x as u32;
-        let bottom_edge_idx = bottom_offset + top_edge_idx;
-        let top_edge_next = (x + 1) as u32;
-        let bottom_edge_next = bottom_offset + top_edge_next;
-        
-        // Two triangles for the side wall
-        indices.push(top_edge_idx);
-        indices.push(bottom_edge_idx);
-        indices.push(bottom_edge_next);
-        
-        indices.push(top_edge_idx);
-        indices.push(bottom_edge_next);
-        indices.push(top_edge_next);
-    }
-    
-    // Build side walls - bottom edge
-    for x in 0..(width - 1) {
-        let top_idx_top = ((height - 1) * width + x) as u32;
-        let bottom_idx_top = bottom_offset + top_idx_top;
-        let top_idx_bot = top_idx_top + 1;
-        let bottom_idx_bot = bottom_offset + top_idx_bot;
-        
-        // Two triangles for the side wall
-        indices.push(top_idx_top);
-        indices.push(bottom_idx_bot);
-        indices.push(bottom_idx_top);
-        
-        indices.push(top_idx_top);
-        indices.push(top_idx_bot);
-        indices.push(bottom_idx_bot);
-    }
-    
-    // Calculate normals (simplified approach)
-    // For each vertex, we should average the normals of adjacent triangles
-    // For this example, we'll use a simplified approach with up-facing for top, down-facing for bottom
-    for _ in 0..(width * height) {
-        // Top vertices face up
-        normals.push(0.0);
-        normals.push(0.0);
-        normals.push(1.0);
-    }
-    
-    for _ in 0..(width * height) {
-        // Bottom vertices face down
-        normals.push(0.0);
-        normals.push(0.0);
-        normals.push(-1.0);
-    }
+    // Generate optimized triangle indices and normals
+    generate_terrain_indices(&mut indices, width, height);
+    generate_terrain_normals(&mut normals, &positions, width, height);
     
     // Return the result
     TerrainGeometryResult {
@@ -567,6 +547,8 @@ fn generate_terrain_mesh(
         processed_elevation_grid,
         processed_min_elevation,
         processed_max_elevation,
+        original_min_elevation: elevation_data.min_elevation,
+        original_max_elevation: elevation_data.max_elevation,
     }
 }
 

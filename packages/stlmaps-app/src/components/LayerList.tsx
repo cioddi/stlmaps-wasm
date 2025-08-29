@@ -30,7 +30,7 @@ import LayersIcon from '@mui/icons-material/Layers';
 import FormatColorFillIcon from '@mui/icons-material/FormatColorFill';
 import * as THREE from 'three';
 import { VtDataSet } from './GenerateMeshButton';
-import useLayerStore from '../stores/useLayerStore';
+import { useCombinedStore } from '../stores/useCombinedStore';
 
 // No props needed anymore as we'll use the Zustand store
 interface LayerListProps {}
@@ -100,7 +100,7 @@ const LayerList: React.FC<LayerListProps> = () => {
     setLayerHeightScaleFactor,
     setTerrainSettings,
     setBuildingSettings,
-  } = useLayerStore();
+  } = useCombinedStore();
 
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({
     terrain: false,

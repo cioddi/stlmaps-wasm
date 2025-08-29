@@ -76,6 +76,9 @@ pub struct PolygonGeometryInput {
     #[allow(dead_code)] // Part of public API structure
     #[serde(rename = "terrainBaseHeight")]
     pub terrain_base_height: f64,
+    #[allow(dead_code)] // Part of public API structure
+    #[serde(rename = "verticalExaggeration")]
+    pub vertical_exaggeration: f64,
     #[serde(rename = "elevationGrid")]
     pub elevation_grid: Vec<Vec<f64>>,
     #[serde(rename = "gridSize")]
@@ -109,7 +112,7 @@ pub struct BufferGeometry {
     pub properties: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
-// Sample a terrain elevation at a specific geographic point
+// Sample a terrain elevation at a specific geographic point with proper scaling
 fn sample_terrain_elevation_at_point(
     lng: f64,
     lat: f64,
@@ -118,6 +121,8 @@ fn sample_terrain_elevation_at_point(
     bbox: &[f64],
     min_elevation: f64,
     max_elevation: f64,
+    vertical_exaggeration: f64,
+    terrain_base_height: f64,
 ) -> f64 {
     let min_lng = bbox[0];
     let min_lat = bbox[1];
@@ -154,13 +159,13 @@ fn sample_terrain_elevation_at_point(
     
     let elevation = v0 * (1.0 - dy) + v1 * dy;
     
-    // Normalize the elevation to the actual terrain height range
-    if max_elevation > min_elevation {
-        return elevation;
-    } else {
-        // Fallback if elevation range is invalid
-        return (min_elevation + max_elevation) / 2.0;
-    }
+    // Apply the same scaling as terrain generation
+    let elevation_range = f64::max(1.0, max_elevation - min_elevation);
+    let normalized_elevation = (elevation - min_elevation) / elevation_range;
+    let scale_factor = (200.0 * 0.2) * vertical_exaggeration;
+    
+    // Return the scaled terrain height (same formula as terrain generation)
+    terrain_base_height + normalized_elevation * scale_factor
 }
 
 // Transform geographic coordinates to mesh coordinates
@@ -587,6 +592,8 @@ fn create_extruded_shape(
     bbox: Option<&[f64]>,
     min_elevation: Option<f64>,
     max_elevation: Option<f64>,
+    vertical_exaggeration: Option<f64>,
+    terrain_base_height: Option<f64>,
     source_layer: Option<&str>
 ) -> BufferGeometry {
     // Basic validation
@@ -618,7 +625,7 @@ fn create_extruded_shape(
                 Vector2 { x: pt.x + size, y: pt.y + size },
                 Vector2 { x: pt.x - size, y: pt.y + size },
             ];
-            return create_extruded_shape(&square_points, height, z_offset, None, false, None, None, None, None, None, None);
+            return create_extruded_shape(&square_points, height, z_offset, None, false, None, None, None, None, None, None, None, None);
         } else if unique_shape_points.len() == 2 {
             // For two points, create a thin rectangle along the line
             let p1 = unique_shape_points[0];
@@ -658,7 +665,7 @@ fn create_extruded_shape(
                 Vector2 { x: p2.x - px * width, y: p2.y - py * width },
                 Vector2 { x: p1.x - px * width, y: p1.y - py * width },
             ];
-            return create_extruded_shape(&rect_points, height, z_offset, None, false, None, None, None, None, None, None);
+            return create_extruded_shape(&rect_points, height, z_offset, None, false, None, None, None, None, None, None, None, None);
         }
         
         // If we somehow get here with no points, return empty geometry
@@ -823,8 +830,8 @@ fn create_extruded_shape(
     
     // Apply terrain alignment if enabled
     if align_vertices_to_terrain {
-        if let (Some(elev_grid), Some(grid_sz), Some(bbox_arr), Some(min_elev), Some(max_elev)) = 
-            (elevation_grid, grid_size, bbox, min_elevation, max_elevation) {
+        if let (Some(elev_grid), Some(grid_sz), Some(bbox_arr), Some(min_elev), Some(max_elev), Some(vert_exag), Some(base_height)) = 
+            (elevation_grid, grid_size, bbox, min_elevation, max_elevation, vertical_exaggeration, terrain_base_height) {
             
             // Check if this is a transportation layer (roads)
             let is_transportation = source_layer == Some("transportation");
@@ -849,7 +856,8 @@ fn create_extruded_shape(
                 
                 // Sample terrain elevation at this position
                 let terrain_height = sample_terrain_elevation_at_point(
-                    lng, lat, elev_grid, grid_sz, bbox_arr, min_elev, max_elev
+                    lng, lat, elev_grid, grid_sz, bbox_arr, min_elev, max_elev,
+                    vert_exag, base_height
                 );
                 
                 if is_transportation {
@@ -909,6 +917,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 sample_lng, sample_lat,
                 &input.elevation_grid, &input.grid_size,
                 &input.bbox, input.min_elevation, input.max_elevation,
+                input.vertical_exaggeration, input.terrain_base_height
             );
             dataset_lowest_z = dataset_lowest_z.min(elev);
             dataset_highest_z = dataset_highest_z.max(elev);
@@ -1099,8 +1108,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         };
         
         if points.len() < 3 {
-            // Debug: Track why roads might be skipped - THIS IS A MAJOR FILTER
-            let _transportation_class = if let Some(ref props) = polygon_data.properties {
+            // Debug: Track why geometries might be skipped - THIS IS A MAJOR FILTER
+            let transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
                     if let Some(serde_json::Value::String(class)) = obj.get("class") {
                         class.clone()
@@ -1108,16 +1117,19 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 } else { "no_props".to_string() }
             } else { "no_props".to_string() };
             
+            web_sys::console::log_1(&format!("Skipping geometry with {} points for class: {}", points.len(), transportation_class).into());
             return Ok(None); // Skip invalid polygons
         }
         
         // Determine extrusion height based on geometry type and available data
         let mut height = if let Some(d) = input.vt_data_set.extrusion_depth {
             // Use explicitly set extrusion depth
+            web_sys::console::log_1(&format!("Using explicit extrusion depth: {}", d).into());
             d
         } else if let Some(h) = polygon_data.height.filter(|h| *h > 0.0) {
             // Use feature-specific height (typically for buildings from OSM data)
             // This ensures building height variation is preserved
+            web_sys::console::log_1(&format!("Using feature height: {}", h).into());
             h
         } else {
             // Determine height based on geometry type/class
@@ -1153,6 +1165,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 // Building-like structures should have reasonable default heights in meters
                 "building" | "residential_building" | "commercial" | "industrial" => {
                     // Default building height: 25 meters (reasonable for 6-8 story building)
+                    web_sys::console::log_1(&format!("Using default building height: 25.0 for class: {}", geometry_class).into());
                     25.0
                 },
                 
@@ -1336,6 +1349,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             let tz = sample_terrain_elevation_at_point(
                 pt.x, pt.y, &input.elevation_grid, &input.grid_size,
                 &input.bbox, input.min_elevation, input.max_elevation,
+                input.vertical_exaggeration, input.terrain_base_height
             );
             lowest_terrain_z = lowest_terrain_z.min(tz);
             _highest_terrain_z = _highest_terrain_z.max(tz);
@@ -1375,6 +1389,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             Some(&input.bbox),
             Some(input.min_elevation),
             Some(input.max_elevation),
+            Some(input.vertical_exaggeration),
+            Some(input.terrain_base_height),
             Some(&input.vt_data_set.source_layer)
         );
         

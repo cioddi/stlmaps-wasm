@@ -9,13 +9,13 @@ import {
   FormLabel,
   Paper
 } from '@mui/material';
-import useLayerStore from '../stores/useLayerStore';
+import { useCombinedStore } from '../stores/useCombinedStore';
 
 /**
  * Component that provides controls for adjusting the rendering quality/performance mode
  */
 const RenderingControls: React.FC = () => {
-  const { renderingSettings, setRenderingMode } = useLayerStore();
+  const { renderingSettings, setRenderingMode } = useCombinedStore();
   
   const handleModeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setRenderingMode(event.target.value as 'quality' | 'performance');

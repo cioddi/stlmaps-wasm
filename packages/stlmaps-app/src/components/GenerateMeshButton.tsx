@@ -7,7 +7,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
 import { bufferLineString } from "../three_maps/bufferLineString";
 import { createDebugGeometry } from "../three_maps/createDebugGeometry";
-import useLayerStore from "../stores/useLayerStore";
+import { useCombinedStore } from "../stores/useCombinedStore";
 import {
   createComponentHashes,
   createConfigHash,
@@ -110,7 +110,7 @@ export const GenerateMeshButton = function () {
     setConfigHashes,
     processedTerrainData,
     setProcessedTerrainData,
-  } = useLayerStore();
+  } = useCombinedStore();
 
   // Modify generate3DModel function to include buildings
   const generate3DModel = async (): Promise<void> => {
@@ -270,6 +270,9 @@ export const GenerateMeshButton = function () {
       let processedMaxElevation = elevationResult.maxElevation;
       let elevationGrid = elevationResult.elevationGrid;
       let gridSize = elevationResult.gridSize;
+      // Initialize original elevation values (will be updated if WASM terrain is used)
+      let originalMinElevation = elevationResult.minElevation;
+      let originalMaxElevation = elevationResult.maxElevation;
 
       // Re-calculate the current terrain hash here to ensure it's available
       const { terrainHash: currentTerrainHashHere } = createComponentHashes(
@@ -323,8 +326,10 @@ export const GenerateMeshButton = function () {
         // Call the WASM terrain geometry generator (now async)
         const wasmTerrainResult = await wasmModule.create_terrain_geometry(terrainParams);
 
-        // Convert WASM TypedArrays to THREE.js BufferGeometry
+        // Convert WASM TypedArrays to THREE.js BufferGeometry with optimizations
         const geometry = new THREE.BufferGeometry();
+        
+        // Use direct TypedArray references for better performance
         geometry.setAttribute(
           "position",
           new THREE.BufferAttribute(wasmTerrainResult.positions, 3)
@@ -337,12 +342,17 @@ export const GenerateMeshButton = function () {
           "color",
           new THREE.BufferAttribute(wasmTerrainResult.colors, 3)
         );
-        geometry.setIndex(Array.from(wasmTerrainResult.indices));
+        
+        // Use Uint32Array directly instead of converting to Array for better performance
+        geometry.setIndex(new THREE.BufferAttribute(wasmTerrainResult.indices, 1));
 
         terrainGeometry = geometry;
         processedElevationGrid = wasmTerrainResult.processedElevationGrid;
         processedMinElevation = wasmTerrainResult.processedMinElevation;
         processedMaxElevation = wasmTerrainResult.processedMaxElevation;
+        // Use original elevation values for polygon alignment consistency
+        originalMinElevation = wasmTerrainResult.originalMinElevation;
+        originalMaxElevation = wasmTerrainResult.originalMaxElevation;
 
       } catch (error) {
         console.error("Error creating terrain geometry with WASM:", error);
@@ -467,11 +477,12 @@ export const GenerateMeshButton = function () {
             // Prepare the input for the Rust function but with debug flag
             const polygonGeometryInput = {
               terrainBaseHeight: terrainSettings.baseHeight,
+              verticalExaggeration: terrainSettings.verticalExaggeration,
               bbox: [minLng, minLat, maxLng, maxLat],
               elevationGrid: processedElevationGrid,
               gridSize,
-              minElevation: processedMinElevation,
-              maxElevation: processedMaxElevation,
+              minElevation: originalMinElevation ?? elevationResult.minElevation,
+              maxElevation: originalMaxElevation ?? elevationResult.maxElevation,
               vtDataSet: { 
                 ...convertToRustVtDataSet(currentLayer),
                 geometryDebugMode: true // Enable debug mode in WASM
@@ -559,13 +570,22 @@ export const GenerateMeshButton = function () {
         
           try {
           // Prepare the input for the Rust function
+          // Debug logging for elevation values
+          console.log("Polygon geometry elevation values:", {
+            originalMinElevation,
+            originalMaxElevation,
+            processedMinElevation,
+            processedMaxElevation
+          });
+          
           const polygonGeometryInput = {
             terrainBaseHeight: terrainSettings.baseHeight,
+            verticalExaggeration: terrainSettings.verticalExaggeration,
             bbox: [minLng, minLat, maxLng, maxLat],
             elevationGrid: processedElevationGrid,
             gridSize,
-            minElevation: processedMinElevation,
-            maxElevation: processedMaxElevation,
+            minElevation: originalMinElevation ?? elevationResult.minElevation,
+            maxElevation: originalMaxElevation ?? elevationResult.maxElevation,
             vtDataSet: convertToRustVtDataSet(currentLayer), // Convert to format compatible with Rust
             useSameZOffset: true,
             bbox_key: currentBboxHash, // Pass the bbox key to access cached features

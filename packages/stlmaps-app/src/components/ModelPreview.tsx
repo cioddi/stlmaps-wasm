@@ -16,7 +16,7 @@ import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
 // @ts-expect-error
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { Sprite, SpriteMaterial, CanvasTexture } from "three";
-import useLayerStore from "../stores/useLayerStore";
+import { useCombinedStore } from "../stores/useCombinedStore";
 import HoverTooltip from "./HoverTooltip";
 
 interface ModelPreviewProps {}
@@ -284,7 +284,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
     clearHover,
     clearColorOnlyUpdate,
     setCurrentSceneGetter
-  } = useLayerStore();
+  } = useCombinedStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);
