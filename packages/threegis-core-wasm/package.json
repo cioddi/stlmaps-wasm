@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "RUSTFLAGS=\"-C target-feature=+bulk-memory\" wasm-pack build --target web --release --out-dir pkg",
-    "dev": "nodemon --watch src --ext rs --exec \"RUSTFLAGS=\\\"-gC target-feature=+bulk-memory\\\" wasm-pack build --dev --target web --out-dir pkg\"",
+    "dev": "nodemon --watch src --ext rs --exec \"RUSTFLAGS=\\\"-C target-feature=+bulk-memory\\\" wasm-pack build --release --target web --out-dir pkg\"",
     "test": "cargo test",
     "prepublishOnly": "npm run build"
   },
