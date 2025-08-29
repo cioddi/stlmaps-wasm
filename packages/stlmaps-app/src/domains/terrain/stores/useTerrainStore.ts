@@ -5,7 +5,7 @@ const DEFAULT_TERRAIN_SETTINGS = {
   enabled: true,
   verticalExaggeration: 0.06,
   baseHeight: 5,
-  color: '#8B4513', // Brown color for terrain
+  color: '#D0661B', // Brown color for terrain
 };
 
 const DEFAULT_BUILDING_SETTINGS = {

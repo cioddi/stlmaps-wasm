@@ -26,7 +26,7 @@ export const vtGeometries: VtDataSet[] = [
   },
   {
     sourceLayer: "park",
-    color: new THREE.Color(0x4cdf54), // Green color for landuse
+    color: new THREE.Color(0x26CB00), // Green color for landuse
     extrusionDepth: 0.8, // Thin extrusion for landuse
     zOffset: -0.3,
     bufferSize: 2,

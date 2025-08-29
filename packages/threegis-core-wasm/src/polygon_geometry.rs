@@ -159,13 +159,14 @@ fn sample_terrain_elevation_at_point(
     
     let elevation = v0 * (1.0 - dy) + v1 * dy;
     
-    // Apply the same scaling as terrain generation
+    // Apply the same scaling as terrain generation (must match terrain.rs exactly)
     let elevation_range = f64::max(1.0, max_elevation - min_elevation);
     let normalized_elevation = (elevation - min_elevation) / elevation_range;
-    let scale_factor = (200.0 * 0.2) * vertical_exaggeration;
+    let base_box_height = terrain_base_height; // Use terrain base height as box height (no magic numbers)
+    let elevation_variation = normalized_elevation * vertical_exaggeration; // Direct application like terrain.rs
     
     // Return the scaled terrain height (same formula as terrain generation)
-    terrain_base_height + normalized_elevation * scale_factor
+    base_box_height + elevation_variation
 }
 
 // Transform geographic coordinates to mesh coordinates
@@ -828,7 +829,7 @@ fn create_extruded_shape(
         uv_array.copy_to(&mut uvs);
     }
     
-    // Apply terrain alignment if enabled
+    // Apply terrain alignment if enabled, or ensure minimum terrain height positioning
     if align_vertices_to_terrain {
         if let (Some(elev_grid), Some(grid_sz), Some(bbox_arr), Some(min_elev), Some(max_elev), Some(vert_exag), Some(base_height)) = 
             (elevation_grid, grid_size, bbox, min_elevation, max_elevation, vertical_exaggeration, terrain_base_height) {
@@ -872,6 +873,21 @@ fn create_extruded_shape(
                     let vertex_height_above_base = vertices[i + 2] as f64 - z_offset;
                     // Then set the vertex to terrain height plus that height
                     vertices[i + 2] = (terrain_height + vertex_height_above_base) as f32;
+                }
+            }
+        }
+    } else {
+        // Even when terrain alignment is disabled, ensure layers are positioned above terrain base height
+        // This handles cases where alignVerticesToTerrain is false but we still want proper Z positioning
+        if let (Some(base_height), Some(_vert_exag)) = (terrain_base_height, vertical_exaggeration) {
+            // Terrain extends from 0 to base_height + elevation_variation, so minimum is base_height
+            let minimum_terrain_height = base_height;
+            
+            // Ensure all vertices are at least at the minimum terrain height
+            for i in (2..vertices.len()).step_by(3) {
+                if vertices[i] < minimum_terrain_height as f32 {
+                    let vertex_height_above_original = vertices[i] as f64 - z_offset;
+                    vertices[i] = (minimum_terrain_height + vertex_height_above_original) as f32;
                 }
             }
         }
@@ -925,9 +941,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     }
     let _dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
     
-    // Dataset terrain extremes for fallback and shared Z offset
-    let dataset_lowest_z = input.min_elevation;
-    let dataset_highest_z = input.max_elevation;
+    // Use the correctly calculated dataset terrain extremes (don't overwrite with raw elevation)
+    // dataset_lowest_z and dataset_highest_z are already correctly calculated above
     let _dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
     
     if input.polygons.is_empty() {

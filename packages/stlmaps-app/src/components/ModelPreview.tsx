@@ -858,7 +858,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           
           if (layerColorUpdates[zOffsetKey] !== undefined) {
             const zOffset = layerColorUpdates[zOffsetKey] as number;
-            // Always position at terrain base height + layer zOffset
+            // Always position at terrain base height + layer zOffset (no magic numbers)
             child.position.z = terrainSettings.baseHeight + zOffset;
             console.log(`🔧 Updated ${child.userData.sourceLayer} zOffset: terrain base (${terrainSettings.baseHeight}) + zOffset (${zOffset}) = ${child.position.z}`);
           }
@@ -902,12 +902,14 @@ const ModelPreview = ({}: ModelPreviewProps) => {
         }
       }
       
-      // Calculate layer positioning based on terrain base height + zOffset
-      const layerBasePosition = terrainSettings.baseHeight + (-0.1); // terrain base height + default zOffset
-      console.log("🏔️ Layer positioning calculation:");
-      console.log("  - Terrain base height:", terrainSettings.baseHeight);
-      console.log("  - Default zOffset:", -0.1);
-      console.log("  - Layer base position:", layerBasePosition);
+      console.log("🏔️ Layer positioning debug:", {
+        terrainBaseHeight: terrainSettings.baseHeight,
+        vtLayers: vtLayers.map(layer => ({
+          sourceLayer: layer.sourceLayer,
+          zOffset: layer.zOffset,
+          enabled: layer.enabled
+        }))
+      });
 
       // Add terrain if available and enabled
       if (geometryDataSets.terrainGeometry && terrainSettings.enabled) {
@@ -932,8 +934,10 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           terrainMaterial
         );
         geometryMesh.name = 'terrain'; // Identify this as terrain mesh
+        geometryMesh.position.z = 0; // Terrain geometry always at Z=0
         geometryMesh.castShadow = renderingMode === 'quality';
         geometryMesh.receiveShadow = renderingMode === 'quality';
+        console.log(`🏔️ Positioned terrain at Z=0`);
         modelGroup.add(geometryMesh);
       }
       
@@ -981,16 +985,25 @@ const ModelPreview = ({}: ModelPreviewProps) => {
               }
               if (individualGeometry.boundingBox) {
                 originalBottomZ = individualGeometry.boundingBox.min.z;
+                console.log(`🔧 Geometry ${vtDataset.sourceLayer} original bottom Z: ${originalBottomZ}`);
                 // Translate geometry so bottom is at origin (z=0)
                 individualGeometry.translate(0, 0, -originalBottomZ);
+                console.log(`🔧 Translated geometry by ${-originalBottomZ} to put bottom at origin`);
               }
 
               // Create mesh
               const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
               
-              // Position mesh at terrain base height + zOffset
-              polygonMesh.position.z = layerBasePosition;
-              console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh at Z: ${polygonMesh.position.z} (terrain base + zOffset)`);
+              // Position mesh using the layer's configured zOffset value
+              const currentLayerConfig = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+              const layerZOffset = currentLayerConfig?.zOffset || 0;
+              polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
+              console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh:`, {
+                terrainBaseHeight: terrainSettings.baseHeight,
+                layerZOffset: layerZOffset,
+                finalPosition: polygonMesh.position.z,
+                calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}`
+              });
               polygonMesh.castShadow = renderingMode === 'quality';
               polygonMesh.receiveShadow = renderingMode === 'quality';
               polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
@@ -1053,9 +1066,16 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           // Create mesh
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
           
-          // Position mesh at terrain base height + zOffset
-          polygonMesh.position.z = layerBasePosition;
-          console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh at Z: ${polygonMesh.position.z} (terrain base + zOffset)`);
+          // Position mesh using the layer's configured zOffset value
+          const currentLayerConfig = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+          const layerZOffset = currentLayerConfig?.zOffset || 0;
+          polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
+          console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh:`, {
+            terrainBaseHeight: terrainSettings.baseHeight,
+            layerZOffset: layerZOffset,
+            finalPosition: polygonMesh.position.z,
+            calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}`
+          });
           polygonMesh.castShadow = renderingMode === 'quality';
           polygonMesh.receiveShadow = renderingMode === 'quality';
           

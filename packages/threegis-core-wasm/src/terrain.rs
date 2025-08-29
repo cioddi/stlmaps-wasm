@@ -31,126 +31,128 @@ pub struct TerrainGeometryResult {
     pub original_max_elevation: f64,
 }
 
-// Optimized function to generate terrain triangle indices
+// Generate triangle indices for 3D terrain box (top, bottom, and side surfaces)
 fn generate_terrain_indices(indices: &mut Vec<u32>, width: usize, height: usize) {
-    let bottom_offset = (width * height) as u32;
+    // Each vertex position has 2 vertices: top (even index) and bottom (odd index)
+    // Vertex at (x,y) has top vertex at index (y*width+x)*2 and bottom at (y*width+x)*2+1
     
-    // Pre-calculate exact capacity needed
-    let surface_triangles = (width - 1) * (height - 1) * 2 * 2; // top and bottom surfaces
-    let side_triangles = ((width - 1) + (height - 1)) * 2 * 2; // 4 side walls
-    indices.reserve(surface_triangles * 3 + side_triangles * 3);
-    
-    // Generate top surface triangles (optimized loop unrolling)
+    // Generate top surface triangles
     for y in 0..(height - 1) {
-        let row_start = (y * width) as u32;
-        let next_row_start = ((y + 1) * width) as u32;
-        
         for x in 0..(width - 1) {
-            let idx = row_start + x as u32;
-            let next_idx = next_row_start + x as u32;
+            let top_left = ((y * width + x) * 2) as u32;
+            let top_right = ((y * width + x + 1) * 2) as u32;
+            let bottom_left = (((y + 1) * width + x) * 2) as u32;
+            let bottom_right = (((y + 1) * width + x + 1) * 2) as u32;
             
-            // Triangle 1
-            indices.extend_from_slice(&[idx, next_idx + 1, next_idx]);
-            // Triangle 2  
-            indices.extend_from_slice(&[idx, idx + 1, next_idx + 1]);
+            // Triangle 1: top-left, bottom-left, bottom-right
+            indices.extend_from_slice(&[top_left, bottom_left, bottom_right]);
+            // Triangle 2: top-left, bottom-right, top-right
+            indices.extend_from_slice(&[top_left, bottom_right, top_right]);
         }
     }
     
-    // Generate bottom surface triangles (reversed winding)
+    // Generate bottom surface triangles (reversed winding for proper normals)
     for y in 0..(height - 1) {
-        let row_start = bottom_offset + (y * width) as u32;
-        let next_row_start = bottom_offset + ((y + 1) * width) as u32;
-        
         for x in 0..(width - 1) {
-            let idx = row_start + x as u32;
-            let next_idx = next_row_start + x as u32;
+            let top_left = ((y * width + x) * 2 + 1) as u32; // bottom vertex
+            let top_right = ((y * width + x + 1) * 2 + 1) as u32; // bottom vertex
+            let bottom_left = (((y + 1) * width + x) * 2 + 1) as u32; // bottom vertex
+            let bottom_right = (((y + 1) * width + x + 1) * 2 + 1) as u32; // bottom vertex
             
-            // Triangle 1 (reversed)
-            indices.extend_from_slice(&[idx, next_idx, next_idx + 1]);
-            // Triangle 2 (reversed)
-            indices.extend_from_slice(&[idx, next_idx + 1, idx + 1]);
+            // Triangle 1: reversed winding for downward-facing normals
+            indices.extend_from_slice(&[top_left, bottom_right, bottom_left]);
+            // Triangle 2: reversed winding for downward-facing normals
+            indices.extend_from_slice(&[top_left, top_right, bottom_right]);
         }
     }
     
-    // Generate side wall indices (optimized)
-    generate_side_walls(indices, width, height, bottom_offset);
+    // Generate side wall triangles
+    generate_terrain_side_walls(indices, width, height);
 }
 
-// Optimized function to generate side wall indices
-fn generate_side_walls(indices: &mut Vec<u32>, width: usize, height: usize, bottom_offset: u32) {
+// Generate side wall triangles for the terrain box
+fn generate_terrain_side_walls(indices: &mut Vec<u32>, width: usize, height: usize) {
     // Left and right walls
     for y in 0..(height - 1) {
-        // Left wall
-        let top_left = (y * width) as u32;
-        let bottom_left = bottom_offset + top_left;
-        let top_next = ((y + 1) * width) as u32;
-        let bottom_next = bottom_offset + top_next;
+        // Left wall (x = 0)
+        let top_top = ((y * width) * 2) as u32; // top vertex of current row
+        let top_bottom = ((y * width) * 2 + 1) as u32; // bottom vertex of current row
+        let next_top = (((y + 1) * width) * 2) as u32; // top vertex of next row
+        let next_bottom = (((y + 1) * width) * 2 + 1) as u32; // bottom vertex of next row
         
-        indices.extend_from_slice(&[top_left, bottom_next, bottom_left]);
-        indices.extend_from_slice(&[top_left, top_next, bottom_next]);
+        // Left wall triangles
+        indices.extend_from_slice(&[top_top, next_bottom, top_bottom]);
+        indices.extend_from_slice(&[top_top, next_top, next_bottom]);
         
-        // Right wall
-        let top_right = (y * width + width - 1) as u32;
-        let bottom_right = bottom_offset + top_right;
-        let top_right_next = ((y + 1) * width + width - 1) as u32;
-        let bottom_right_next = bottom_offset + top_right_next;
+        // Right wall (x = width - 1)
+        let right_top_top = ((y * width + width - 1) * 2) as u32;
+        let right_top_bottom = ((y * width + width - 1) * 2 + 1) as u32;
+        let right_next_top = (((y + 1) * width + width - 1) * 2) as u32;
+        let right_next_bottom = (((y + 1) * width + width - 1) * 2 + 1) as u32;
         
-        indices.extend_from_slice(&[top_right, bottom_right, bottom_right_next]);
-        indices.extend_from_slice(&[top_right, bottom_right_next, top_right_next]);
+        // Right wall triangles (reversed winding for outward normals)
+        indices.extend_from_slice(&[right_top_top, right_top_bottom, right_next_bottom]);
+        indices.extend_from_slice(&[right_top_top, right_next_bottom, right_next_top]);
     }
     
     // Top and bottom walls
     for x in 0..(width - 1) {
-        // Top wall
-        let top_idx = x as u32;
-        let bottom_idx = bottom_offset + top_idx;
-        let top_next = (x + 1) as u32;
-        let bottom_next = bottom_offset + top_next;
+        // Top wall (y = 0)
+        let top_top = (x * 2) as u32;
+        let top_bottom = (x * 2 + 1) as u32;
+        let next_top = ((x + 1) * 2) as u32;
+        let next_bottom = ((x + 1) * 2 + 1) as u32;
         
-        indices.extend_from_slice(&[top_idx, bottom_idx, bottom_next]);
-        indices.extend_from_slice(&[top_idx, bottom_next, top_next]);
+        // Top wall triangles (reversed winding for outward normals)
+        indices.extend_from_slice(&[top_top, top_bottom, next_bottom]);
+        indices.extend_from_slice(&[top_top, next_bottom, next_top]);
         
-        // Bottom wall
-        let bottom_edge_top = ((height - 1) * width + x) as u32;
-        let bottom_edge_bottom = bottom_offset + bottom_edge_top;
-        let bottom_edge_top_next = bottom_edge_top + 1;
-        let bottom_edge_bottom_next = bottom_offset + bottom_edge_top_next;
+        // Bottom wall (y = height - 1)
+        let bottom_top_top = (((height - 1) * width + x) * 2) as u32;
+        let bottom_top_bottom = (((height - 1) * width + x) * 2 + 1) as u32;
+        let bottom_next_top = (((height - 1) * width + x + 1) * 2) as u32;
+        let bottom_next_bottom = (((height - 1) * width + x + 1) * 2 + 1) as u32;
         
-        indices.extend_from_slice(&[bottom_edge_top, bottom_edge_bottom_next, bottom_edge_bottom]);
-        indices.extend_from_slice(&[bottom_edge_top, bottom_edge_top_next, bottom_edge_bottom_next]);
+        // Bottom wall triangles
+        indices.extend_from_slice(&[bottom_top_top, bottom_next_bottom, bottom_top_bottom]);
+        indices.extend_from_slice(&[bottom_top_top, bottom_next_top, bottom_next_bottom]);
     }
 }
 
-// Optimized function to generate terrain normals
+
+// Generate normals for 3D terrain box vertices
 fn generate_terrain_normals(normals: &mut Vec<f32>, positions: &[f32], width: usize, height: usize) {
-    let vertex_count = width * height * 2;
+    let vertex_count = width * height * 2; // top and bottom vertices
     normals.reserve(vertex_count * 3);
     
-    // Generate normals for top vertices (terrain surface)
+    // Generate normals for all vertices (top and bottom)
     for y in 0..height {
         for x in 0..width {
-            // Calculate normal using cross product of adjacent vertices
-            let normal = if x < width - 1 && y < height - 1 {
-                calculate_vertex_normal(positions, x, y, width)
+            // Calculate normal for top surface vertex
+            let top_normal = if x < width - 1 && y < height - 1 {
+                calculate_terrain_vertex_normal(positions, x, y, width, true) // true = top vertex
             } else {
                 [0.0, 0.0, 1.0] // Default up-facing normal for edge vertices
             };
             
-            normals.extend_from_slice(&normal);
+            // Calculate normal for bottom surface vertex
+            let bottom_normal = [0.0, 0.0, -1.0]; // Always down-facing for bottom
+            
+            // Add normals for top and bottom vertices
+            normals.extend_from_slice(&top_normal);
+            normals.extend_from_slice(&bottom_normal);
         }
-    }
-    
-    // Generate normals for bottom vertices (all pointing down)
-    for _ in 0..(width * height) {
-        normals.extend_from_slice(&[0.0, 0.0, -1.0]);
     }
 }
 
-// Calculate vertex normal using cross product of adjacent edges
-fn calculate_vertex_normal(positions: &[f32], x: usize, y: usize, width: usize) -> [f32; 3] {
-    let idx = (y * width + x) * 3;
-    let right_idx = (y * width + x + 1) * 3;
-    let down_idx = ((y + 1) * width + x) * 3;
+// Calculate vertex normal for terrain box structure using cross product of adjacent edges
+fn calculate_terrain_vertex_normal(positions: &[f32], x: usize, y: usize, width: usize, is_top: bool) -> [f32; 3] {
+    // Each vertex position has 2 vertices: top (even index) and bottom (odd index)
+    // Vertex at (x,y) has top vertex at index (y*width+x)*2*3 and bottom at (y*width+x)*2*3+3
+    let vertex_offset = if is_top { 0 } else { 3 }; // 3 floats per vertex (x,y,z)
+    let idx = ((y * width + x) * 2) * 3 + vertex_offset;
+    let right_idx = ((y * width + x + 1) * 2) * 3 + vertex_offset;
+    let down_idx = (((y + 1) * width + x) * 2) * 3 + vertex_offset;
     
     // Get vertex positions
     let v = [positions[idx], positions[idx + 1], positions[idx + 2]];
@@ -173,7 +175,7 @@ fn calculate_vertex_normal(positions: &[f32], x: usize, y: usize, width: usize) 
     if length > 0.0 {
         [normal[0] / length, normal[1] / length, normal[2] / length]
     } else {
-        [0.0, 0.0, 1.0]
+        if is_top { [0.0, 0.0, 1.0] } else { [0.0, 0.0, -1.0] }
     }
 }
 
@@ -470,14 +472,17 @@ fn generate_terrain_mesh(
     let width = elevation_data.grid_size.width as usize;
     let height = elevation_data.grid_size.height as usize;
     
-    // Pre-calculate array sizes for optimal memory allocation
-    let vertex_count = width * height * 2; // top and bottom vertices
-    let triangle_count = (width - 1) * (height - 1) * 12; // 12 triangles per quad (2 for top + 10 for sides)
+    // Pre-calculate array sizes for optimal memory allocation  
+    let vertex_count = width * height * 2; // top and bottom vertices for 3D terrain box
+    let surface_triangle_count = (width - 1) * (height - 1) * 2; // 2 triangles per quad for top surface
+    let bottom_triangle_count = (width - 1) * (height - 1) * 2; // 2 triangles per quad for bottom surface
+    let side_triangle_count = 2 * ((width - 1) + (height - 1)) * 2; // side walls
+    let total_triangle_count = surface_triangle_count + bottom_triangle_count + side_triangle_count;
     
     // Initialize result arrays with precise capacity
     let mut positions: Vec<f32> = Vec::with_capacity(vertex_count * 3);
     let mut colors: Vec<f32> = Vec::with_capacity(vertex_count * 3);
-    let mut indices: Vec<u32> = Vec::with_capacity(triangle_count * 3);
+    let mut indices: Vec<u32> = Vec::with_capacity(total_triangle_count * 3);
     let mut normals: Vec<f32> = Vec::with_capacity(vertex_count * 3);
     
     // Store processed elevation data
@@ -487,11 +492,11 @@ fn generate_terrain_mesh(
     
     // Pre-calculate constants to avoid repeated calculations
     let elevation_range = f64::max(1.0, elevation_data.max_elevation - elevation_data.min_elevation);
-    let scale_factor = (200.0 * 0.2) * vertical_exaggeration;
     let light_brown = [0.82f32, 0.71f32, 0.55f32]; // rgb for #d2b48c
     let dark_brown = [0.66f32, 0.48f32, 0.30f32];  // rgb for #a87b4d
+    let terrain_base_height_f32 = terrain_base_height as f32;
     
-    // Generate vertices with optimized single-pass approach
+    // Generate vertices for 3D terrain box (top and bottom surfaces)
     for y in 0..height {
         let mesh_y = (y as f32 / (height - 1) as f32 - 0.5) * 200.0;
         let mut row_elevation = Vec::with_capacity(width);
@@ -499,37 +504,41 @@ fn generate_terrain_mesh(
         for x in 0..width {
             let mesh_x = (x as f32 / (width - 1) as f32 - 0.5) * 200.0;
             
-            // Calculate normalized elevation value
+            // Get elevation data and apply vertical exaggeration with proper scaling
             let elevation = elevation_data.elevation_grid[y][x];
-            let normalized_z = (elevation - elevation_data.min_elevation) / elevation_range;
+            let normalized_elevation = (elevation - elevation_data.min_elevation) / elevation_range;
             
-            // Apply vertical exaggeration and base height
-            let mesh_z = (terrain_base_height + normalized_z * scale_factor) as f32;
+            // Scale the elevation properly: terrain extends from 0 to terrain_base_height + elevation variation
+            // The terrain base height defines the base terrain box height (no magic numbers)
+            let elevation_variation = normalized_elevation * vertical_exaggeration; // Direct application of user setting
+            let top_z = terrain_base_height_f32 + elevation_variation as f32;
             
             // Track processed elevation
             row_elevation.push(elevation);
-            processed_min_elevation = processed_min_elevation.min(mesh_z as f64);
-            processed_max_elevation = processed_max_elevation.max(mesh_z as f64);
+            processed_min_elevation = processed_min_elevation.min(terrain_base_height);
+            processed_max_elevation = processed_max_elevation.max(top_z as f64);
             
-            // Store top vertex position
+            // Top surface vertex (DEM-based height)
             positions.push(mesh_x);
             positions.push(mesh_y);
-            positions.push(mesh_z);
+            positions.push(top_z);
             
-            // Store bottom vertex position (flat at z=0)
+            // Bottom surface vertex (at Z=0, terrain base is the height from 0)
             positions.push(mesh_x);
             positions.push(mesh_y);
             positions.push(0.0);
             
-            // Calculate terrain color using linear interpolation
-            let normalized_z_f32 = normalized_z as f32;
+            // Calculate terrain color based on elevation
+            let normalized_z_f32 = normalized_elevation as f32;
             let inv_norm = 1.0 - normalized_z_f32;
             let r = light_brown[0] * inv_norm + dark_brown[0] * normalized_z_f32;
             let g = light_brown[1] * inv_norm + dark_brown[1] * normalized_z_f32;
             let b = light_brown[2] * inv_norm + dark_brown[2] * normalized_z_f32;
             
-            // Add colors for both top and bottom vertices
-            colors.extend_from_slice(&[r, g, b, r, g, b]);
+            // Add color for top vertex
+            colors.extend_from_slice(&[r, g, b]);
+            // Add color for bottom vertex (darker)
+            colors.extend_from_slice(&[r * 0.6, g * 0.6, b * 0.6]);
         }
         processed_elevation_grid.push(row_elevation);
     }
