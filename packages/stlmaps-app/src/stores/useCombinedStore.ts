@@ -80,7 +80,7 @@ interface CombinedState {
   _syncState: () => void;
   
   // Internal tracking fields for performance optimization
-  _lastLayerRef?: any;
+  _lastLayerRef?: unknown;
 }
 
 // Create combined store that syncs with individual domain stores
@@ -284,23 +284,23 @@ const immediateSync = () => {
 };
 
 // Subscribe to changes in individual stores with appropriate sync strategy
-useLayerStore.subscribe((state) => {
+useLayerStore.subscribe(() => {
   immediateSync(); // Layer changes should be immediate for UI responsiveness
 });
 
-useTerrainStore.subscribe((state) => {
+useTerrainStore.subscribe(() => {
   immediateSync(); // Terrain changes should be immediate
 });
 
-useProcessingStore.subscribe((state) => {
+useProcessingStore.subscribe(() => {
   immediateSync(); // Processing state changes should be immediate
 });
 
-useGeometryStore.subscribe((state) => {
+useGeometryStore.subscribe(() => {
   immediateSync(); // Geometry changes should be immediate
 });
 
 // UI Store updates (like mouse movements) should be debounced to prevent performance issues
-useUIStore.subscribe((state) => {
+useUIStore.subscribe(() => {
   debouncedSync(); // Debounce UI updates like hover states to improve performance
 });

@@ -1,15 +1,13 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import { Button, Tooltip } from '@mui/material';
 import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
-import { useMap } from '@mapcomponents/react-maplibre';
 
 interface BboxToCenterButtonProps {
   mapId?: string;
   bboxSelectorRef: React.RefObject<{ updateBbox: () => void }>;
 }
 
-const BboxToCenterButton: React.FC<BboxToCenterButtonProps> = ({ mapId, bboxSelectorRef }) => {
-  const mapHook = useMap({ mapId });
+const BboxToCenterButton: React.FC<BboxToCenterButtonProps> = ({ bboxSelectorRef }) => {
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   // Style the button similarly to the camera buttons in ModelPreview

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ProcessingStore } from '../types/ProcessingTypes';
 
-export const useProcessingStore = create<ProcessingStore>((set, get) => ({
+export const useProcessingStore = create<ProcessingStore>((set) => ({
   // State
   isProcessing: false,
   processingStatus: null,

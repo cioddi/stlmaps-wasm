@@ -1,9 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import { styled, keyframes } from '@mui/material/styles';
 import { Box, Typography, LinearProgress, Paper, useMediaQuery, useTheme } from '@mui/material';
 import CodeIcon from '@mui/icons-material/Code';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import useLayerStore from '../stores/useLayerStore';
 
 // Pulsating animation for the icon
 const pulse = keyframes`
@@ -111,7 +110,7 @@ const IconContainer = styled(Box)(({ theme }) => ({
   }
 }));
 
-const StyledLinearProgress = styled(LinearProgress)(({ theme }) => ({
+const StyledLinearProgress = styled(LinearProgress)(() => ({
   width: '100%',
   height: '6px',
   marginTop: '12px',
@@ -132,7 +131,7 @@ const StatusText = styled(Typography)({
   textAlign: 'left',
 });
 
-const ProcessingStepContainer = styled(Box)(({ theme }) => ({
+const ProcessingStepContainer = styled(Box)(() => ({
   display: 'flex',
   alignItems: 'center',
   width: '100%',

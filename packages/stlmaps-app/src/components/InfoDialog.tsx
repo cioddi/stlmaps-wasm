@@ -37,7 +37,6 @@ interface ProcessItem {
 const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const isTablet = useMediaQuery(theme.breakpoints.down("md"));
 
   // Process explanation items
   const processItems: ProcessItem[] = [

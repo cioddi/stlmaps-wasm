@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, { useRef, useEffect, useCallback } from "react";
 import ReactDOM from "react-dom";
 import Moveable from "react-moveable";
 import { Map as MapType, Marker } from "maplibre-gl";
@@ -9,7 +9,7 @@ type BboxSelectorEditModeProps = {
   mapId?: string;
   options: BboxSelectorOptions;
   bbox: Feature;
-  mapHook: any;
+  mapHook: { map?: { map?: MapType } };
   onBboxUpdate: (updatedBbox: Feature) => void;
 };
 
@@ -17,7 +17,6 @@ type BboxSelectorEditModeProps = {
  * BboxSelectorEditMode handles the edit mode UI for bbox selection
  */
 const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
-  mapId,
   options,
   bbox,
   mapHook,
@@ -28,7 +27,6 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
   const targetRef = useRef<HTMLDivElement>(null);
   const moveableRef = useRef<Moveable>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [marker, setMarker] = useState<Marker | null>(null);
 
   useEffect(() => {
     mapHook.map.map.setPitch(0);
@@ -226,7 +224,7 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
           // Apply transform during drag
           e.target.style.transform = e.transform;
         }}
-        onDragEnd={(e) => {
+        onDragEnd={() => {
           // Important: Do not reset the transform here as we need it for positioning
           // Let the updateBbox function handle all positioning calculations
           updateBbox();

@@ -1,25 +1,21 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { CircularProgress } from "@mui/material";
 import * as THREE from "three";
-// @ts-expect-error
+// @ts-expect-error - Three.js types don't include examples
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
-// @ts-expect-error
-import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
-// @ts-expect-error
+// @ts-expect-error - Three.js types don't include postprocessing
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-// @ts-expect-error
+// @ts-expect-error - Three.js types don't include postprocessing
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-// @ts-expect-error
+// @ts-expect-error - Three.js types don't include postprocessing
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-// @ts-expect-error
+// @ts-expect-error - Three.js types don't include postprocessing
 import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
-// @ts-expect-error
+// @ts-expect-error - Three.js types don't include postprocessing
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { Sprite, SpriteMaterial, CanvasTexture } from "three";
 import { useCombinedStore } from "../stores/useCombinedStore";
 import HoverTooltip from "./HoverTooltip";
 
-interface ModelPreviewProps {}
 
 // Interface for scene data to be stored in ref
 interface SceneData {
@@ -267,15 +263,13 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   return recommendedMode;
 };
 
-const ModelPreview = ({}: ModelPreviewProps) => {
+const ModelPreview = () => {
   // Get geometry data and settings from the Zustand store
   const { 
     geometryDataSets, 
     vtLayers,
     terrainSettings, 
     renderingSettings, 
-    debugSettings, 
-    hoverState,
     colorOnlyUpdate,
     layerColorUpdates,
     setRenderingMode,
@@ -918,10 +912,8 @@ const ModelPreview = ({}: ModelPreviewProps) => {
           valid: !!geometryDataSets.terrainGeometry.attributes?.position?.count
         });
         // Create terrain material based on rendering mode
-        let terrainMaterial;
-        
         // Use the same matte material approach for both modes - just like performance mode works
-        terrainMaterial = new THREE.MeshLambertMaterial({
+        const terrainMaterial = new THREE.MeshLambertMaterial({
           vertexColors: terrainSettings.color ? false : true,
           color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
           flatShading: true,
@@ -943,7 +935,7 @@ const ModelPreview = ({}: ModelPreviewProps) => {
       
       // Process polygon geometries
       if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
-        geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}, polyIndex) => {
+        geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
           if (!geometry) return; // Skip if geometry is undefined
           
           // Look up current enabled state from layer store instead of using stored state

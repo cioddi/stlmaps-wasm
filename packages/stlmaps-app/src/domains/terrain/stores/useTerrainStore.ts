@@ -18,7 +18,7 @@ const DEFAULT_PROCESSED_TERRAIN_DATA = {
   processedMaxElevation: 100,
 };
 
-export const useTerrainStore = create<TerrainStore>((set, get) => ({
+export const useTerrainStore = create<TerrainStore>((set) => ({
   // State
   terrainSettings: DEFAULT_TERRAIN_SETTINGS,
   buildingSettings: DEFAULT_BUILDING_SETTINGS,

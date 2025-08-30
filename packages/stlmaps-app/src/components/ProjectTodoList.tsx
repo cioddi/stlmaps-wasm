@@ -21,7 +21,6 @@ import {
 import DoneOutlineIcon from "@mui/icons-material/DoneOutline";
 import CodeIcon from "@mui/icons-material/Code";
 import ScheduleIcon from "@mui/icons-material/Schedule";
-import TimerIcon from "@mui/icons-material/Timer";
 
 interface ProjectTodoListProps {
     open: boolean;
@@ -46,7 +45,6 @@ interface TodoItem {
 const ProjectTodoList: React.FC<ProjectTodoListProps> = ({ open, onClose }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const [expandedItems, setExpandedItems] = React.useState<Record<number, boolean>>({});
 
     // Initialize expanded state when dialog opens based on task status

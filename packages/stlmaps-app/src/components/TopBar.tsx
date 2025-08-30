@@ -4,7 +4,6 @@ import {
   Toolbar,
   Typography,
   Box,
-  Button,
   IconButton,
   useMediaQuery,
   useTheme,
@@ -17,7 +16,6 @@ import MapIcon from "@mui/icons-material/Map";
 import ViewQuiltIcon from "@mui/icons-material/ViewQuilt";
 import View3dIcon from "@mui/icons-material/ViewInAr";
 import InfoIcon from "@mui/icons-material/Info";
-import ListAltIcon from "@mui/icons-material/ListAlt";
 import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import CitySearch from "./CitySearch";
 import ExportButtons from "./ExportButtons";

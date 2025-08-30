@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Box,
-  List,
   ListItem,
   ListItemIcon,
   ListItemText,
@@ -9,9 +8,7 @@ import {
   Switch,
   Slider,
   Paper,
-  Divider,
   Collapse,
-  IconButton,
   TextField,
   InputAdornment,
   FormControlLabel,
@@ -21,7 +18,6 @@ import { styled } from '@mui/material/styles';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import TerrainIcon from '@mui/icons-material/Terrain';
-import BusinessIcon from '@mui/icons-material/Business';
 import WaterIcon from '@mui/icons-material/Water';
 import ParkIcon from '@mui/icons-material/Park';
 import ForestIcon from '@mui/icons-material/Forest';
@@ -29,11 +25,9 @@ import DirectionsIcon from '@mui/icons-material/Directions';
 import LayersIcon from '@mui/icons-material/Layers';
 import FormatColorFillIcon from '@mui/icons-material/FormatColorFill';
 import * as THREE from 'three';
-import { VtDataSet } from './GenerateMeshButton';
 import { useCombinedStore } from '../stores/useCombinedStore';
 
 // No props needed anymore as we'll use the Zustand store
-interface LayerListProps {}
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   backgroundColor: theme.palette.background.paper,
@@ -67,14 +61,6 @@ const ColorCircle = styled(Box)<{ bgcolor: string }>(({ bgcolor }) => ({
   marginRight: 8,
 }));
 
-function hexToRgb(hex: string) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16) / 255,
-    g: parseInt(result[2], 16) / 255,
-    b: parseInt(result[3], 16) / 255
-  } : null;
-}
 
 function rgbToHex(color: THREE.Color) {
   return '#' + 
@@ -83,12 +69,11 @@ function rgbToHex(color: THREE.Color) {
     Math.floor(color.b * 255).toString(16).padStart(2, '0');
 }
 
-const LayerList: React.FC<LayerListProps> = () => {
+const LayerList: React.FC = () => {
   // Get state and actions from the Zustand store
   const {
     vtLayers,
     terrainSettings,
-    buildingSettings,
     toggleLayerEnabled,
     setLayerColor,
     setLayerExtrusionDepth,
@@ -99,7 +84,6 @@ const LayerList: React.FC<LayerListProps> = () => {
     toggleLayerAlignVerticesToTerrain,
     setLayerHeightScaleFactor,
     setTerrainSettings,
-    setBuildingSettings,
   } = useCombinedStore();
 
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({

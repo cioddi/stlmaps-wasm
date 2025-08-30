@@ -9,7 +9,6 @@ import {
   Typography, 
   Paper, 
   Grid2 as Grid, 
-  Divider, 
   Chip, 
   useTheme,
   IconButton,
@@ -22,7 +21,6 @@ import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { getWasmModule } from "@threegis/core";
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import SaveIcon from '@mui/icons-material/Save';
 import ModelTrainingIcon from '@mui/icons-material/ModelTraining';
 import ScatterPlotIcon from '@mui/icons-material/ScatterPlot';
 import ThreeDRotationIcon from '@mui/icons-material/ThreeDRotation';
@@ -171,7 +169,7 @@ const ExportButtons: React.FC = () => {
     const scene = new THREE.Scene();
 
     // Helper to check if geometry is valid for export
-    const isValidGeometry = (geometry: any) => {
+    const isValidGeometry = (geometry: THREE.BufferGeometry) => {
       return (
         geometry &&
         geometry.isBufferGeometry &&
@@ -259,13 +257,6 @@ const ExportButtons: React.FC = () => {
     return scene;
   };
 
-  // Generate all exports
-  const generateExports = (): void => {
-    generateOBJFile();
-    generateSTLFile();
-    generateGLTFFile();
-    generate3MFFile();
-  };
   
   const generateOBJFile = (): void => {
     if (!geometryDataSets.terrainGeometry) return;
@@ -371,7 +362,7 @@ const ExportButtons: React.FC = () => {
       const scene = createExportScene(true);
       
       // Extract mesh data for 3MF export
-      const meshes: any[] = [];
+      const meshes: THREE.Mesh[] = [];
       
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh && object.geometry) {

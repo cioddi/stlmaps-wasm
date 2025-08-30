@@ -38,7 +38,7 @@ const validateConfig = (config: typeof developmentConfig): void => {
 
   for (const key of requiredKeys) {
     const keys = key.split('.');
-    let current: any = config;
+    let current: unknown = config;
     
     for (const k of keys) {
       if (!(k in current)) {

@@ -9,7 +9,6 @@ import {
   Drawer,
   Paper,
   Typography,
-  LinearProgress,
 } from "@mui/material";
 import useLayerStore from "./stores/useLayerStore";
 import { Sidebar } from "./components/Sidebar";
@@ -44,7 +43,7 @@ const App: React.FC = () => {
   const bboxSelectorRef = useRef<{ updateBbox: () => void } | null>(null);
   
   // Use the WebAssembly hook
-  const { isInitialized, isLoading, error } = useWasm();
+  const { isInitialized, error } = useWasm();
   
   // Close sidebar by default on mobile devices
   useEffect(() => {
@@ -75,9 +74,8 @@ const App: React.FC = () => {
 
 
   // Handle city selection to update both center and bbox
-  const handleCitySelect = (city: any) => {
+  const handleCitySelect = (city: { coordinates: [number, number] } | null) => {
     if (city) {
-      _map.setZoom(15);
       setBboxCenter(city.coordinates);
       
       // Add a small delay to ensure state is updated before triggering bbox update

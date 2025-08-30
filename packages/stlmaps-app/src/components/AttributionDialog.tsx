@@ -86,7 +86,6 @@ const AttributionDialog: React.FC<AttributionDialogProps> = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const isTablet = useMediaQuery(theme.breakpoints.down("md"));
 
   const getIconByType = (iconType: string) => {
     switch (iconType) {

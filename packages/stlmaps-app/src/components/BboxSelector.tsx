@@ -1,4 +1,4 @@
-import React, {
+import {
   useRef,
   useEffect,
   useState,
@@ -7,13 +7,10 @@ import React, {
 } from "react";
 import {
   useMap,
-  useMapState,
   MlGeoJsonLayer,
 } from "@mapcomponents/react-maplibre";
-import { Marker } from "maplibre-gl";
 import { Feature } from "geojson";
 import BboxSelectorEditMode from "./BboxSelectorEditMode";
-import { Description } from "@mui/icons-material";
 
 export interface BboxSelectorOptions {
   topLeft?: [number, number] | undefined;
@@ -24,7 +21,6 @@ export interface BboxSelectorOptions {
   fixedScale?: boolean;
 }
 
-let lastViewPortState = "";
 
 type Props = {
   /**

@@ -1,32 +1,18 @@
 import { useState } from "react";
 import {
     Toolbar,
-    Button,
     Box,
     Drawer,
     Tab,
     Tabs,
-    useTheme,
-    useMediaQuery,
 } from "@mui/material";
-import BboxSelector from "./BboxSelector";
-import { GenerateMeshButton } from "./GenerateMeshButton";
-import ExportButtons from "./ExportButtons";
-import AttributionDialog from "./AttributionDialog";
-import ProjectTodoList from "./ProjectTodoList";
 import LayerList from "./LayerList";
 import RenderingControls from "./RenderingControls";
-import useLayerStore from "../stores/useLayerStore";
 
 const SIDEBAR_WIDTH = 340;
 
-export const Sidebar = ({ bboxCenter }: { bboxCenter: [number, number] }) => {
-    const { terrainSettings, buildingSettings, vtLayers, bbox, setBbox } = useLayerStore();
-    const [openAttribution, setOpenAttribution] = useState(false);
-    const [openTodoList, setOpenTodoList] = useState(false);
+export const Sidebar = () => {
     const [activeTab, setActiveTab] = useState(0);
-    const theme = useTheme();
-    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
     return (
         <>

@@ -1,12 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import {
-  GeometryData,
-} from "./VectorTileFunctions";
 import * as THREE from "three";
-//@ts-expect-error No types available for BufferGeometryUtils
-import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils";
-import { bufferLineString } from "../three_maps/bufferLineString";
-import { createDebugGeometry } from "../three_maps/createDebugGeometry";
 import { useCombinedStore } from "../stores/useCombinedStore";
 import {
   createComponentHashes,
@@ -24,8 +17,7 @@ import {
   useElevationProcessor, 
   getWasmModule,
   fetchVtData,
-  calculateTileCount,
-  getTilesForBbox
+  calculateTileCount
 } from "@threegis/core";
 
 // Define interfaces for our data structures
@@ -34,34 +26,8 @@ export interface GridSize {
   height: number;
 }
 
-interface TerrainGeometryResult {
-  geometry: THREE.BufferGeometry;
-  processedElevationGrid: number[][];
-  processedMinElevation: number;
-  processedMaxElevation: number;
-}
 
-interface GeoJSONFeature {
-  geometry: {
-    type: string;
-    coordinates: number[][][];
-  };
-  properties?: Record<string, any>;
-  type: string;
-}
 
-interface ElevationProcessingResult {
-  elevationGrid: number[][];
-  gridSize: GridSize;
-  minElevation: number;
-  maxElevation: number;
-}
-
-interface ConfigHashes {
-  fullConfigHash: string;
-  terrainHash: string;
-  layerHashes: { index: number; hash: string }[];
-}
 
 // Helper function to convert JS VtDataSet to Rust-compatible format
 function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
@@ -91,8 +57,7 @@ export const GenerateMeshButton = function () {
     useState<string>("");
 
   // Get WASM-related hooks
-  const { isInitialized: isWasmInitialized, isLoading: isWasmLoading } =
-    useWasm();
+  const { isInitialized: isWasmInitialized } = useWasm();
   const { processElevationForBbox } = useElevationProcessor();
 
   // Get settings and setter functions directly from Zustand store
@@ -108,7 +73,6 @@ export const GenerateMeshButton = function () {
     updateProgress,
     configHashes,
     setConfigHashes,
-    processedTerrainData,
     setProcessedTerrainData,
   } = useCombinedStore();
 
@@ -155,15 +119,6 @@ export const GenerateMeshButton = function () {
 
 
     // Check which specific components need regeneration
-    const terrainChanged = currentTerrainHash !== configHashes.terrainHash;
-    const changedLayerIndices = currentLayerHashes
-      .filter((layerHash) => {
-        const previousHash = configHashes.layerHashes.find(
-          (lh) => lh.index === layerHash.index
-        )?.hash;
-        return previousHash !== layerHash.hash;
-      })
-      .map((lh) => lh.index);
 
 
     try {
@@ -213,7 +168,6 @@ export const GenerateMeshButton = function () {
       updateProgress("Calculating tile coordinates...", 10);
 
       // Get tile coordinates
-      const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
 
       // Update processing status
       updateProgress("Processing elevation data...", 20);
@@ -227,7 +181,6 @@ export const GenerateMeshButton = function () {
 
       if (bboxChanged) {
         setLastProcessedBboxHash(currentBboxHash);
-      } else {
       }
 
       // Only attempt to process elevation data if WASM is initialized
@@ -268,8 +221,7 @@ export const GenerateMeshButton = function () {
       let processedElevationGrid = elevationResult.elevationGrid;
       let processedMinElevation = elevationResult.minElevation;
       let processedMaxElevation = elevationResult.maxElevation;
-      let elevationGrid = elevationResult.elevationGrid;
-      let gridSize = elevationResult.gridSize;
+      const gridSize = elevationResult.gridSize;
       // Initialize original elevation values (will be updated if WASM terrain is used)
       let originalMinElevation = elevationResult.minElevation;
       let originalMaxElevation = elevationResult.maxElevation;
@@ -373,7 +325,7 @@ export const GenerateMeshButton = function () {
       updateProgress("Processing vector data...", 50);
 
       // Initialize or get existing polygon geometries
-      let vtPolygonGeometries: VtDataSet[] = [];
+      const vtPolygonGeometries: VtDataSet[] = [];
 
       // Array to store geometry generation promises
       const geometryPromises: {

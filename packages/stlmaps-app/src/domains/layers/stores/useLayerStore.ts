@@ -4,7 +4,7 @@ import { vtGeometries as defaultVtGeometries } from '../../../config/layers';
 import type { LayerStore } from '../types/LayerTypes';
 
 // Convert legacy THREE.Color to hex string and ensure all required properties
-const convertLegacyLayers = (layers: any[]) => {
+const convertLegacyLayers = (layers: unknown[]) => {
   return layers.map(layer => ({
     ...layer,
     enabled: layer.enabled ?? true,

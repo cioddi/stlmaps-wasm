@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { Box, CircularProgress, useTheme } from "@mui/material";
+import { Box, CircularProgress } from "@mui/material";
 import ModelPreview from "./ModelPreview";
 
 interface ModelSectionProps {
@@ -8,7 +8,6 @@ interface ModelSectionProps {
 }
 
 const ModelSection: React.FC<ModelSectionProps> = ({ flex, display }) => {
-  const theme = useTheme();
 
   return (
     <Box
