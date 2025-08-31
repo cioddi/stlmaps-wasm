@@ -198,6 +198,15 @@ export const GenerateMeshButton = function () {
         // This will automatically register the data with this ID in the WASM context
         elevationResult = await processElevationForBbox(bbox, currentBboxHash);
 
+        // Debug: Log elevation processing results
+        console.log("🏔️ Elevation processing result:", {
+          gridSize: elevationResult.gridSize,
+          minElevation: elevationResult.minElevation,
+          maxElevation: elevationResult.maxElevation,
+          elevationRange: elevationResult.maxElevation - elevationResult.minElevation,
+          gridLength: elevationResult.elevationGrid?.length || 0
+        });
+
         updateProgress("Processing elevation data...", 35);
 
         // Store just the metadata for JavaScript-side operations, the actual grid
@@ -276,8 +285,26 @@ export const GenerateMeshButton = function () {
           bbox_key: currentBboxHash, // Use the bbox hash as the cache key
         };
 
+        // Debug: Log terrain parameters to verify values
+        console.log("🏔️ Terrain generation parameters:", {
+          verticalExaggeration: terrainSettings.verticalExaggeration,
+          baseHeight: terrainSettings.baseHeight,
+          bbox: [minLng, minLat, maxLng, maxLat],
+          bbox_key: currentBboxHash
+        });
+
         // Call the WASM terrain geometry generator (now async)
         const wasmTerrainResult = await wasmModule.create_terrain_geometry(terrainParams);
+
+        // Debug: Log WASM terrain result statistics
+        console.log("🏔️ WASM terrain result:", {
+          vertexCount: wasmTerrainResult.positions.length / 3,
+          minElevation: wasmTerrainResult.processedMinElevation,
+          maxElevation: wasmTerrainResult.processedMaxElevation,
+          originalMinElevation: wasmTerrainResult.originalMinElevation,
+          originalMaxElevation: wasmTerrainResult.originalMaxElevation,
+          elevationRange: wasmTerrainResult.processedMaxElevation - wasmTerrainResult.processedMinElevation
+        });
 
         // Convert WASM TypedArrays to THREE.js BufferGeometry with optimizations
         const geometry = new THREE.BufferGeometry();
