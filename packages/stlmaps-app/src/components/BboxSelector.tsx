@@ -133,18 +133,44 @@ const BboxSelector = forwardRef((props: Props, ref) => {
     setBbox(_geoJson);
   }, [mapHook.map]);
 
-  const handleBboxClick = () => {
+  const handleBboxClick = (e?: any) => {
+    // Ensure we're in view mode before switching
+    if (modeRef.current !== "view") {
+      console.log("BboxSelector click ignored - already in edit mode");
+      return;
+    }
+    
+    console.log("BboxSelector click detected, switching to edit mode");
+    
+    // Prevent event bubbling to avoid map interactions
+    if (e && e.originalEvent) {
+      e.originalEvent.stopPropagation();
+      e.originalEvent.preventDefault();
+    }
+    
+    // Immediately update mode to prevent double-clicks
     modeRef.current = "edit";
     setMode("edit");
-    mapHook.map?.map.once("dragstart", () => {
-      setMode("view");
-    });
-    mapHook.map?.map.once("rotatestart", () => {
-      setMode("view");
-    });
-    mapHook.map?.map.once("zoomstart", () => {
-      setMode("view");
-    });
+    
+    // Set up exit conditions immediately but with proper guards
+    if (mapHook.map) {
+      const exitToView = () => {
+        console.log("Exiting bbox edit mode due to map interaction");
+        if (modeRef.current === "edit") {
+          modeRef.current = "view";
+          setMode("view");
+        }
+      };
+
+      // Use nextTick to ensure handlers are set after current event processing
+      Promise.resolve().then(() => {
+        if (modeRef.current === "edit" && mapHook.map) {
+          mapHook.map.map.once("dragstart", exitToView);
+          mapHook.map.map.once("rotatestart", exitToView);  
+          mapHook.map.map.once("zoomstart", exitToView);
+        }
+      });
+    }
   };
 
   const handleBboxUpdate = (updatedBbox: Feature) => {
@@ -178,6 +204,7 @@ const BboxSelector = forwardRef((props: Props, ref) => {
           geojson={bbox}
           layerId="bbox-selector-layer-circles"
           mapId={props.mapId}
+          onClick={handleBboxClick}
           type="circle"
           options={{
             paint: {
