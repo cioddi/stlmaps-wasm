@@ -16,8 +16,10 @@ const WORKER_TIMEOUT = 60000; // 60 seconds timeout for worker operations
 
 export class WorkerService {
   private static workers: Map<string, Worker> = new Map();
+  private static workerPools: Map<string, Worker[]> = new Map();
   private static requests: Map<string, WorkerRequest> = new Map();
   private static requestCounter = 0;
+  private static readonly MAX_WORKERS = Math.max(2, Math.min(navigator.hardwareConcurrency || 4, 8));
 
   /**
    * Initializes a worker with a specified name if it doesn't already exist
@@ -43,6 +45,36 @@ export class WorkerService {
     this.workers.set(workerName, worker);
     
     return worker;
+  }
+
+  /**
+   * Creates or gets a worker pool for parallel processing
+   */
+  private static getWorkerPool(workerName: string, workerConstructor: new () => Worker): Worker[] {
+    if (!this.workerPools.has(workerName)) {
+      const pool: Worker[] = [];
+      
+      for (let i = 0; i < this.MAX_WORKERS; i++) {
+        const poolWorkerName = `${workerName}-${i}`;
+        const worker = this.initWorker(poolWorkerName, workerConstructor);
+        pool.push(worker);
+      }
+      
+      this.workerPools.set(workerName, pool);
+      console.log(`🏭 Created worker pool for '${workerName}' with ${this.MAX_WORKERS} workers`);
+    }
+    
+    return this.workerPools.get(workerName)!;
+  }
+
+  /**
+   * Gets the least busy worker from a pool
+   */
+  private static getLeastBusyWorker(pool: Worker[]): Worker {
+    // Simple round-robin selection for now
+    // In a more sophisticated implementation, we could track active requests per worker
+    const randomIndex = Math.floor(Math.random() * pool.length);
+    return pool[randomIndex];
   }
 
   /**
@@ -73,6 +105,41 @@ export class WorkerService {
       
       // Store the request callbacks for later resolution
       this.requests.set(requestId, { resolve, reject, timeoutId, workerName });
+      
+      // Send data to worker with the request ID
+      worker.postMessage({
+        id: requestId,
+        data,
+        cancelable: true
+      });
+    });
+  }
+
+  /**
+   * Runs a task on a worker pool for parallel processing
+   */
+  public static runWorkerPoolTask(
+    workerName: string,
+    workerConstructor: new () => Worker,
+    data: any
+  ): Promise<any> {
+    const pool = this.getWorkerPool(workerName, workerConstructor);
+    const worker = this.getLeastBusyWorker(pool);
+    const requestId = `${workerName}-pool-${++this.requestCounter}`;
+    
+    console.log(`🔄 Assigning task ${requestId} to worker pool`);
+    
+    return new Promise((resolve, reject) => {
+      // Set up timeout to prevent hanging requests
+      const timeoutId = window.setTimeout(() => {
+        if (this.requests.has(requestId)) {
+          this.requests.delete(requestId);
+          reject(new Error(`Worker pool task ${requestId} timed out after ${WORKER_TIMEOUT / 1000} seconds`));
+        }
+      }, WORKER_TIMEOUT);
+      
+      // Store the request callbacks for later resolution
+      this.requests.set(requestId, { resolve, reject, timeoutId, workerName: workerName + '-pool' });
       
       // Send data to worker with the request ID
       worker.postMessage({
@@ -149,6 +216,13 @@ export class WorkerService {
     for (const workerName of this.workers.keys()) {
       this.terminateWorker(workerName);
     }
+    
+    // Also terminate worker pools
+    for (const [poolName, pool] of this.workerPools.entries()) {
+      console.log(`🏭 Terminating worker pool: ${poolName}`);
+      pool.forEach(worker => worker.terminate());
+    }
+    this.workerPools.clear();
   }
   
   /**

@@ -69,14 +69,19 @@ export const initWasmFetchHelpers = () => {
       console.log(`JS Helper: Fetching from ${url}`);
       
       try {
-        const response = await fetch(url);
+        const response = await window.fetch(url);
         if (!response.ok) {
-          throw new Error(`Failed to fetch data: ${response.status}`);
+          console.error(`HTTP Error ${response.status} for ${url}:`, response.statusText);
+          throw new Error(`Failed to fetch data: ${response.status} ${response.statusText}`);
         }
         
         // Get the content type to determine how to process the response
         const contentType = response.headers.get('content-type') || '';
+        const contentLength = response.headers.get('content-length');
         const tileCoords = extractTileCoordinatesFromUrl(url);
+        
+        console.log(`Response headers - Content-Type: ${contentType}, Content-Length: ${contentLength}`);
+        console.log(`Tile coordinates extracted: ${JSON.stringify(tileCoords)}`);
         
         // Handle different content types appropriately
         if (contentType.includes('image/')) {
@@ -128,6 +133,9 @@ export const initWasmFetchHelpers = () => {
         }
       } catch (error) {
         console.error(`Error downloading from ${url}:`, error);
+        if (error instanceof TypeError) {
+          console.error('This might be a CORS or network connectivity issue');
+        }
         throw error;
       }
     },

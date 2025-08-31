@@ -66,14 +66,17 @@ const CitySearch: React.FC<CitySearchProps> = ({ onCitySelect }) => {
             option.country.toLowerCase().includes(inputValue)
           );
         }}
-        renderOption={(props, option) => (
-          <Box component="li" {...props}>
-            <Typography variant="body1">{option.name}</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
-              {option.country}
-            </Typography>
-          </Box>
-        )}
+        renderOption={(props, option) => {
+          const { key, ...otherProps } = props;
+          return (
+            <Box component="li" key={key} {...otherProps}>
+              <Typography variant="body1">{option.name}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+                {option.country}
+              </Typography>
+            </Box>
+          );
+        }}
         renderInput={(params) => (
           <TextField
             {...params}

@@ -90,17 +90,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       order: 1,
     });
     
-    // Final step - model assembly (90-100% progress)
-    const finalStatus = 
-      !processingProgress || processingProgress < 90 ? 'not-started' :
-      processingProgress < 100 ? 'in-progress' : 'completed';
-      
-    steps.push({
-      id: "finalization",
-      label: "Finalizing 3D model",
-      status: finalStatus,
-      order: vtLayers.length + 1,
-    });
+    // Note: Removed finalization step to show only 2 main steps
     
     return steps;
   };

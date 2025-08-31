@@ -834,44 +834,40 @@ fn create_extruded_shape(
         if let (Some(elev_grid), Some(grid_sz), Some(bbox_arr), Some(min_elev), Some(max_elev), Some(vert_exag), Some(base_height)) = 
             (elevation_grid, grid_size, bbox, min_elevation, max_elevation, vertical_exaggeration, terrain_base_height) {
             
-            // Check if this is a transportation layer (roads)
-            let is_transportation = source_layer == Some("transportation");
-            
             // Apply terrain alignment to vertices
+            // Bottom vertices align to terrain surface, top vertices maintain relative height
             for i in (0..vertices.len()).step_by(3) {
-                // Get x, y coordinates in mesh space
+                // Get vertex position in mesh coordinates
                 let mesh_x = vertices[i] as f64;
                 let mesh_y = vertices[i + 1] as f64;
+                let current_z = vertices[i + 2] as f64;
                 
-                // Convert mesh coordinates back to geographic coordinates
-                let mesh_size = 200.0; // TERRAIN_SIZE constant
+                // Convert mesh coordinates (-100 to +100) to geographic coordinates
+                let mesh_size = 200.0;
                 let half_size = mesh_size / 2.0;
                 
-                // Convert from mesh coordinates (-100 to +100) to normalized 0-1 space
-                let normalized_x = (mesh_x + half_size) / mesh_size;
-                let normalized_y = (mesh_y + half_size) / mesh_size;
+                // Normalize to 0-1 range
+                let norm_x = (mesh_x + half_size) / mesh_size;
+                let norm_y = (mesh_y + half_size) / mesh_size;
                 
-                // Convert from normalized space to geographic coordinates
-                let lng = bbox_arr[0] + (bbox_arr[2] - bbox_arr[0]) * normalized_x;
-                let lat = bbox_arr[1] + (bbox_arr[3] - bbox_arr[1]) * normalized_y;
+                // Convert to geographic coordinates
+                let lng = bbox_arr[0] + (bbox_arr[2] - bbox_arr[0]) * norm_x;
+                let lat = bbox_arr[1] + (bbox_arr[3] - bbox_arr[1]) * norm_y;
                 
-                // Sample terrain elevation at this position
+                // Get terrain height at this position
                 let terrain_height = sample_terrain_elevation_at_point(
                     lng, lat, elev_grid, grid_sz, bbox_arr, min_elev, max_elev,
                     vert_exag, base_height
                 );
                 
-                if is_transportation {
-                    // For transportation (roads), set the vertex to terrain height
-                    // Don't add terrain height since z_offset already includes it
-                    // Instead, adjust to the exact terrain height at this position
-                    let current_base_z = vertices[i + 2] as f64 - z_offset;
-                    vertices[i + 2] = (terrain_height + current_base_z) as f32;
+                // Determine if this is a bottom or top vertex based on its Z position relative to z_offset
+                let vertex_height_above_base = current_z - z_offset;
+                
+                if vertex_height_above_base <= 0.01 {
+                    // This is a bottom vertex - align to terrain surface
+                    vertices[i + 2] = terrain_height as f32;
                 } else {
-                    // For other features (landuse, water, buildings), align bottom to terrain
-                    // First, get the height of this vertex above the base z_offset
-                    let vertex_height_above_base = vertices[i + 2] as f64 - z_offset;
-                    // Then set the vertex to terrain height plus that height
+                    // This is a top vertex - align to terrain surface + original height above bottom
                     vertices[i + 2] = (terrain_height + vertex_height_above_base) as f32;
                 }
             }

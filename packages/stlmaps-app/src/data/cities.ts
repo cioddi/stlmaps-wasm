@@ -11,7 +11,7 @@ const cities: City[] = [
   { name: "Tokyo", country: "Japan", coordinates: [139.6503, 35.6762], population: 13960000 },
   { name: "Paris", country: "France", coordinates: [2.3522, 48.8566], population: 2161000 },
   { name: "Sydney", country: "Australia", coordinates: [151.2093, -33.8688], population: 5312000 },
-  { name: "Berlin", country: "Germany", coordinates: [13.4050, 52.5200], population: 3769000 },
+  { name: "Berlin", country: "Germany", coordinates: [13.4051, 52.5201], population: 3769000 },
   { name: "Rome", country: "Italy", coordinates: [12.4964, 41.9028], population: 2873000 },
   { name: "Cairo", country: "Egypt", coordinates: [31.2357, 30.0444], population: 9540000 },
   { name: "Rio de Janeiro", country: "Brazil", coordinates: [-43.1729, -22.9068], population: 6748000 },
