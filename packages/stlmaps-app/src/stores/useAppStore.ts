@@ -119,7 +119,6 @@ interface AppState {
   // Processing state
   isProcessing: boolean;
   processingStatus: string;
-  processingProgress: number | null;
   
   // Geometry state
   geometryDataSets: GeometryDataSets;
@@ -167,7 +166,7 @@ interface AppState {
   
   // Processing actions
   setIsProcessing: (processing: boolean) => void;
-  updateProgress: (status: string, progress?: number) => void;
+  updateProgress: (status: string) => void;
   resetProcessing: () => void;
   
   // Geometry actions
@@ -265,7 +264,7 @@ const defaultLayers: VtDataSet[] = [
     color: "#76bcff", // Lighter blue color for water
     bufferSize: 0,
     extrusionDepth: 1, // Thin extrusion for water
-    zOffset: -0.5,
+    zOffset: 0.2,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
@@ -288,7 +287,7 @@ const defaultLayers: VtDataSet[] = [
 
 // Create the unified Zustand store
 export const useAppStore = create<AppState>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set) => ({
     // Core app state
     bboxCenter: [-74.00599999999997, 40.71279999999999],
     bbox: null,
@@ -321,7 +320,6 @@ export const useAppStore = create<AppState>()(
     // Processing state
     isProcessing: false,
     processingStatus: "",
-    processingProgress: null,
     
     // Geometry state
     geometryDataSets: {},
@@ -374,11 +372,27 @@ export const useAppStore = create<AppState>()(
         i === index ? { ...layer, enabled: !layer.enabled } : layer
       )
     })),
-    setLayerColor: (index, color) => set(state => ({
-      vtLayers: state.vtLayers.map((layer, i) =>
+    setLayerColor: (index, color) => set(state => {
+      const newVtLayers = state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, color } : layer
-      )
-    })),
+      );
+      
+      // Trigger live color update in 3D preview
+      const layer = state.vtLayers[index];
+      if (layer) {
+        const threeColor = new THREE.Color(color);
+        return {
+          vtLayers: newVtLayers,
+          layerColorUpdates: {
+            ...state.layerColorUpdates,
+            [layer.sourceLayer]: threeColor
+          },
+          colorOnlyUpdate: true
+        };
+      }
+      
+      return { vtLayers: newVtLayers };
+    }),
     setLayerExtrusionDepth: (index, depth) => set(state => ({
       vtLayers: state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, extrusionDepth: depth } : layer
@@ -389,11 +403,26 @@ export const useAppStore = create<AppState>()(
         i === index ? { ...layer, minExtrusionDepth: depth } : layer
       )
     })),
-    setLayerZOffset: (index, offset) => set(state => ({
-      vtLayers: state.vtLayers.map((layer, i) =>
+    setLayerZOffset: (index, offset) => set(state => {
+      const newVtLayers = state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, zOffset: offset } : layer
-      )
-    })),
+      );
+      
+      // Trigger live zOffset update in 3D preview
+      const layer = state.vtLayers[index];
+      if (layer) {
+        return {
+          vtLayers: newVtLayers,
+          layerColorUpdates: {
+            ...state.layerColorUpdates,
+            [`${layer.sourceLayer}_zOffset`]: offset
+          },
+          colorOnlyUpdate: true
+        };
+      }
+      
+      return { vtLayers: newVtLayers };
+    }),
     setLayerBufferSize: (index, size) => set(state => ({
       vtLayers: state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, bufferSize: size } : layer
@@ -409,11 +438,26 @@ export const useAppStore = create<AppState>()(
         i === index ? { ...layer, alignVerticesToTerrain: !layer.alignVerticesToTerrain } : layer
       )
     })),
-    setLayerHeightScaleFactor: (index, factor) => set(state => ({
-      vtLayers: state.vtLayers.map((layer, i) =>
+    setLayerHeightScaleFactor: (index, factor) => set(state => {
+      const newVtLayers = state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, heightScaleFactor: factor } : layer
-      )
-    })),
+      );
+      
+      // Trigger live height scale factor update in 3D preview
+      const layer = state.vtLayers[index];
+      if (layer) {
+        return {
+          vtLayers: newVtLayers,
+          layerColorUpdates: {
+            ...state.layerColorUpdates,
+            [`${layer.sourceLayer}_heightScaleFactor`]: factor
+          },
+          colorOnlyUpdate: true
+        };
+      }
+      
+      return { vtLayers: newVtLayers };
+    }),
     setLayerCsgClipping: (index, enabled) => set(state => ({
       vtLayers: state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, useCsgClipping: enabled } : layer
@@ -444,9 +488,29 @@ export const useAppStore = create<AppState>()(
     }),
     
     // Terrain actions
-    setTerrainSettings: (settings) => set(state => ({
-      terrainSettings: { ...state.terrainSettings, ...settings }
-    })),
+    setTerrainSettings: (settings) => set(state => {
+      const newTerrainSettings = { ...state.terrainSettings, ...settings };
+      const updates: Record<string, THREE.Color | number> = {};
+      
+      // Trigger live terrain color update in 3D preview
+      if (settings.color) {
+        updates.terrain = new THREE.Color(settings.color);
+      }
+      
+      // Trigger live terrain base height update in 3D preview
+      if (settings.baseHeight !== undefined) {
+        updates.terrainBaseHeight = settings.baseHeight;
+      }
+      
+      return {
+        terrainSettings: newTerrainSettings,
+        layerColorUpdates: {
+          ...state.layerColorUpdates,
+          ...updates
+        },
+        colorOnlyUpdate: Object.keys(updates).length > 0
+      };
+    }),
     setBuildingSettings: (settings) => set(state => ({
       buildingSettings: { ...state.buildingSettings, ...settings }
     })),
@@ -454,14 +518,13 @@ export const useAppStore = create<AppState>()(
     
     // Processing actions
     setIsProcessing: (processing) => set({ isProcessing: processing }),
-    updateProgress: (status, progress) => set({ 
-      processingStatus: status, 
-      processingProgress: progress ?? null 
+    updateProgress: (status) => set({ 
+      isProcessing: true, // Automatically set processing to true when progress is updated
+      processingStatus: status
     }),
     resetProcessing: () => set({ 
       isProcessing: false, 
-      processingStatus: "", 
-      processingProgress: null 
+      processingStatus: ""
     }),
     
     // Geometry actions
@@ -491,13 +554,13 @@ export const useAppStore = create<AppState>()(
     setMousePosition: (position) => set(state => ({
       hoverState: { ...state.hoverState, mousePosition: position }
     })),
-    clearHover: () => set(state => ({
+    clearHover: () => set({
       hoverState: { 
         hoveredMesh: null, 
         hoveredProperties: null, 
         mousePosition: null 
       }
-    })),
+    }),
     clearColorOnlyUpdate: () => set({ colorOnlyUpdate: false }),
     setCurrentSceneGetter: (getter) => set({ sceneGetter: getter }),
   }))

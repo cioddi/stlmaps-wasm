@@ -1,8 +1,8 @@
 import React from 'react';
 import { styled, keyframes } from '@mui/material/styles';
-import { Box, Typography, LinearProgress, Paper, useMediaQuery, useTheme } from '@mui/material';
+import { Box, Typography, Paper, useMediaQuery, useTheme } from '@mui/material';
 import CodeIcon from '@mui/icons-material/Code';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import { useAppStore } from '../stores/useAppStore';
 
 // Pulsating animation for the icon
 const pulse = keyframes`
@@ -30,28 +30,10 @@ const flowAnimation = keyframes`
   }
 `;
 
-// Define the processing steps that will be tracked
-interface ProcessingStep {
-  id: string;
-  label: string;
-  status: 'not-started' | 'in-progress' | 'completed';
-  order: number;
-}
-
-// Define the props for the ProcessingIndicator component
+// Define the props for the ProcessingIndicator component (now optional)
 interface ProcessingIndicatorProps {
-  // Show/hide the indicator
-  isVisible: boolean;
-  // Title to display at the top of the indicator
-  title: string;
-  // Current progress (0-100)
-  progress: number | null;
-  // Current status message to display
-  statusMessage: string | null;
-  // Array of steps to display
-  steps: ProcessingStep[];
-  // ID of the current active step
-  activeStepId: string | null;
+  // Optional title to display at the top of the indicator (defaults to "Processing 3D Model")
+  title?: string;
 }
 
 // Styled components
@@ -69,7 +51,7 @@ const ProcessingContainer = styled(Paper)(({ theme }) => ({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  width: '320px',
+  width: '280px',
   maxWidth: 'calc(100vw - 2rem)',
   boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
   overflow: 'hidden',
@@ -110,65 +92,36 @@ const IconContainer = styled(Box)(({ theme }) => ({
   }
 }));
 
-const StyledLinearProgress = styled(LinearProgress)(() => ({
-  width: '100%',
-  height: '6px',
-  marginTop: '12px',
-  borderRadius: '3px',
-  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  '& .MuiLinearProgress-bar': {
-    background: 'linear-gradient(90deg, #42a5f5, #64ffda)',
-  },
-}));
-
 const StatusText = styled(Typography)({
-  fontSize: '0.75rem',
-  opacity: 0.85,
-  marginTop: '4px',
-  fontFamily: 'monospace',
-  letterSpacing: '0.3px',
+  fontSize: '0.875rem',
+  opacity: 0.9,
+  marginTop: '8px',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  letterSpacing: '0.2px',
   width: '100%',
-  textAlign: 'left',
+  textAlign: 'center',
+  lineHeight: '1.4',
 });
 
-const ProcessingStepContainer = styled(Box)(() => ({
-  display: 'flex',
-  alignItems: 'center',
-  width: '100%',
-  marginTop: '2px',
-  padding: '2px 0',
-}));
-
-const StepIcon = styled(Box, {
-  shouldForwardProp: (prop) => prop !== 'status'
-})<{ status: ProcessingStep['status'] }>(({ status, theme }) => ({
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  marginRight: '8px',
-  color: status === 'completed' 
-    ? theme.palette.success.main 
-    : status === 'in-progress' 
-      ? theme.palette.info.main 
-      : 'rgba(100, 100, 100, 0.7)',
-}));
-
 const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
-  isVisible = false,
-  title = "Processing",
-  progress = null,
-  statusMessage = null,
-  steps = [],
-  activeStepId = null
+  title = "Processing 3D Model"
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  
+  // Get state from the app store
+  const { isProcessing, processingStatus } = useAppStore();
+
+  // Don't render if not processing
+  if (!isProcessing) {
+    return null;
+  }
 
   return (
     <ProcessingContainer
       elevation={8}
       sx={{
-        opacity: isVisible ? 1 : 0,
+        opacity: 1,
         pointerEvents: 'none'
       }}
     >
@@ -177,74 +130,16 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
         <IconContainer>
           <CodeIcon color="primary" fontSize={"small"} />
         </IconContainer>
-        <Typography variant={isMobile ? "body1" : "subtitle1"} fontWeight="600">
+        <Typography variant={isMobile ? "body2" : "subtitle2"} fontWeight="600">
           {title}
         </Typography>
       </Box>
       
-      <StyledLinearProgress 
-        variant={progress !== null ? "determinate" : "indeterminate"} 
-        value={progress !== null ? progress : undefined}
-      />
-      
-      <Box sx={{ width: '100%', mt: 2, mb: 1 }}>
-        {steps.map((step) => (
-          <ProcessingStepContainer key={step.id}>
-            <StepIcon status={step.status}>
-              {step.status === 'completed' ? (
-                <CheckCircleOutlineIcon color="inherit" fontSize="small" />
-              ) : step.status === 'in-progress' ? (
-                <Box 
-                  sx={{ 
-                    width: 18, 
-                    height: 18, 
-                    borderRadius: '50%', 
-                    border: '2px solid', 
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }} 
-                >
-                  <Box 
-                    sx={{ 
-                      width: 8, 
-                      height: 8, 
-                      borderRadius: '50%', 
-                      bgcolor: 'currentColor' 
-                    }} 
-                  />
-                </Box>
-              ) : (
-                <Box 
-                  sx={{ 
-                    width: 18, 
-                    height: 18, 
-                    borderRadius: '50%', 
-                    border: '2px solid', 
-                    opacity: 0.5 
-                  }} 
-                />
-              )}
-            </StepIcon>
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography 
-                variant="caption" 
-                sx={{ 
-                  fontWeight: step.id === activeStepId ? 600 : 400,
-                  opacity: step.status !== 'not-started' ? 1 : 0.5
-                }}
-              >
-                {step.label}
-              </Typography>
-              {step.id === activeStepId && statusMessage && (
-                <StatusText variant="caption">{" "}
-                  {statusMessage}
-                </StatusText>
-              )}
-            </Box>
-          </ProcessingStepContainer>
-        ))}
-      </Box>
+      {processingStatus && (
+        <StatusText variant="body2">
+          {processingStatus}
+        </StatusText>
+      )}
     </ProcessingContainer>
   );
 };

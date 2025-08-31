@@ -962,8 +962,10 @@ const ModelPreview = () => {
                 return; // Skip empty geometries
               }
               
-              // Create color for polygon
-              const baseColor = vtDataset.color || new THREE.Color(0x81ecec);
+              // Create color for polygon from current layer config (not stored geometry data)
+              const currentLayerConfig = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+              const layerColor = currentLayerConfig?.color || "#81ecec";
+              const baseColor = new THREE.Color(layerColor);
               
               // Always render as solid mesh
               const enhancedColor = new THREE.Color().copy(baseColor).convertSRGBToLinear();
@@ -995,14 +997,22 @@ const ModelPreview = () => {
               const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
               
               // Position mesh using the layer's configured zOffset value
-              const currentLayerConfig = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+              // (currentLayerConfig already retrieved above for color)
               const layerZOffset = currentLayerConfig?.zOffset || 0;
+              const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
+              
+              // Apply height scale factor to the mesh
+              polygonMesh.scale.z = layerHeightScaleFactor;
+              
+              // Position mesh using the layer's configured zOffset value
               polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
               console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh:`, {
                 terrainBaseHeight: terrainSettings.baseHeight,
                 layerZOffset: layerZOffset,
+                layerHeightScaleFactor: layerHeightScaleFactor,
                 finalPosition: polygonMesh.position.z,
-                calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}`
+                heightScale: polygonMesh.scale.z,
+                calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}, scale.z = ${layerHeightScaleFactor}`
               });
               polygonMesh.castShadow = renderingMode === 'quality';
               polygonMesh.receiveShadow = renderingMode === 'quality';

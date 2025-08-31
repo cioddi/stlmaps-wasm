@@ -54,9 +54,6 @@ const App: React.FC = () => {
     setOpenInfo,
     openTodoList,
     setOpenTodoList,
-    isProcessing,
-    processingStatus,
-    processingProgress,
   } = useAppStore();
   
   // Close sidebar by default on mobile devices
@@ -257,35 +254,7 @@ const App: React.FC = () => {
         }
       }}
     />
-    
-    {/* Clean Processing Indicator */}
-    {isProcessing && (
-      <Paper
-        elevation={6}
-        sx={{
-          position: 'fixed',
-          bottom: '16px',
-          right: '16px',
-          padding: '8px 16px',
-          borderRadius: '8px',
-          backgroundColor: 'rgba(30, 30, 30, 0.95)',
-          color: '#fff',
-          zIndex: 9999,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          minWidth: '250px',
-          maxWidth: '350px',
-        }}
-      >
-        <Typography variant="body2" sx={{ flexGrow: 1 }}>
-          {processingStatus || "Processing..."}
-        </Typography>
-        <Typography variant="body2" sx={{ fontWeight: 'bold', minWidth: '35px' }}>
-          {processingProgress !== null ? `${Math.round(processingProgress)}%` : "0%"}
-        </Typography>
-      </Paper>
-    )}
+
   </>
   );
 };

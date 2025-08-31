@@ -20,15 +20,6 @@ import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import CitySearch from "./CitySearch";
 import ExportButtons from "./ExportButtons";
 import ProcessingIndicator from "./ProcessingIndicator";
-import { useAppStore } from "../stores/useAppStore";
-
-// Define processing step type to match ProcessingIndicator
-interface ProcessingStep {
-  id: string;
-  label: string;
-  status: 'not-started' | 'in-progress' | 'completed';
-  order: number;
-}
 
 // View mode types
 export type ViewMode = "split" | "map" | "model";
@@ -59,55 +50,6 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
-  const { isProcessing, processingStatus, processingProgress, vtLayers } =
-    useAppStore();
-
-  // Create dynamic processing steps based on current progress
-  const getProcessingSteps = (): ProcessingStep[] => {
-    const steps: ProcessingStep[] = [];
-    
-    // Initial terrain/elevation processing (0-50% progress)
-    const terrainStatus = 
-      !processingProgress ? 'not-started' :
-      processingProgress < 50 ? 'in-progress' : 'completed';
-    
-    steps.push({
-      id: "terrain",
-      label: "Processing terrain and elevation data",
-      status: terrainStatus,
-      order: 0,
-    });
-    
-    // Vector processing step (50-90% progress)  
-    const vectorProcessingStatus = 
-      !processingProgress || processingProgress < 50 ? 'not-started' :
-      processingProgress < 90 ? 'in-progress' : 'completed';
-    
-    steps.push({
-      id: 'vector-processing',
-      label: 'Processing vector data',
-      status: vectorProcessingStatus,
-      order: 1,
-    });
-    
-    // Note: Removed finalization step to show only 2 main steps
-    
-    return steps;
-  };
-
-  // Determine active step based on current processing status
-  const getActiveStepId = (): string | null => {
-    if (!isProcessing || !processingProgress) return null;
-    
-    if (processingProgress < 50) return "terrain";
-    if (processingProgress < 90) {
-      // Find which layer is currently being processed
-      const layerIndex = Math.floor((processingProgress - 50) / (40 / vtLayers.length));
-      const clampedIndex = Math.min(layerIndex, vtLayers.length - 1);
-      return `layer-${vtLayers[clampedIndex]?.sourceLayer}`;
-    }
-    return "finalization";
-  };
 
   return (
     <AppBar
@@ -214,15 +156,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
         </Box>
 
-        {/* Processing Indicator - Always visible, positioned differently based on device */}
-        <ProcessingIndicator
-          isVisible={isProcessing}
-          title="Processing 3D Model"
-          progress={processingProgress}
-          statusMessage={processingStatus}
-          steps={getProcessingSteps()}
-          activeStepId={getActiveStepId()}
-        />
+        {/* Processing Indicator - Self-contained component */}
+        <ProcessingIndicator />
       </Toolbar>
     </AppBar>
   );

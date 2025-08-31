@@ -72,6 +72,7 @@ export const GenerateMeshButton = function () {
     geometryDataSets,
     setIsProcessing,
     updateProgress,
+    resetProcessing,
     configHashes,
     setConfigHashes,
     setProcessedTerrainData,
@@ -101,7 +102,7 @@ export const GenerateMeshButton = function () {
       console.warn("Error cancelling existing tasks:", err);
     }
 
-    updateProgress("Starting 3D model generation...", 0);
+    updateProgress("Processing...");
 
 
     // Generate configuration hashes for efficiency checks
@@ -166,12 +167,12 @@ export const GenerateMeshButton = function () {
 
 
       // Update processing status
-      updateProgress("Calculating tile coordinates...", 10);
+      // updateProgress("Calculating tile coordinates...");
 
       // Get tile coordinates
 
       // Update processing status
-      updateProgress("Processing elevation data...", 20);
+      // updateProgress("Processing elevation data...", 20);
 
       // Check for cancellation before processing elevation data
       cancellationToken.throwIfCancelled();
@@ -191,7 +192,7 @@ export const GenerateMeshButton = function () {
 
       // Use the WASM-based elevation processing with the bboxHash as bbox_key
 
-      updateProgress("Fetching elevation data...", 25);
+      // updateProgress("Fetching elevation data...");
       let elevationResult;
       try {
         // Pass the currentBboxHash as the bbox_key to store data in WASM
@@ -207,7 +208,7 @@ export const GenerateMeshButton = function () {
           gridLength: elevationResult.elevationGrid?.length || 0
         });
 
-        updateProgress("Processing elevation data...", 35);
+        // updateProgress("Processing elevation data...");
 
         // Store just the metadata for JavaScript-side operations, the actual grid
         // remains in WASM memory and is accessible via the bbox_key (currentBboxHash)
@@ -248,7 +249,7 @@ export const GenerateMeshButton = function () {
         currentTerrainHashHere !== configHashes.terrainHash;
 
       // Generate three.js geometry from elevation grid using WASM
-      updateProgress("Generating terrain mesh...", 40);
+      // updateProgress("Generating terrain mesh...");
 
       try {
         // Get the WASM module instance
@@ -354,7 +355,7 @@ export const GenerateMeshButton = function () {
       console.log("🏔️ Terrain processing complete, ready for layer alignment...");
       
       // Update progress after terrain/VT data is complete
-      updateProgress("Processing vector data...", 50);
+      // updateProgress("Processing vector data...");
 
       // Initialize or get existing polygon geometries
       const vtPolygonGeometries: VtDataSet[] = [];
@@ -386,7 +387,7 @@ export const GenerateMeshButton = function () {
         const currentLayer = vtLayers[i];
         const layerProgress = 50 + ((i + 1) * 40) / vtLayers.length;
         
-        updateProgress("Processing vector data...", Math.round(layerProgress));
+        // updateProgress("Processing vector data...");
 
         // Process all layers regardless of enabled state for 3D preview
         // (Disabled layers will be hidden in the 3D preview but geometry is still generated)
@@ -615,7 +616,7 @@ export const GenerateMeshButton = function () {
           });
 
           // Process geometries in web worker to avoid blocking main thread
-          updateProgress(`Processing geometries in worker...`, 0.1);
+          // updateProgress("Processing geometries in worker...");
           
           // Cancel any existing geometry processing tasks
           WorkerService.cancelActiveTasks('geometryProcessor');
@@ -787,7 +788,7 @@ export const GenerateMeshButton = function () {
             );
           }
 
-          updateProgress("Finalizing geometries...", 90);
+          // updateProgress("Finalizing geometries...");
           // Update the placeholder geometries with actual results
           results.forEach(({ layer, geometry, success }) => {
             if (success) {
@@ -827,14 +828,12 @@ export const GenerateMeshButton = function () {
 
       // Update the Zustand store with our geometries
       // Final step - updating 3D model
-      updateProgress("Updating 3D model...", 95);
+      // updateProgress("Updating 3D model...");
 
       setGeometryDataSets({
         terrainGeometry: terrainGeometry, // Always store terrain geometry, visibility controlled in 3D preview
         polygonGeometries: vtPolygonGeometries,
       });
-      setIsProcessing(false);
-
       // Store the hashes for future comparisons
       setConfigHashes({
         fullConfigHash: currentFullConfigHash,
@@ -842,8 +841,13 @@ export const GenerateMeshButton = function () {
         layerHashes: currentLayerHashes,
       });
 
-      // Update processing state to show completion
-      updateProgress("3D model generation complete!", 100);
+      // Show completion message briefly then hide popup
+      updateProgress("Complete!");
+      
+      // Hide progress popup after showing completion message briefly
+      setTimeout(() => {
+        resetProcessing();
+      }, 1500);
 
       console.log(
         "%c ✅ 3D model generation complete!",
@@ -870,11 +874,11 @@ export const GenerateMeshButton = function () {
       // Only show error in processing indicator for non-cancellation errors
       const displayErrorMessage =
         error instanceof Error ? error.message : "Failed to generate 3D model";
-      updateProgress(`Error: ${displayErrorMessage}`, 100);
+      updateProgress(`Error: ${displayErrorMessage}`);
 
       // Hide the indicator after showing the error
       setTimeout(() => {
-        setIsProcessing(false);
+        resetProcessing();
       }, 3000);
     }
   };
