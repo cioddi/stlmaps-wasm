@@ -555,7 +555,17 @@ export const GenerateMeshButton = function () {
           
           // Call the Rust implementation directly with cancellation support
           const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
-          const geometryDataArray = JSON.parse(geometryJson) as Array<{
+          
+          // Parse JSON asynchronously to avoid blocking
+          const parseJsonAsync = async (jsonString: string) => {
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                resolve(JSON.parse(jsonString));
+              }, 0);
+            });
+          };
+          
+          const geometryDataArray = await parseJsonAsync(geometryJson) as Array<{
             vertices: number[];
             normals: number[] | null;
             colors: number[] | null;
@@ -570,7 +580,7 @@ export const GenerateMeshButton = function () {
           // Convert each geometry and merge them into a single Three.js buffer geometry
           // Process in batches to avoid blocking the main thread
           const geometries: THREE.BufferGeometry[] = [];
-          const batchSize = 50; // Process 50 geometries per batch
+          const batchSize = 10; // Smaller batch size to prevent UI blocking
           
           for (let i = 0; i < geometryDataArray.length; i += batchSize) {
             const batch = geometryDataArray.slice(i, i + batchSize);
@@ -605,9 +615,9 @@ export const GenerateMeshButton = function () {
                 );
               }
               
-              // Add index attribute if available
+              // Add index attribute if available (avoid Array.from for better performance)
               if (geometryData.indices && geometryData.indices.length > 0) {
-                geometry.setIndex(Array.from(geometryData.indices));
+                geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(geometryData.indices), 1));
               }
 
               // Add properties to userData for hover interaction
@@ -617,9 +627,13 @@ export const GenerateMeshButton = function () {
                 };
               }
               
-              // Compute normals if not provided
+              // Defer expensive operations like normal computation
               if (!geometryData.normals) {
-                geometry.computeVertexNormals();
+                // Mark for later normal computation to avoid blocking
+                geometry.userData = {
+                  ...geometry.userData,
+                  needsNormals: true
+                };
               }
 
               geometries.push(geometry);
@@ -644,6 +658,25 @@ export const GenerateMeshButton = function () {
           }
 
           console.log(`Created ${geometries.length} individual Three.js geometries`);
+
+          // Compute normals for geometries that need them (non-blocking)
+          const computeNormalsAsync = async () => {
+            const geometriesNeedingNormals = geometries.filter(g => g.userData?.needsNormals);
+            console.log(`Computing normals for ${geometriesNeedingNormals.length} geometries`);
+            
+            for (let i = 0; i < geometriesNeedingNormals.length; i++) {
+              geometriesNeedingNormals[i].computeVertexNormals();
+              delete geometriesNeedingNormals[i].userData.needsNormals;
+              
+              // Yield every 5 normal computations
+              if (i % 5 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+              }
+            }
+          };
+          
+          // Start computing normals in background (don't await)
+          computeNormalsAsync().catch(console.error);
 
           // Create a container geometry that holds individual geometries as userData
           // This allows the system to expect a single geometry while preserving individual ones
