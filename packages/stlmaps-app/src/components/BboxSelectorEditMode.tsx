@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback, useState } from "react";
 import ReactDOM from "react-dom";
 import Moveable from "react-moveable";
 import { Map as MapType, Marker } from "maplibre-gl";
@@ -27,6 +27,7 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
   const targetRef = useRef<HTMLDivElement>(null);
   const moveableRef = useRef<Moveable>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     mapHook.map.map.setPitch(0);
@@ -87,31 +88,34 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
     maplibreMarker.addTo(mapHook.map.map);
     maplibreMarkerRef.current = maplibreMarker;
 
-    // More robust function to update dimensions with retry mechanism
-    const updateTargetDimensions = (retryCount = 0, maxRetries = 10) => {
-      // Only proceed if component is still mounted
-
-      if (targetRef.current) {
-        targetRef.current.style.width = _width + "px";
-        targetRef.current.style.height = _height + "px";
-        moveableRef.current?.updateRect();
-      } else if (retryCount < maxRetries) {
-        // Retry with exponential backoff (100ms, 200ms, 300ms, etc.)
-        setTimeout(
-          () => {
-            updateTargetDimensions(retryCount + 1, maxRetries);
-          },
-          100 + retryCount * 100
-        );
-      } else if (process.env.NODE_ENV !== "production") {
-        console.warn("Failed to initialize targetRef after maximum retries");
-      }
-    };
-    moveableRef.current?.updateRect();
-
-    // Start the update process
-    updateTargetDimensions();
+    // Direct, synchronous initialization - no fallbacks needed
+    setIsReady(true);
   }, [mapHook.map, bbox]);
+
+  // Handle target dimensions after render - only set initial dimensions
+  useEffect(() => {
+    if (isReady && targetRef.current && mapHook.map && !targetRef.current.style.width) {
+      // Calculate dimensions based on current bbox (only if not already set)
+      const coords = bbox.geometry.coordinates[0];
+      const [topLeftLng, topLeftLat] = coords[0];
+      const [topRightLng, topRightLat] = coords[1];
+      const [bottomLeftLng, bottomLeftLat] = coords[3];
+
+      const topLeftPixel = mapHook.map.map.project([topLeftLng, topLeftLat]);
+      const topRightPixel = mapHook.map.map.project([topRightLng, topRightLat]);
+      const bottomLeftPixel = mapHook.map.map.project([bottomLeftLng, bottomLeftLat]);
+
+      const width = Math.round(Math.abs(topRightPixel.x - topLeftPixel.x));
+      const height = Math.round(Math.abs(bottomLeftPixel.y - topLeftPixel.y));
+
+      // Apply dimensions directly (only once)
+      targetRef.current.style.width = width + "px";
+      targetRef.current.style.height = height + "px";
+      
+      // Update moveable after dimensions are set
+      moveableRef.current?.updateRect();
+    }
+  }, [isReady]);
 
   const updateBbox = useCallback(() => {
     if (!mapHook.map) return;
@@ -184,14 +188,15 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
   return ReactDOM.createPortal(
     <>
       <div className="target" ref={targetRef}></div>
-      <Moveable
-        // eslint-disable-next-line
-        // @ts-ignore:
-        ref={moveableRef}
-        target={targetRef}
-        container={null}
-        origin={true}
-        keepRatio={true}
+      {isReady && (
+        <Moveable
+          // eslint-disable-next-line
+          // @ts-ignore:
+          ref={moveableRef}
+          target={targetRef}
+          container={null}
+          origin={true}
+          keepRatio={true}
         /* draggable */
         draggable={true}
         onDragStart={(e) => {
@@ -247,7 +252,8 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
         rotatable={false}
         edge={true}
         controlPadding={20}
-      />
+        />
+      )}
     </>,
     containerRef.current
   );

@@ -9,6 +9,7 @@ import {
   hashTerrainConfig,
 } from "../utils/configHashing";
 import { WorkerService } from "../workers/WorkerService";
+import GeometryWorker from "../workers/geometryWorker?worker";
 import { tokenManager } from "../utils/CancellationToken";
 import { VtDataSet } from "../types/VtDataSet";
 // Import WASM functionality
@@ -576,107 +577,90 @@ export const GenerateMeshButton = function () {
           }>;
 
           console.log(`WASM returned ${geometryDataArray.length} individual geometries`);
-
-          // Convert each geometry and merge them into a single Three.js buffer geometry
-          // Process in batches to avoid blocking the main thread
-          const geometries: THREE.BufferGeometry[] = [];
-          const batchSize = 10; // Smaller batch size to prevent UI blocking
           
-          for (let i = 0; i < geometryDataArray.length; i += batchSize) {
-            const batch = geometryDataArray.slice(i, i + batchSize);
-            
-            // Process current batch
-            for (const geometryData of batch) {
-              if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
-                continue;
-              }
+          // Debug: Log details of returned geometries
+          geometryDataArray.forEach((geom, idx) => {
+            console.log(`Geometry ${idx}: hasData=${geom.hasData}, vertices=${geom.vertices?.length || 0}, indices=${geom.indices?.length || 0}`);
+          });
 
-              const geometry = new THREE.BufferGeometry();
-              
-              // Add position attribute (vertices)
+          // Process geometries in web worker to avoid blocking main thread
+          updateProgress(`Processing geometries in worker...`, 0.1);
+          
+          // Cancel any existing geometry processing tasks
+          WorkerService.cancelActiveTasks('geometryProcessor');
+          
+          const workerResult = await WorkerService.runWorkerTask(
+            'geometryProcessor',
+            GeometryWorker,
+            {
+              geometryDataArray,
+              layerName: currentLayer.sourceLayer
+            }
+          );
+          
+          // Check for cancellation after worker completes
+          if (cancellationToken.isCancelled) {
+            console.log("Geometry processing cancelled by user after worker completion");
+            return;
+          }
+          
+          // Convert worker results back to Three.js geometries on main thread
+          const geometries: THREE.BufferGeometry[] = [];
+          const processedGeometries = workerResult.geometries;
+          
+          console.log(`Worker returned ${processedGeometries.length} processed geometries`);
+          
+          for (const processedGeom of processedGeometries) {
+            if (!processedGeom.hasData || !processedGeom.vertices || processedGeom.vertices.length === 0) {
+              console.log(`Skipping empty geometry: hasData=${processedGeom.hasData}, vertices=${processedGeom.vertices?.length || 0}`);
+              continue;
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            
+            // Add position attribute (vertices)
+            geometry.setAttribute(
+              "position", 
+              new THREE.BufferAttribute(new Float32Array(processedGeom.vertices), 3)
+            );
+            
+            // Add normal attribute if available
+            if (processedGeom.normals && processedGeom.normals.length > 0) {
               geometry.setAttribute(
-                "position", 
-                new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
+                "normal",
+                new THREE.BufferAttribute(new Float32Array(processedGeom.normals), 3)
               );
-              
-              // Add normal attribute if available
-              if (geometryData.normals && geometryData.normals.length > 0) {
-                geometry.setAttribute(
-                  "normal",
-                  new THREE.BufferAttribute(new Float32Array(geometryData.normals), 3)
-                );
-              }
-              
-              // Add color attribute if available
-              if (geometryData.colors && geometryData.colors.length > 0) {
-                geometry.setAttribute(
-                  "color",
-                  new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
-                );
-              }
-              
-              // Add index attribute if available (avoid Array.from for better performance)
-              if (geometryData.indices && geometryData.indices.length > 0) {
-                geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(geometryData.indices), 1));
-              }
-
-              // Add properties to userData for hover interaction
-              if (geometryData.properties) {
-                geometry.userData = {
-                  properties: geometryData.properties
-                };
-              }
-              
-              // Defer expensive operations like normal computation
-              if (!geometryData.normals) {
-                // Mark for later normal computation to avoid blocking
-                geometry.userData = {
-                  ...geometry.userData,
-                  needsNormals: true
-                };
-              }
-
-              geometries.push(geometry);
             }
             
-            // Yield control to the event loop after each batch
-            if (i + batchSize < geometryDataArray.length) {
-              updateProcessingState({
-                status: `Processing geometries... (${Math.min(i + batchSize, geometryDataArray.length)}/${geometryDataArray.length})`,
-                progress: (i + batchSize) / geometryDataArray.length * 0.8 + 0.1 // 10-90% of progress
-              });
-              
-              // Yield to event loop
-              await new Promise(resolve => setTimeout(resolve, 0));
-              
-              // Check for cancellation
-              if (cancellationToken.isCancelled()) {
-                console.log("Geometry processing cancelled by user");
-                return;
-              }
+            // Add color attribute if available
+            if (processedGeom.colors && processedGeom.colors.length > 0) {
+              geometry.setAttribute(
+                "color",
+                new THREE.BufferAttribute(new Float32Array(processedGeom.colors), 3)
+              );
             }
+            
+            // Add index attribute if available
+            if (processedGeom.indices && processedGeom.indices.length > 0) {
+              geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(processedGeom.indices), 1));
+            }
+
+            // Add properties to userData for hover interaction
+            if (processedGeom.properties) {
+              geometry.userData = {
+                properties: processedGeom.properties
+              };
+            }
+            
+            // Compute normals if needed (minimal main thread work)
+            if (processedGeom.needsNormals) {
+              geometry.computeVertexNormals();
+            }
+
+            geometries.push(geometry);
           }
 
-          console.log(`Created ${geometries.length} individual Three.js geometries`);
-
-          // Compute normals for geometries that need them (non-blocking)
-          const computeNormalsAsync = async () => {
-            const geometriesNeedingNormals = geometries.filter(g => g.userData?.needsNormals);
-            console.log(`Computing normals for ${geometriesNeedingNormals.length} geometries`);
-            
-            for (let i = 0; i < geometriesNeedingNormals.length; i++) {
-              geometriesNeedingNormals[i].computeVertexNormals();
-              delete geometriesNeedingNormals[i].userData.needsNormals;
-              
-              // Yield every 5 normal computations
-              if (i % 5 === 0) {
-                await new Promise(resolve => setTimeout(resolve, 0));
-              }
-            }
-          };
-          
-          // Start computing normals in background (don't await)
-          computeNormalsAsync().catch(console.error);
+          console.log(`Created ${geometries.length} individual Three.js geometries from worker results`);
 
           // Create a container geometry that holds individual geometries as userData
           // This allows the system to expect a single geometry while preserving individual ones
