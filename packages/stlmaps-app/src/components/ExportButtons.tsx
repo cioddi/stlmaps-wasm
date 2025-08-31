@@ -15,7 +15,7 @@ import {
   useMediaQuery
 } from "@mui/material";
 import * as THREE from "three";
-import { useCombinedStore } from "../stores/useCombinedStore";
+import { useAppStore } from "../stores/useAppStore";
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
@@ -35,7 +35,7 @@ interface ExportFormat {
 
 const ExportButtons: React.FC = () => {
   // Get geometry data and scene directly from the Zustand store
-  const { geometryDataSets, vtLayers, terrainSettings, sceneGetter: getCurrentScene } = useCombinedStore();
+  const { geometryDataSets, vtLayers, terrainSettings, sceneGetter: getCurrentScene } = useAppStore();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   

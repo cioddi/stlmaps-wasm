@@ -1,14 +1,13 @@
 import React, { useMemo } from "react";
 import { MlVectorTileLayer } from "@mapcomponents/react-maplibre";
-import useLayerStore from "../stores/useLayerStore";
+import { useAppStore } from "../stores/useAppStore";
 
 interface DynamicVectorLayersProps {
   mapId?: string;
 }
 
 const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() => {
-    const vtLayers = useLayerStore((state) => state.vtLayers);
-    const terrainSettings = useLayerStore((state) => state.terrainSettings);
+    const { vtLayers, terrainSettings } = useAppStore();
 
     // Create a stable dependency array
     const layerDeps = useMemo(
@@ -16,7 +15,7 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
         vtLayers.map((layer) => ({
           sourceLayer: layer.sourceLayer,
           enabled: layer.enabled,
-          colorHex: layer.color?.getHexString(),
+          colorHex: layer.color, // Color is already a hex string in the unified store
           filter: JSON.stringify(layer.filter), // Stringify filter for stable comparison
         })),
       [vtLayers]
@@ -42,10 +41,8 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
       }
 
       for (const layerDep of layerDeps) {
-        // Use cached hex color from layerDeps
-        const hexColor = layerDep.colorHex
-          ? `#${layerDep.colorHex}`
-          : "#ff0000";
+        // Use cached hex color from layerDeps (already includes # prefix)
+        const hexColor = layerDep.colorHex || "#ff0000";
         const filter = layerDep.filter
           ? JSON.parse(layerDep.filter)
           : undefined;

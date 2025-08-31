@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   CssBaseline,
   Box,
@@ -10,7 +10,7 @@ import {
   Paper,
   Typography,
 } from "@mui/material";
-import useLayerStore from "./stores/useLayerStore";
+import { useAppStore } from "./stores/useAppStore";
 import { Sidebar } from "./components/Sidebar";
 import AttributionDialog from "./components/AttributionDialog";
 import InfoDialog from "./components/InfoDialog";
@@ -31,24 +31,38 @@ const SIDEBAR_WIDTH = 340;
 const App: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [bboxCenter, setBboxCenter] = useState<[number, number]>([
-    -74.00599999999997, 40.71279999999999,
-  ]);
-  const [openAttribution, setOpenAttribution] = useState(false);
-  const [openInfo, setOpenInfo] = useState(false);
-  const [openTodoList, setOpenTodoList] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
   const bboxSelectorRef = useRef<{ updateBbox: () => void } | null>(null);
   
   // Use the WebAssembly hook
   const { isInitialized, error } = useWasm();
   
+  // Get all state from unified Zustand store
+  const {
+    bboxCenter,
+    setBboxCenter,
+    bbox,
+    setBbox,
+    viewMode,
+    setViewMode,
+    sidebarOpen,
+    setSidebarOpen,
+    menuOpen,
+    setMenuOpen,
+    openAttribution,
+    setOpenAttribution,
+    openInfo,
+    setOpenInfo,
+    openTodoList,
+    setOpenTodoList,
+    isProcessing,
+    processingStatus,
+    processingProgress,
+  } = useAppStore();
+  
   // Close sidebar by default on mobile devices
   useEffect(() => {
     setSidebarOpen(!isMobile);
-  }, [isMobile]);
+  }, [isMobile, setSidebarOpen]);
 
   // Use the Rust functions when WASM is initialized
   useEffect(() => {
@@ -64,26 +78,30 @@ const App: React.FC = () => {
     }
   }, [error]);
 
-  // Get layer settings and geometries from Zustand store
-  const {
-    setBbox,
-    isProcessing,
-    processingStatus,
-    processingProgress,
-  } = useLayerStore();
 
-
-  // Handle city selection to update both center and bbox
+  // Handle city selection to update both center and bbox  
   const handleCitySelect = (city: { coordinates: [number, number] } | null) => {
     if (city) {
+      console.log("🏙️ City selected:", city);
+      
+      // Clear any existing bbox first to ensure React detects the change
+      setBbox(null);
       setBboxCenter(city.coordinates);
       
-      // Add a small delay to ensure state is updated before triggering bbox update
+      // Wait for map animation to complete, then update bbox
       setTimeout(() => {
         if (bboxSelectorRef.current) {
-          bboxSelectorRef.current.updateBbox();
+          console.log("🔄 Updating bbox after city jump...");
+          try {
+            bboxSelectorRef.current.updateBbox();
+            console.log("✅ Bbox updated - should trigger automatic geometry processing");
+          } catch (error) {
+            console.error("❌ Failed to update bbox after city jump:", error);
+          }
+        } else {
+          console.warn("⚠️ BboxSelector ref not available for updateBbox");
         }
-      }, 100);
+      }, 500);
     }
   };
   
@@ -113,8 +131,8 @@ const App: React.FC = () => {
         onOpenAttribution={() => setOpenAttribution(true)}
         onOpenInfo={() => setOpenInfo(true)}
         onOpenTodoList={() => setOpenTodoList(true)}
-        onSidebarToggle={() => setSidebarOpen(curr => !curr)}
-        onMenuToggle={() => setMenuOpen(curr => !curr)}
+        onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
+        onMenuToggle={() => setMenuOpen(!menuOpen)}
         onCitySelect={handleCitySelect}
       />
 
@@ -199,8 +217,44 @@ const App: React.FC = () => {
         height: 200,
       }}
       onChange={(geojson) => {
-        console.log("BboxSelector onChange triggered with:", geojson);
-        setBbox(geojson);
+        console.log("🔄 BboxSelector onChange triggered");
+        console.log("📦 New bbox geojson:", geojson);
+        
+        // Validate bbox geometry before setting
+        if (geojson && geojson.geometry && geojson.geometry.coordinates) {
+          const coords = geojson.geometry.coordinates[0];
+          if (coords && coords.length >= 5) {
+            const [topLeftLng, topLeftLat] = coords[0];
+            const [topRightLng, topRightLat] = coords[1];
+            const [bottomRightLng, bottomRightLat] = coords[2];
+            const [bottomLeftLng, bottomLeftLat] = coords[3];
+            
+            console.log("🗺️ Bbox bounds:", {
+              topLeft: [topLeftLng, topLeftLat],
+              topRight: [topRightLng, topRightLat], 
+              bottomRight: [bottomRightLng, bottomRightLat],
+              bottomLeft: [bottomLeftLng, bottomLeftLat],
+              width: Math.abs(topRightLng - topLeftLng),
+              height: Math.abs(topLeftLat - bottomLeftLat)
+            });
+            
+            // Check for invalid coordinates
+            const allCoords = [topLeftLng, topLeftLat, topRightLng, topRightLat, bottomRightLng, bottomRightLat, bottomLeftLng, bottomLeftLat];
+            const hasInvalidCoords = allCoords.some(coord => !Number.isFinite(coord));
+            
+            if (hasInvalidCoords) {
+              console.error("❌ Invalid bbox coordinates detected!", allCoords);
+              return;
+            }
+            
+            setBbox(geojson);
+            console.log("✅ Bbox updated successfully");
+          } else {
+            console.error("❌ Invalid bbox geometry - insufficient coordinates:", coords);
+          }
+        } else {
+          console.error("❌ Invalid bbox geojson structure:", geojson);
+        }
       }}
     />
     

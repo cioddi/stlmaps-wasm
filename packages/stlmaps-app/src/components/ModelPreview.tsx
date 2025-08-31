@@ -13,7 +13,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
 // @ts-expect-error - Three.js types don't include postprocessing
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { useCombinedStore } from "../stores/useCombinedStore";
+import { useAppStore } from "../stores/useAppStore";
 import HoverTooltip from "./HoverTooltip";
 
 
@@ -272,13 +272,21 @@ const ModelPreview = () => {
     renderingSettings, 
     colorOnlyUpdate,
     layerColorUpdates,
-    setRenderingMode,
+    setRenderingSettings,
     setHoveredMesh,
     setMousePosition,
     clearHover,
     clearColorOnlyUpdate,
-    setCurrentSceneGetter
-  } = useCombinedStore();
+    setSceneGetter
+  } = useAppStore();
+  
+  const setRenderingMode = (mode: 'quality' | 'performance') => {
+    setRenderingSettings({ mode });
+  };
+  
+  const setCurrentSceneGetter = (getter: (() => THREE.Scene | null) | null) => {
+    setSceneGetter(getter);
+  };
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);

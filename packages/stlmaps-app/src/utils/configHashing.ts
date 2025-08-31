@@ -1,5 +1,5 @@
-import { VtDataSet } from "../components/GenerateMeshButton";
-import { TerrainSettings } from "../stores/useLayerStore";
+import { VtDataSet } from "../types/VtDataSet";
+import { TerrainSettings } from "../stores/useAppStore";
 
 /**
  * Creates a hash representation of terrain settings for geometry generation

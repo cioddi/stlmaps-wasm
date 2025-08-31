@@ -9,13 +9,17 @@ import {
   FormLabel,
   Paper
 } from '@mui/material';
-import { useCombinedStore } from '../stores/useCombinedStore';
+import { useAppStore } from '../stores/useAppStore';
 
 /**
  * Component that provides controls for adjusting the rendering quality/performance mode
  */
 const RenderingControls: React.FC = () => {
-  const { renderingSettings, setRenderingMode } = useCombinedStore();
+  const { renderingSettings, setRenderingSettings } = useAppStore();
+  
+  const setRenderingMode = (mode: 'quality' | 'performance') => {
+    setRenderingSettings({ mode });
+  };
   
   const handleModeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setRenderingMode(event.target.value as 'quality' | 'performance');

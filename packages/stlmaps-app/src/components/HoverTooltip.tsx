@@ -1,9 +1,9 @@
 import React from 'react';
 import { Paper, Typography, Box } from '@mui/material';
-import useLayerStore from '../stores/useLayerStore';
+import { useAppStore } from '../stores/useAppStore';
 
 const HoverTooltip: React.FC = () => {
-  const { hoverState } = useLayerStore();
+  const { hoverState } = useAppStore();
 
   if (!hoverState.hoveredMesh || !hoverState.hoveredProperties || !hoverState.mousePosition) {
     return null;

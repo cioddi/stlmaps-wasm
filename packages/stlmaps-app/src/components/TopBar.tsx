@@ -20,7 +20,7 @@ import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import CitySearch from "./CitySearch";
 import ExportButtons from "./ExportButtons";
 import ProcessingIndicator from "./ProcessingIndicator";
-import useLayerStore from "../stores/useLayerStore";
+import { useAppStore } from "../stores/useAppStore";
 
 // Define processing step type to match ProcessingIndicator
 interface ProcessingStep {
@@ -60,7 +60,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { isProcessing, processingStatus, processingProgress, vtLayers } =
-    useLayerStore();
+    useAppStore();
 
   // Create dynamic processing steps based on current progress
   const getProcessingSteps = (): ProcessingStep[] => {

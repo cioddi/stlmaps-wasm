@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { useCombinedStore } from "../stores/useCombinedStore";
+import { useAppStore } from "../stores/useAppStore";
 import {
   createComponentHashes,
   createConfigHash,
@@ -75,7 +75,7 @@ export const GenerateMeshButton = function () {
     configHashes,
     setConfigHashes,
     setProcessedTerrainData,
-  } = useCombinedStore();
+  } = useAppStore();
 
   // Modify generate3DModel function to include buildings
   const generate3DModel = async (): Promise<void> => {

@@ -24,8 +24,8 @@ import ForestIcon from '@mui/icons-material/Forest';
 import DirectionsIcon from '@mui/icons-material/Directions';
 import LayersIcon from '@mui/icons-material/Layers';
 import FormatColorFillIcon from '@mui/icons-material/FormatColorFill';
-import * as THREE from 'three';
-import { useCombinedStore } from '../stores/useCombinedStore';
+// THREE import no longer needed since colors are now strings
+import { useAppStore } from '../stores/useAppStore';
 
 // No props needed anymore as we'll use the Zustand store
 
@@ -62,12 +62,7 @@ const ColorCircle = styled(Box)<{ bgcolor: string }>(({ bgcolor }) => ({
 }));
 
 
-function rgbToHex(color: THREE.Color) {
-  return '#' + 
-    Math.floor(color.r * 255).toString(16).padStart(2, '0') +
-    Math.floor(color.g * 255).toString(16).padStart(2, '0') +
-    Math.floor(color.b * 255).toString(16).padStart(2, '0');
-}
+// Color is now stored as string in unified store, no conversion needed
 
 const LayerList: React.FC = () => {
   // Get state and actions from the Zustand store
@@ -84,7 +79,7 @@ const LayerList: React.FC = () => {
     toggleLayerAlignVerticesToTerrain,
     setLayerHeightScaleFactor,
     setTerrainSettings,
-  } = useCombinedStore();
+  } = useAppStore();
 
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({
     terrain: false,
@@ -276,16 +271,16 @@ const LayerList: React.FC = () => {
             <Collapse in={isExpanded} timeout="auto" unmountOnExit>
               <Box sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <FormatColorFillIcon sx={{ mr: 1, color: rgbToHex(layer.color) }} />
+                  <FormatColorFillIcon sx={{ mr: 1, color: layer.color }} />
                   <TextField
                     label="Color"
                     type="color"
-                    value={rgbToHex(layer.color)}
+                    value={layer.color}
                     onChange={(e) => handleLayerColorChange(index, e.target.value)}
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
-                          <ColorCircle bgcolor={rgbToHex(layer.color)} />
+                          <ColorCircle bgcolor={layer.color} />
                         </InputAdornment>
                       ),
                     }}
