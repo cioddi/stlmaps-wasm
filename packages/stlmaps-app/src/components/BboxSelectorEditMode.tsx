@@ -86,7 +86,6 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
     maplibreMarker.setLngLat(topLeftLngLat);
     maplibreMarker.addTo(mapHook.map.map);
     maplibreMarkerRef.current = maplibreMarker;
-    setMarker(maplibreMarker);
 
     // More robust function to update dimensions with retry mechanism
     const updateTargetDimensions = (retryCount = 0, maxRetries = 10) => {

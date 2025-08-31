@@ -530,14 +530,18 @@ export const GenerateMeshButton = function () {
             processedMaxElevation
           });
           
+          // Ensure elevation values are valid numbers (not Infinity or -Infinity)
+          const safeMinElevation = Number.isFinite(originalMinElevation) ? originalMinElevation : elevationResult.minElevation;
+          const safeMaxElevation = Number.isFinite(originalMaxElevation) ? originalMaxElevation : elevationResult.maxElevation;
+          
           const polygonGeometryInput = {
             terrainBaseHeight: terrainSettings.baseHeight,
             verticalExaggeration: terrainSettings.verticalExaggeration,
             bbox: [minLng, minLat, maxLng, maxLat],
             elevationGrid: processedElevationGrid,
             gridSize,
-            minElevation: originalMinElevation ?? elevationResult.minElevation,
-            maxElevation: originalMaxElevation ?? elevationResult.maxElevation,
+            minElevation: safeMinElevation,
+            maxElevation: safeMaxElevation,
             vtDataSet: convertToRustVtDataSet(currentLayer), // Convert to format compatible with Rust
             useSameZOffset: true,
             bbox_key: currentBboxHash, // Pass the bbox key to access cached features
