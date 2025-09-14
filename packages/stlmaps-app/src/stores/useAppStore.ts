@@ -211,7 +211,7 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#74e010", // Green color for landcover
     bufferSize: 2,
-    extrusionDepth: 1, // Thin extrusion for landcover
+    extrusionDepth: 1.2, // Thin extrusion for landcover
     zOffset: -0.3,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
@@ -237,7 +237,7 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#989898", // Gray color for streets
     bufferSize: 2,
-    extrusionDepth: 1.4,
+    extrusionDepth: 1.6,
     zOffset: -0.2,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
@@ -263,7 +263,7 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#76bcff", // Lighter blue color for water
     bufferSize: 0,
-    extrusionDepth: 1.2, // Thin extrusion for water
+    extrusionDepth: 1.4, // Thin extrusion for water
     zOffset: 0.2,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
