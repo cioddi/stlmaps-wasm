@@ -35,87 +35,89 @@ pub struct TerrainGeometryResult {
 fn generate_terrain_indices(indices: &mut Vec<u32>, width: usize, height: usize) {
     // Each vertex position has 2 vertices: top (even index) and bottom (odd index)
     // Vertex at (x,y) has top vertex at index (y*width+x)*2 and bottom at (y*width+x)*2+1
-    
-    // Generate top surface triangles
+
+    // Generate top surface triangles (counter-clockwise winding for upward normals)
     for y in 0..(height - 1) {
         for x in 0..(width - 1) {
             let top_left = ((y * width + x) * 2) as u32;
             let top_right = ((y * width + x + 1) * 2) as u32;
             let bottom_left = (((y + 1) * width + x) * 2) as u32;
             let bottom_right = (((y + 1) * width + x + 1) * 2) as u32;
-            
-            // Triangle 1: top-left, bottom-left, bottom-right
+
+            // Triangle 1: counter-clockwise for outward normal
             indices.extend_from_slice(&[top_left, bottom_left, bottom_right]);
-            // Triangle 2: top-left, bottom-right, top-right
+            // Triangle 2: counter-clockwise for outward normal
             indices.extend_from_slice(&[top_left, bottom_right, top_right]);
         }
     }
-    
-    // Generate bottom surface triangles (reversed winding for proper normals)
+
+    // Generate bottom surface triangles (clockwise winding for downward-facing normals)
     for y in 0..(height - 1) {
         for x in 0..(width - 1) {
             let top_left = ((y * width + x) * 2 + 1) as u32; // bottom vertex
             let top_right = ((y * width + x + 1) * 2 + 1) as u32; // bottom vertex
             let bottom_left = (((y + 1) * width + x) * 2 + 1) as u32; // bottom vertex
             let bottom_right = (((y + 1) * width + x + 1) * 2 + 1) as u32; // bottom vertex
-            
-            // Triangle 1: reversed winding for downward-facing normals
-            indices.extend_from_slice(&[top_left, bottom_right, bottom_left]);
-            // Triangle 2: reversed winding for downward-facing normals
-            indices.extend_from_slice(&[top_left, top_right, bottom_right]);
+
+            // Triangle 1: clockwise winding for downward-facing normals
+            indices.extend_from_slice(&[top_left, bottom_left, bottom_right]);
+            // Triangle 2: clockwise winding for downward-facing normals
+            indices.extend_from_slice(&[top_left, bottom_right, top_right]);
         }
     }
-    
+
     // Generate side wall triangles
     generate_terrain_side_walls(indices, width, height);
 }
 
 // Generate side wall triangles for the terrain box
 fn generate_terrain_side_walls(indices: &mut Vec<u32>, width: usize, height: usize) {
-    // Left and right walls
+    // Left wall (x = 0) - flip winding for outward-facing normals
     for y in 0..(height - 1) {
-        // Left wall (x = 0)
-        let top_top = ((y * width) * 2) as u32; // top vertex of current row
-        let top_bottom = ((y * width) * 2 + 1) as u32; // bottom vertex of current row
-        let next_top = (((y + 1) * width) * 2) as u32; // top vertex of next row
-        let next_bottom = (((y + 1) * width) * 2 + 1) as u32; // bottom vertex of next row
-        
-        // Left wall triangles
-        indices.extend_from_slice(&[top_top, next_bottom, top_bottom]);
-        indices.extend_from_slice(&[top_top, next_top, next_bottom]);
-        
-        // Right wall (x = width - 1)
-        let right_top_top = ((y * width + width - 1) * 2) as u32;
-        let right_top_bottom = ((y * width + width - 1) * 2 + 1) as u32;
-        let right_next_top = (((y + 1) * width + width - 1) * 2) as u32;
-        let right_next_bottom = (((y + 1) * width + width - 1) * 2 + 1) as u32;
-        
-        // Right wall triangles (reversed winding for outward normals)
-        indices.extend_from_slice(&[right_top_top, right_top_bottom, right_next_bottom]);
-        indices.extend_from_slice(&[right_top_top, right_next_bottom, right_next_top]);
+        let curr_top = ((y * width) * 2) as u32;
+        let curr_bottom = ((y * width) * 2 + 1) as u32;
+        let next_top = (((y + 1) * width) * 2) as u32;
+        let next_bottom = (((y + 1) * width) * 2 + 1) as u32;
+
+        // Flipped winding for outward normal
+        indices.extend_from_slice(&[curr_top, next_bottom, curr_bottom]);
+        indices.extend_from_slice(&[curr_top, next_top, next_bottom]);
     }
-    
-    // Top and bottom walls
+
+    // Right wall (x = width - 1) - flip winding for outward-facing normals
+    for y in 0..(height - 1) {
+        let curr_top = ((y * width + width - 1) * 2) as u32;
+        let curr_bottom = ((y * width + width - 1) * 2 + 1) as u32;
+        let next_top = (((y + 1) * width + width - 1) * 2) as u32;
+        let next_bottom = (((y + 1) * width + width - 1) * 2 + 1) as u32;
+
+        // Flipped winding for outward normal
+        indices.extend_from_slice(&[curr_top, curr_bottom, next_bottom]);
+        indices.extend_from_slice(&[curr_top, next_bottom, next_top]);
+    }
+
+    // Front wall (y = 0) - flip winding for outward-facing normals
     for x in 0..(width - 1) {
-        // Top wall (y = 0)
-        let top_top = (x * 2) as u32;
-        let top_bottom = (x * 2 + 1) as u32;
+        let curr_top = (x * 2) as u32;
+        let curr_bottom = (x * 2 + 1) as u32;
         let next_top = ((x + 1) * 2) as u32;
         let next_bottom = ((x + 1) * 2 + 1) as u32;
-        
-        // Top wall triangles (reversed winding for outward normals)
-        indices.extend_from_slice(&[top_top, top_bottom, next_bottom]);
-        indices.extend_from_slice(&[top_top, next_bottom, next_top]);
-        
-        // Bottom wall (y = height - 1)
-        let bottom_top_top = (((height - 1) * width + x) * 2) as u32;
-        let bottom_top_bottom = (((height - 1) * width + x) * 2 + 1) as u32;
-        let bottom_next_top = (((height - 1) * width + x + 1) * 2) as u32;
-        let bottom_next_bottom = (((height - 1) * width + x + 1) * 2 + 1) as u32;
-        
-        // Bottom wall triangles
-        indices.extend_from_slice(&[bottom_top_top, bottom_next_bottom, bottom_top_bottom]);
-        indices.extend_from_slice(&[bottom_top_top, bottom_next_top, bottom_next_bottom]);
+
+        // Flipped winding for outward normal
+        indices.extend_from_slice(&[curr_top, curr_bottom, next_bottom]);
+        indices.extend_from_slice(&[curr_top, next_bottom, next_top]);
+    }
+
+    // Back wall (y = height - 1) - flip winding for outward-facing normals
+    for x in 0..(width - 1) {
+        let curr_top = (((height - 1) * width + x) * 2) as u32;
+        let curr_bottom = (((height - 1) * width + x) * 2 + 1) as u32;
+        let next_top = (((height - 1) * width + x + 1) * 2) as u32;
+        let next_bottom = (((height - 1) * width + x + 1) * 2 + 1) as u32;
+
+        // Flipped winding for outward normal
+        indices.extend_from_slice(&[curr_top, next_bottom, curr_bottom]);
+        indices.extend_from_slice(&[curr_top, next_top, next_bottom]);
     }
 }
 
@@ -124,7 +126,7 @@ fn generate_terrain_side_walls(indices: &mut Vec<u32>, width: usize, height: usi
 fn generate_terrain_normals(normals: &mut Vec<f32>, positions: &[f32], width: usize, height: usize) {
     let vertex_count = width * height * 2; // top and bottom vertices
     normals.reserve(vertex_count * 3);
-    
+
     // Generate normals for all vertices (top and bottom)
     for y in 0..height {
         for x in 0..width {
@@ -134,10 +136,10 @@ fn generate_terrain_normals(normals: &mut Vec<f32>, positions: &[f32], width: us
             } else {
                 [0.0, 0.0, 1.0] // Default up-facing normal for edge vertices
             };
-            
-            // Calculate normal for bottom surface vertex
+
+            // Calculate normal for bottom surface vertex (always pointing down)
             let bottom_normal = [0.0, 0.0, -1.0]; // Always down-facing for bottom
-            
+
             // Add normals for top and bottom vertices
             normals.extend_from_slice(&top_normal);
             normals.extend_from_slice(&bottom_normal);
@@ -163,11 +165,11 @@ fn calculate_terrain_vertex_normal(positions: &[f32], x: usize, y: usize, width:
     let edge_right = [vr[0] - v[0], vr[1] - v[1], vr[2] - v[2]];
     let edge_down = [vd[0] - v[0], vd[1] - v[1], vd[2] - v[2]];
     
-    // Calculate cross product (normal)
+    // Calculate cross product (normal) - using edge_down × edge_right for correct orientation
     let normal = [
-        edge_right[1] * edge_down[2] - edge_right[2] * edge_down[1],
-        edge_right[2] * edge_down[0] - edge_right[0] * edge_down[2],
-        edge_right[0] * edge_down[1] - edge_right[1] * edge_down[0],
+        edge_down[1] * edge_right[2] - edge_down[2] * edge_right[1],
+        edge_down[2] * edge_right[0] - edge_down[0] * edge_right[2],
+        edge_down[0] * edge_right[1] - edge_down[1] * edge_right[0],
     ];
     
     // Normalize
