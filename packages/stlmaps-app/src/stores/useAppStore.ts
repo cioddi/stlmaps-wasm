@@ -235,6 +235,24 @@ const defaultLayers: VtDataSet[] = [
   {
     sourceLayer: "transportation",
     enabled: true,
+    color: "#ffefda", // Gray color for streets
+    bufferSize: 1.5,
+    extrusionDepth: 1.6,
+    zOffset: -0.2,
+    heightScaleFactor: 1,
+    useAdaptiveScaleFactor: false,
+    alignVerticesToTerrain: true,
+    useCsgClipping: false,
+    order: 4,
+    filter: [
+      "in",
+      "subclass",
+      "footway"
+    ]
+  },
+  {
+    sourceLayer: "transportation",
+    enabled: true,
     color: "#989898", // Gray color for streets
     bufferSize: 2,
     extrusionDepth: 1.6,

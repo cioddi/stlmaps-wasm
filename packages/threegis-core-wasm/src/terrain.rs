@@ -508,17 +508,32 @@ fn generate_terrain_mesh(
             
             // Get elevation data and apply vertical exaggeration with proper scaling
             let elevation = elevation_data.elevation_grid[y][x];
-            let normalized_elevation = (elevation - elevation_data.min_elevation) / elevation_range;
-            
+
+            // Handle invalid elevation data by using terrain base height as fallback
+            let safe_elevation = if elevation.is_finite() {
+                elevation
+            } else {
+                terrain_base_height
+            };
+
+            let normalized_elevation = (safe_elevation - elevation_data.min_elevation) / elevation_range;
+
             // Scale the elevation properly: terrain extends from 0 to terrain_base_height + elevation variation
             // The terrain base height defines the base terrain box height (no magic numbers)
             let elevation_variation = normalized_elevation * vertical_exaggeration; // Direct application of user setting
             let top_z = terrain_base_height_f32 + elevation_variation as f32;
-            
+
             // Track processed elevation
-            row_elevation.push(elevation);
-            processed_min_elevation = processed_min_elevation.min(terrain_base_height);
-            processed_max_elevation = processed_max_elevation.max(top_z as f64);
+            row_elevation.push(safe_elevation);
+
+            // Update min/max with actual processed terrain heights
+            let bottom_z = terrain_base_height; // Bottom of terrain box
+            processed_min_elevation = processed_min_elevation.min(bottom_z);
+
+            // Ensure top_z is finite before using it
+            if (top_z as f64).is_finite() {
+                processed_max_elevation = processed_max_elevation.max(top_z as f64);
+            }
             
             // Top surface vertex (DEM-based height)
             positions.push(mesh_x);
@@ -548,7 +563,15 @@ fn generate_terrain_mesh(
     // Generate optimized triangle indices and normals
     generate_terrain_indices(&mut indices, width, height);
     generate_terrain_normals(&mut normals, &positions, width, height);
-    
+
+    // Ensure processed min/max elevation values are valid - use terrain_base_height as fallback
+    if !processed_min_elevation.is_finite() || processed_min_elevation == f64::INFINITY {
+        processed_min_elevation = terrain_base_height;
+    }
+    if !processed_max_elevation.is_finite() || processed_max_elevation == f64::NEG_INFINITY {
+        processed_max_elevation = terrain_base_height;
+    }
+
     // Return the result
     TerrainGeometryResult {
         positions,
@@ -591,9 +614,13 @@ fn convert_terrain_geometry_to_js(result: TerrainGeometryResult) -> Result<JsVal
     let processed_grid = serde_wasm_bindgen::to_value(&result.processed_elevation_grid)?;
     js_sys::Reflect::set(&js_obj, &JsValue::from_str("processedElevationGrid"), &processed_grid)?;
     
-    // Set min/max elevation values
+    // Set processed min/max elevation values
     js_sys::Reflect::set(&js_obj, &JsValue::from_str("processedMinElevation"), &JsValue::from_f64(result.processed_min_elevation))?;
     js_sys::Reflect::set(&js_obj, &JsValue::from_str("processedMaxElevation"), &JsValue::from_f64(result.processed_max_elevation))?;
-    
+
+    // Set original min/max elevation values
+    js_sys::Reflect::set(&js_obj, &JsValue::from_str("originalMinElevation"), &JsValue::from_f64(result.original_min_elevation))?;
+    js_sys::Reflect::set(&js_obj, &JsValue::from_str("originalMaxElevation"), &JsValue::from_f64(result.original_max_elevation))?;
+
     Ok(js_obj.into())
 }

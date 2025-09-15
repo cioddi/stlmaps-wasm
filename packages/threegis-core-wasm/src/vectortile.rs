@@ -795,18 +795,35 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             processed_features += 1;
 
             // --- Height Extraction ---
+            // Check hide_3d property first - skip buildings marked as hidden
+            if let Some(hide_3d) = feature.properties.get("hide_3d") {
+                if hide_3d.as_bool().unwrap_or(false) {
+                    continue; // Skip this building entirely
+                }
+            }
+
+            // Extract height, treating render_height=5 as "no height data"
             let height = feature
                 .properties
                 .get("height")
                 .and_then(|v| v.as_f64())
+                .filter(|&h| h > 0.0) // Only use positive heights
                 .or_else(|| {
+                    // Check render_height but ignore the default value of 5
                     feature
                         .properties
                         .get("render_height")
                         .and_then(|v| v.as_f64())
+                        .filter(|&h| h > 0.0 && h != 5.0) // Exclude render_height=5 (default value)
                 })
-                .or_else(|| feature.properties.get("ele").and_then(|v| v.as_f64())) // Check 'ele' too
-                .unwrap_or(0.0);
+                .or_else(|| {
+                    feature.properties.get("ele")
+                        .and_then(|v| v.as_f64())
+                        .filter(|&h| h > 0.0)
+                });
+
+            // Convert Option<f64> to the expected format for further processing
+            let height_value = height.unwrap_or(0.0);
             // Debug: log extracted height for each feature
             // 
 
@@ -853,7 +870,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_ring, // Store transformed coords
                                 r#type: Some("Polygon".to_string()),
-                                height: Some(height),
+                                height: Some(height_value),
                                 layer: Some(vt_dataset.source_layer.clone()),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
@@ -907,7 +924,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_line,
                                 r#type: Some("LineString".to_string()), // Always output as LineString
-                                height: Some(height),
+                                height: Some(height_value),
                                 layer: Some(vt_dataset.source_layer.clone()),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
@@ -948,7 +965,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 transformed_geometry_parts.push(GeometryData {
                                     geometry: vec![transformed_point], // Store as [[lng, lat]]
                                     r#type: Some("Point".to_string()),
-                                    height: Some(height), // Height might represent magnitude for points
+                                    height: Some(height_value), // Height might represent magnitude for points
                                     layer: Some(vt_dataset.source_layer.clone()),
                                     tags: None,
                                     properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
@@ -992,7 +1009,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_ring,
                                 r#type: Some("Polygon".to_string()), // Convert MultiPolygon to individual Polygons
-                                height: Some(height),
+                                height: Some(height_value),
                                 layer: Some(vt_dataset.source_layer.clone()),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
@@ -1055,10 +1072,15 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     console_log!(
         "📊 Layer '{}': {} features → {} geometries after filtering",
-        vt_dataset.source_layer, 
-        feature_count, 
+        vt_dataset.source_layer,
+        feature_count,
         geometry_data_list.len()
     );
+
+    // Apply median height fallback for buildings without height data
+    if vt_dataset.source_layer == "building" {
+        apply_median_height_fallback(&mut geometry_data_list);
+    }
 
     // Cache the extracted feature data for later use
     {
@@ -1715,4 +1737,92 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
     // A more robust implementation would calculate area and potentially reorder rings.
 
     result // Return the structured tile coordinates
+}
+
+/// Apply median height fallback for buildings without height data
+/// Uses the median of the upper 50% of buildings with defined heights
+/// Excludes render_height=5 (default value) from median calculation
+fn apply_median_height_fallback(geometry_list: &mut Vec<GeometryData>) {
+    // First pass: collect all valid heights (> 0.0, excluding render_height=5 defaults)
+    let mut valid_heights: Vec<f64> = geometry_list
+        .iter()
+        .filter_map(|geom| geom.height)
+        .filter(|&h| h > 0.0) // This now properly excludes render_height=5 cases since we filtered them earlier
+        .collect();
+
+    if valid_heights.is_empty() {
+        // No valid heights found, use a reasonable default for buildings
+        let default_height = 15.0; // ~5 stories, reasonable urban building height
+        console_log!(
+            "🏢 No valid building heights found, using default height: {} meters",
+            default_height
+        );
+
+        for geometry in geometry_list.iter_mut() {
+            if geometry.height.is_none() || geometry.height == Some(0.0) {
+                geometry.height = Some(default_height);
+            }
+        }
+        return;
+    }
+
+    // Sort heights to work with upper 50%
+    valid_heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    // Take the upper 50% of buildings (taller half)
+    let split_point = valid_heights.len() / 2;
+    let upper_half = &valid_heights[split_point..];
+
+    // Calculate median of the upper 50%
+    let median_height = if upper_half.len() == 1 {
+        // Only one building in upper half
+        upper_half[0]
+    } else if upper_half.len() % 2 == 0 {
+        // Even number of elements in upper half: average of middle two
+        let mid = upper_half.len() / 2;
+        (upper_half[mid - 1] + upper_half[mid]) / 2.0
+    } else {
+        // Odd number of elements in upper half: middle element
+        upper_half[upper_half.len() / 2]
+    };
+
+    console_log!(
+        "🏢 Calculated median height from upper 50%: {:.1} meters (from {} taller buildings out of {} total with valid heights, excluding render_height=5 defaults)",
+        median_height,
+        upper_half.len(),
+        valid_heights.len()
+    );
+
+    // Log height distribution for debugging
+    if !valid_heights.is_empty() {
+        console_log!(
+            "🏢 Height distribution - Min: {:.1}m, Max: {:.1}m, Overall median: {:.1}m, Upper 50% median: {:.1}m",
+            valid_heights[0],
+            valid_heights[valid_heights.len() - 1],
+            if valid_heights.len() % 2 == 0 {
+                let mid = valid_heights.len() / 2;
+                (valid_heights[mid - 1] + valid_heights[mid]) / 2.0
+            } else {
+                valid_heights[valid_heights.len() / 2]
+            },
+            median_height
+        );
+    }
+
+    // Second pass: apply median height of upper 50% to buildings without height data
+    let mut updated_count = 0;
+    for geometry in geometry_list.iter_mut() {
+        if geometry.height.is_none() || geometry.height == Some(0.0) {
+            geometry.height = Some(median_height);
+            updated_count += 1;
+        }
+    }
+
+    if updated_count > 0 {
+        console_log!(
+            "🏢 Applied upper 50% median height {:.1}m to {} buildings without height data",
+            median_height,
+            updated_count
+        );
+    }
 }
