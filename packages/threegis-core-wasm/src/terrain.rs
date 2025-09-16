@@ -15,7 +15,7 @@ pub struct TerrainGeometryParams {
     pub max_lat: f64,
     pub vertical_exaggeration: f64,
     pub terrain_base_height: f64,
-    pub bbox_key: String,
+    pub process_id: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -332,9 +332,8 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     let _keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
     
     
-    // Create the bbox_key format - this is the same format used in elevation.rs
-    let bbox_key = format!("{}_{}_{}_{}", params.min_lng, params.min_lat, params.max_lng, params.max_lat);
-    let _has_bbox_key = state.elevation_grids.contains_key(&bbox_key);
+    // Use the process_id from params to access cached elevation data
+    let _has_process_elevation = state.elevation_grids.contains_key(&params.process_id);
     
     
     
@@ -342,7 +341,7 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     // Get elevation data with retry mechanism
     let elevation_grid = {
         // First try to get existing elevation data
-        if let Some(grid) = state.get_elevation_grid(&bbox_key) {
+        if let Some(grid) = state.get_elevation_grid(&params.process_id) {
             grid.clone()
         } else {
             
@@ -364,7 +363,7 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                     tiles: Vec::new(), // Will be populated by the processing function
                     grid_width: 256,   // Standard grid size
                     grid_height: 256,  // Standard grid size
-                    bbox_key: Some(bbox_key.clone()),
+                    process_id: params.process_id.clone(),
                 };
                 
                 // Serialize input
@@ -377,7 +376,7 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                                 // Check if we now have the data
                                 let state = ModuleState::global();
                                 let state = state.lock().unwrap();
-                                if let Some(grid) = state.get_elevation_grid(&bbox_key) {
+                                if let Some(grid) = state.get_elevation_grid(&params.process_id) {
                                     elevation_grid = Some(grid.clone());
                                     break;
                                 }
@@ -389,7 +388,6 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                                     let _delay_ms = 500 * (1 << (attempt - 1));
                                     
                                     // Simple delay - just log the delay for now
-                                    // In a real implementation, you might want to add actual delay
                                 }
                             }
                         }
@@ -414,13 +412,10 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
         }
     };
     
-    // For this example, we'll need to get information from elevation module
-    // We'll create a simplified ElevationProcessingResult for testing
-    // In a real implementation, you would store and retrieve the full result
+    // Get information from elevation module
     use crate::elevation::{GridSize, ElevationProcessingResult};
     
-    // Create a simplified elevation result based on the cached grid
-    // In a production environment, you would store and retrieve the complete result
+    // Create elevation result based on the cached grid
     let mut min_elevation = f64::INFINITY;
     let mut max_elevation = f64::NEG_INFINITY;
     

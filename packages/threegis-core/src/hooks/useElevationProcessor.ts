@@ -43,7 +43,8 @@ export function useElevationProcessor() {
    */
   const processElevationData = useCallback(async (
     bbox: [number, number, number, number], // [minLng, minLat, maxLng, maxLat]
-    tiles: Tile[]
+    tiles: Tile[],
+    processId: string
   ): Promise<ElevationProcessingResult> => {
     setIsProcessing(true);
     setError(null);
@@ -70,7 +71,8 @@ export function useElevationProcessor() {
         bbox[1], // minLat
         bbox[2], // maxLng
         bbox[3], // maxLat
-        wasmTiles
+        wasmTiles,
+        processId
       );
       
       // Update progress
@@ -174,24 +176,42 @@ export function useElevationProcessor() {
   }, [calculateTileCount]);
 
   /**
-   * Process elevation data for a GeoJSON bounding box feature
+   * Process elevation data for a bounding box array with process ID
    */
   const processElevationForBbox = useCallback(async (
-    bboxFeature: GeoJSON.Feature
+    bbox: [number, number, number, number], // [minLng, minLat, maxLng, maxLat]
+    processId: string
+  ): Promise<ElevationProcessingResult> => {
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+
+    // Find optimal zoom level
+    const zoom = findOptimalZoom(minLng, minLat, maxLng, maxLat);
+    const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
+
+    // Process the elevation data with the provided process ID
+    return processElevationData([minLng, minLat, maxLng, maxLat], tiles, processId);
+  }, [findOptimalZoom, getTilesForBbox, processElevationData]);
+
+  /**
+   * Process elevation data for a GeoJSON bounding box feature (legacy)
+   */
+  const processElevationForGeoJSON = useCallback(async (
+    bboxFeature: GeoJSON.Feature,
+    processId: string
   ): Promise<ElevationProcessingResult> => {
     if (!bboxFeature.geometry || bboxFeature.geometry.type !== "Polygon") {
       throw new Error("Invalid geometry: expected a Polygon");
     }
-    
+
     // Extract coordinates from the polygon
     const coordinates = bboxFeature.geometry.coordinates[0]; // First ring of the polygon
-    
+
     // Find min/max coordinates
     let minLng = Infinity,
         minLat = Infinity,
         maxLng = -Infinity,
         maxLat = -Infinity;
-    
+
     coordinates.forEach((coord: number[]) => {
       const [lng, lat] = coord;
       minLng = Math.min(minLng, lng);
@@ -199,22 +219,19 @@ export function useElevationProcessor() {
       maxLng = Math.max(maxLng, lng);
       maxLat = Math.max(maxLat, lat);
     });
-    
+
     // Find optimal zoom level
     const zoom = findOptimalZoom(minLng, minLat, maxLng, maxLat);
-    console.log(`Using zoom level ${zoom} for elevation data`);
-    
-    // Get tiles for this bbox
     const tiles = getTilesForBbox(minLng, minLat, maxLng, maxLat, zoom);
-    console.log(`Processing ${tiles.length} tiles for elevation data`);
-    
+
     // Process the elevation data
-    return processElevationData([minLng, minLat, maxLng, maxLat], tiles);
+    return processElevationData([minLng, minLat, maxLng, maxLat], tiles, processId);
   }, [findOptimalZoom, getTilesForBbox, processElevationData]);
 
   return {
     processElevationData,
     processElevationForBbox,
+    processElevationForGeoJSON,
     getTilesForBbox,
     calculateTileCount,
     findOptimalZoom,

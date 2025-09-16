@@ -45,7 +45,6 @@ export function useVectorTiles() {
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Unknown error fetching vector tiles');
       setError(error);
-      console.error('Error fetching vector tiles:', error);
       return [];
     } finally {
       setIsLoading(false);

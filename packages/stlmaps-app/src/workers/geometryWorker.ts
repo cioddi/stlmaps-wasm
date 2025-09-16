@@ -83,7 +83,6 @@ async function processGeometries(
   const processedGeometries: any[] = [];
   const batchSize = 5; // Small batch size for frequent yielding
   
-  console.log(`Worker: Processing ${geometryDataArray.length} geometries for ${layerName}`);
   
   for (let i = 0; i < geometryDataArray.length; i += batchSize) {
     // Check for cancellation
@@ -96,7 +95,6 @@ async function processGeometries(
     // Process current batch
     for (const geometryData of batch) {
       if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
-        console.log(`Worker: Skipping empty geometry data: hasData=${geometryData.hasData}, vertices=${geometryData.vertices?.length || 0}`);
         continue;
       }
       
@@ -135,7 +133,6 @@ async function processGeometries(
     }
   }
   
-  console.log(`Worker: Created ${processedGeometries.length} processed geometries for ${layerName}`);
   
   return {
     geometries: processedGeometries,

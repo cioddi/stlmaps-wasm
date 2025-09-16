@@ -1036,7 +1036,11 @@ const ModelPreview = () => {
               
               
               individualGeometry.userData = { properties };
-              polygonMesh.userData = { properties, sourceLayer: vtDataset.sourceLayer };
+              polygonMesh.userData = {
+                properties,
+                sourceLayer: vtDataset.sourceLayer,
+                label: vtDataset.label || vtDataset.sourceLayer
+              };
               
               modelGroup.add(polygonMesh);
             });
@@ -1108,7 +1112,11 @@ const ModelPreview = () => {
           
           
           geometry.userData = { properties };
-          polygonMesh.userData = { properties, sourceLayer: vtDataset.sourceLayer };
+          polygonMesh.userData = {
+            properties,
+            sourceLayer: vtDataset.sourceLayer,
+            label: vtDataset.label || vtDataset.sourceLayer
+          };
           
           modelGroup.add(polygonMesh);
         });

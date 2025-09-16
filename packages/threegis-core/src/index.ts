@@ -11,6 +11,9 @@ export { useWasm } from './hooks/useWasm';
 export { useElevationProcessor } from './hooks/useElevationProcessor';
 export { useVectorTiles } from './hooks/useVectorTiles';
 
+// Export the process manager
+export { processManager } from './utils/ProcessManager';
+
 // Export the WASM bridge functions
 export { 
   initializeWasm,

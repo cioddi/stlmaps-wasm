@@ -23,6 +23,16 @@ export interface TileFetchResponse {
 }
 
 /**
+ * Configuration for fetch retry behavior
+ */
+export interface FetchConfig {
+  maxRetries: number;
+  timeoutMs: number;
+  backoffMs: number;
+  validateContent: boolean;
+}
+
+/**
  * Extract tile coordinates from URL path
  * @param url The URL to parse for tile coordinates
  * @returns Object with extracted x, y, z coordinates
@@ -56,92 +66,138 @@ const extractTileCoordinatesFromUrl = (url: string): { x: number; y: number; z: 
 };
 
 /**
+ * Create a fetch function with timeout support
+ */
+const fetchWithTimeout = async (url: string, timeoutMs: number): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await window.fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+};
+
+/**
+ * Robust fetch implementation with retry logic and validation
+ */
+const robustFetch = async (url: string, config: FetchConfig): Promise<TileFetchResponse> => {
+  let lastError: Error;
+
+  for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    try {
+      const response = await fetchWithTimeout(url, config.timeoutMs);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      const contentLength = response.headers.get('content-length');
+      const tileCoords = extractTileCoordinatesFromUrl(url);
+
+      if (config.validateContent && contentLength === '0') {
+        throw new Error('Empty response received');
+      }
+
+      if (contentType.includes('image/')) {
+        const blob = await response.blob();
+
+        if (config.validateContent && blob.size === 0) {
+          throw new Error('Empty image blob received');
+        }
+
+        const imageBitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = imageBitmap.width;
+        canvas.height = imageBitmap.height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Could not get canvas context');
+        ctx.drawImage(imageBitmap, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixelData = new Uint8Array(imageData.data);
+
+        if (config.validateContent && pixelData.length === 0) {
+          throw new Error('Empty pixel data extracted');
+        }
+
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          x: tileCoords.x,
+          y: tileCoords.y,
+          z: tileCoords.z,
+          pixelData,
+          mimeType: contentType
+        };
+      } else {
+        const arrayBuffer = await response.arrayBuffer();
+        const rawData = new Uint8Array(arrayBuffer);
+
+        if (config.validateContent && rawData.length === 0) {
+          throw new Error('Empty binary data received');
+        }
+
+        return {
+          width: 256,
+          height: 256,
+          x: tileCoords.x,
+          y: tileCoords.y,
+          z: tileCoords.z,
+          rawData,
+          mimeType: contentType
+        };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < config.maxRetries) {
+        const delay = config.backoffMs * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+    }
+  }
+
+  if (lastError!.message.includes('CORS') || lastError!.message.includes('network')) {
+    throw new Error(`Network error after ${config.maxRetries + 1} attempts: ${lastError!.message}`);
+  }
+
+  throw new Error(`Fetch failed after ${config.maxRetries + 1} attempts: ${lastError!.message}`);
+};
+
+/**
  * Initialize the WASM JS helpers for fetch operations
  * This function exposes the fetch function to WASM
  */
 export const initWasmFetchHelpers = () => {
-  // Create global namespace for our helper functions
+  const defaultConfig: FetchConfig = {
+    maxRetries: 3,
+    timeoutMs: 10000,
+    backoffMs: 1000,
+    validateContent: true
+  };
+
   (window as any).wasmJsHelpers = {
     ...(window as any).wasmJsHelpers,
-    
-    // Function to fetch data from a URL - the name must match what's used in Rust (fetch)
-    fetch: async (url: string): Promise<TileFetchResponse> => {
-      console.log(`JS Helper: Fetching from ${url}`);
-      
-      try {
-        const response = await window.fetch(url);
-        if (!response.ok) {
-          console.error(`HTTP Error ${response.status} for ${url}:`, response.statusText);
-          throw new Error(`Failed to fetch data: ${response.status} ${response.statusText}`);
-        }
-        
-        // Get the content type to determine how to process the response
-        const contentType = response.headers.get('content-type') || '';
-        const contentLength = response.headers.get('content-length');
-        const tileCoords = extractTileCoordinatesFromUrl(url);
-        
-        console.log(`Response headers - Content-Type: ${contentType}, Content-Length: ${contentLength}`);
-        console.log(`Tile coordinates extracted: ${JSON.stringify(tileCoords)}`);
-        
-        // Handle different content types appropriately
-        if (contentType.includes('image/')) {
-          // Handle as raster tile (WebP, PNG, etc.)
-          const blob = await response.blob();
-          const imageBitmap = await createImageBitmap(blob);
-          
-          // Create a canvas to extract the pixel data
-          const canvas = document.createElement('canvas');
-          canvas.width = imageBitmap.width;
-          canvas.height = imageBitmap.height;
-          
-          // Draw the image on the canvas
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error('Could not get canvas context');
-          ctx.drawImage(imageBitmap, 0, 0);
-          
-          // Get the decoded pixel data
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const pixelData = new Uint8Array(imageData.data);
-          
-          console.log(`Decoded raster tile, dimensions ${canvas.width}x${canvas.height}, length: ${pixelData.length} bytes`);
-          
-          return {
-            width: canvas.width,
-            height: canvas.height,
-            x: tileCoords.x,
-            y: tileCoords.y,
-            z: tileCoords.z,
-            pixelData,
-            mimeType: contentType
-          };
-        } else {
-          // Handle as vector tile (PBF) or other binary format
-          const arrayBuffer = await response.arrayBuffer();
-          const rawData = new Uint8Array(arrayBuffer);
-          
-          console.log(`Fetched vector tile or binary data, length: ${rawData.length} bytes`);
-          
-          return {
-            width: 256, // Standard tile width for vector tiles
-            height: 256, // Standard tile height for vector tiles
-            x: tileCoords.x,
-            y: tileCoords.y,
-            z: tileCoords.z,
-            rawData,
-            mimeType: contentType
-          };
-        }
-      } catch (error) {
-        console.error(`Error downloading from ${url}:`, error);
-        if (error instanceof TypeError) {
-          console.error('This might be a CORS or network connectivity issue');
-        }
-        throw error;
-      }
+
+    fetch: async (url: string, configOverrides?: Partial<FetchConfig>): Promise<TileFetchResponse> => {
+      const config = { ...defaultConfig, ...configOverrides };
+      return robustFetch(url, config);
     },
-    
-    // Additional helper functions can be added here
+
+    fetchWithConfig: async (url: string, config: FetchConfig): Promise<TileFetchResponse> => {
+      return robustFetch(url, config);
+    }
   };
   
-  console.log('WebAssembly fetch helpers initialized');
 };

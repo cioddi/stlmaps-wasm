@@ -73,27 +73,34 @@ pub struct FeatureData {
 pub struct ModuleState {
     // Cache for raster DEM tiles
     pub raster_tiles: HashMap<TileKey, TileData>,
-    
+
     // Cache for vector tiles
     pub vector_tiles: HashMap<TileKey, Vec<VectorTileData>>,
-    
+
     // Cache for processed data like elevation grids
     pub elevation_grids: HashMap<String, Vec<Vec<f64>>>,
-    
-    // Cache for vector tile data by bbox_key
-    pub bbox_vector_tiles: HashMap<String, Vec<TileData>>,
-    
+
+    // Process-based cache for vector tile data: process_id -> tiles
+    pub process_vector_tiles: HashMap<String, Vec<TileData>>,
+
     // Cache for parsed vector tiles (ParsedMvtTile) keyed by "z/x/y"
     pub mvt_parsed_tiles: HashMap<String, ParsedMvtTile>,
-    
+
+    // Process-based cache for extracted feature data: process_id -> data_key -> JSON string
+    pub process_feature_data: HashMap<String, HashMap<String, String>>,
+
     // Configuration for cache limits
     pub max_raster_tiles: usize,
     pub max_vector_tiles: usize,
-    
+
     // Stats
     pub cache_hits: usize,
     pub cache_misses: usize,
-    // Cache for extracted feature data: maps bbox_key -> inner_key -> JSON string
+
+    // Legacy caches (deprecated)
+    #[deprecated(note = "Use process-based caching instead")]
+    pub bbox_vector_tiles: HashMap<String, Vec<TileData>>,
+    #[deprecated(note = "Use process-based caching instead")]
     pub feature_data_cache: HashMap<String, HashMap<String, String>>,
 }
 
@@ -108,12 +115,15 @@ impl ModuleState {
             raster_tiles: HashMap::new(),
             vector_tiles: HashMap::new(),
             elevation_grids: HashMap::new(),
-            bbox_vector_tiles: HashMap::new(),
+            process_vector_tiles: HashMap::new(),
             mvt_parsed_tiles: HashMap::new(),
-            max_raster_tiles: 100, // Default limits
+            process_feature_data: HashMap::new(),
+            max_raster_tiles: 100,
             max_vector_tiles: 50,
             cache_hits: 0,
             cache_misses: 0,
+            // Legacy caches
+            bbox_vector_tiles: HashMap::new(),
             feature_data_cache: HashMap::new(),
         }
     }
@@ -190,19 +200,7 @@ impl ModuleState {
         self.elevation_grids.get(key)
     }
     
-    // Get tile data from cache
-    pub fn get_tile_data(&self, _key: &str) -> Option<TileData> {
-        // For now, just return None to make the compiler happy
-        // In a real implementation, this would retrieve the tile from a HashMap
-        
-        None
-    }
     
-    // Set tile data in cache
-    pub fn set_tile_data(&mut self, _key: &str, _tile_data: TileData) {
-        // In a real implementation, this would store the tile in a HashMap
-        
-    }
     
     // Get a cached parsed vector tile by cache key
     pub fn get_parsed_mvt_tile(&self, key: &str) -> Option<ParsedMvtTile> {
@@ -259,22 +257,6 @@ impl ModuleState {
         }
     }
     
-    // Get elevation data for a process ID
-    pub fn get_elevation_data(&self, bbox_key: &str) -> Option<ElevationData> {
-        // In a real implementation, this would retrieve the elevation data from a HashMap
-        
-        
-        // Return dummy elevation data for testing
-        Some(ElevationData {
-            bbox_key: bbox_key.to_string(),
-            elevation_grid: vec![vec![0.0; 2]; 2],
-            grid_width: 2,
-            grid_height: 2,
-            min_elevation: 0.0,
-            max_elevation: 0.0,
-            timestamp: 0.0,
-        })
-    }
     
     // Get cached geometry data for a specific layer and bbox key
     #[allow(dead_code)] // Public API method for future use
@@ -309,6 +291,7 @@ impl ModuleState {
                                     r#type: Some(feature.geometry.r#type.clone()),
                                     height: Some(height),
                                     layer: Some(source_layer.to_string()),
+                                    label: None,
                                     tags: None,
                                     properties: Some(feature.properties.clone()),
                                 });
@@ -327,23 +310,55 @@ impl ModuleState {
         None
     }
     
-    // Add a cached object (for general-purpose caching)
-    #[allow(dead_code)] // Public API method for future use
-    pub fn add_cached_object(&mut self, _key: &str, _value: JsValue) {
-        // In a real implementation, you would store this in a HashMap<String, JsValue>
-        // For now, we'll just log it since we're not implementing the full cache
-        
-    }
     
-    // Get a cached object
-    #[allow(dead_code)] // Public API method for future use
-    pub fn get_cached_object(&self, _key: &str) -> Option<JsValue> {
-        // In a real implementation, you would retrieve from a HashMap<String, JsValue>
-        // For now, we'll just return None
-        None
-    }
     
+    // ========== Process-based cache methods ==========
+
+    /// Store vector tiles for a specific process
+    pub fn store_process_vector_tiles(&mut self, process_id: &str, tiles: Vec<TileData>) {
+        self.process_vector_tiles.insert(process_id.to_string(), tiles);
+    }
+
+    /// Retrieve vector tiles for a specific process
+    pub fn get_process_vector_tiles(&self, process_id: &str) -> Option<&Vec<TileData>> {
+        self.process_vector_tiles.get(process_id)
+    }
+
+    /// Store extracted feature data for a specific process
+    pub fn add_process_feature_data(&mut self, process_id: &str, data_key: &str, json: String) {
+        let entry = self.process_feature_data
+            .entry(process_id.to_string())
+            .or_insert_with(HashMap::new);
+        entry.insert(data_key.to_string(), json);
+    }
+
+    /// Retrieve feature data for a specific process
+    pub fn get_process_feature_data(&self, process_id: &str, data_key: &str) -> Option<JsValue> {
+        self.process_feature_data
+            .get(process_id)
+            .and_then(|inner| inner.get(data_key).cloned())
+            .map(|s| JsValue::from_str(&s))
+    }
+
+    /// Clear all data for a specific process
+    pub fn clear_process_data(&mut self, process_id: &str) {
+        self.process_vector_tiles.remove(process_id);
+        self.process_feature_data.remove(process_id);
+    }
+
+    /// Get list of cached process IDs
+    pub fn get_cached_process_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.process_vector_tiles.keys().cloned().collect();
+        ids.extend(self.process_feature_data.keys().cloned());
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    // ========== Legacy bbox-based methods (deprecated) ==========
+
     /// Store extracted feature data under a bbox_key and inner_key as JSON string
+    #[deprecated(note = "Use add_process_feature_data instead")]
     pub fn add_feature_data(&mut self, bbox_key: &str, inner_key: &str, json: String) {
         let entry = self.feature_data_cache
             .entry(bbox_key.to_string())

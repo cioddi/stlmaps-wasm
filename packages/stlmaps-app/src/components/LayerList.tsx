@@ -141,7 +141,18 @@ const LayerList: React.FC = () => {
     }));
   };
 
-  const getLayerIcon = (sourceLayer: string) => {
+  const getLayerIcon = (sourceLayer: string, label?: string) => {
+    // First try to match by label for better user experience
+    if (label) {
+      const lowerLabel = label.toLowerCase();
+      if (lowerLabel.includes('water')) return <WaterIcon />;
+      if (lowerLabel.includes('natural') || lowerLabel.includes('land use')) return <ForestIcon />;
+      if (lowerLabel.includes('park') || lowerLabel.includes('recreation')) return <ParkIcon />;
+      if (lowerLabel.includes('road') || lowerLabel.includes('street') || lowerLabel.includes('footway')) return <DirectionsIcon />;
+      if (lowerLabel.includes('building')) return <LayersIcon />;
+    }
+
+    // Fall back to source layer matching
     switch (sourceLayer) {
       case 'water': return <WaterIcon />;
       case 'landcover':
@@ -250,10 +261,10 @@ const LayerList: React.FC = () => {
               onClick={() => toggleExpand(layerId)}
             >
               <ListItemIcon>
-                {getLayerIcon(layer.sourceLayer)}
+                {getLayerIcon(layer.sourceLayer, layer.label)}
               </ListItemIcon>
-              <ListItemText 
-                primary={layer.sourceLayer.charAt(0).toUpperCase() + layer.sourceLayer.slice(1)} 
+              <ListItemText
+                primary={layer.label || layer.sourceLayer.charAt(0).toUpperCase() + layer.sourceLayer.slice(1)}
               />
               <FormControlLabel
                 control={

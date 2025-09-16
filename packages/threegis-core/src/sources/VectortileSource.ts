@@ -20,7 +20,7 @@ export interface FetchVtDataOptions {
   bbox: number[]; // [minLng, minLat, maxLng, maxLat]
   zoom: number;
   gridSize: GridSize;
-  bboxKey?: string; // Optional key for caching
+  bboxKey?: string; // Used as process_id for process-based caching
 }
 
 /**
@@ -34,7 +34,6 @@ export const parseVectorTile = (arrayBuffer: ArrayBuffer): VectorTile => {
     const vectorTile = new VectorTile(pbf);
     return vectorTile;
   } catch (error) {
-    console.error("Error parsing vector tile:", error);
     return {} as VectorTile;
   }
 };
@@ -57,11 +56,9 @@ export const parseVectorTileRust = (
 
     // Note: parse_mvt_data function doesn't exist in the current WASM module
     // This functionality might be handled differently or needs to be implemented
-    console.warn("parseVectorTileRust: parse_mvt_data function not available in WASM module");
 
     return tileKey;
   } catch (error) {
-    console.error("Error parsing vector tile with Rust:", error);
     throw error;
   }
 };
@@ -93,7 +90,6 @@ export const extractFeaturesFromLayer = (
     // This processes and caches the features in WASM, doesn't return them
     return wasmModule.extract_features_from_vector_tiles(input);
   } catch (error) {
-    console.error(`Error extracting features from layer '${vtDataSet.sourceLayer}':`, error);
     throw error;
   }
 };
@@ -110,12 +106,7 @@ export const extractGeojsonFeaturesFromVectorTiles = async (config: {
 }): Promise<void> => {
   const { bbox, vtDataSet, bboxKey, elevationBboxKey } = config;
   
-  console.log(`Extracting features for layer: ${vtDataSet.sourceLayer}`);
-  
-  // Call the WASM function to extract and cache features
   await extractFeaturesFromLayer(bbox, vtDataSet, bboxKey, elevationBboxKey);
-  
-  console.log(`✅ Features extracted and cached for layer: ${vtDataSet.sourceLayer}`);
 };
 
 /**
@@ -199,7 +190,6 @@ export const fetchVtData = async (
   const [minLng, minLat, maxLng, maxLat] = bbox;
 
   if (!gridSize || !gridSize.width || !gridSize.height) {
-    console.warn("Invalid or missing gridSize. Returning no data.");
     return [];
   }
 
@@ -207,13 +197,8 @@ export const fetchVtData = async (
     // Check if we can use the Rust/WASM implementation
     const wasmModule = getWasmModule();
     if (wasmModule && wasmModule.fetch_vector_tiles) {
-      console.log("Using WASM vector tile fetching for performance");
-
       const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoom);
       if (tileCount > 9) {
-        console.warn(
-          `Skipping geometry data fetch: area too large (${tileCount} tiles, max allowed: 9)`
-        );
         return [];
       }
 
@@ -236,7 +221,7 @@ export const fetchVtData = async (
         zoom,
         grid_width: gridSize.width,
         grid_height: gridSize.height,
-        bbox_key: bboxKeyValue
+        process_id: bboxKeyValue // Use bboxKey as process_id for new WASM system
       };
 
       // Call the Rust function to fetch and cache the vector tiles
@@ -245,8 +230,6 @@ export const fetchVtData = async (
     }
     return [];
   } catch (error) {
-    console.error("Error in fetchVtData:", error);
-    // Fall back to an empty result set in case of errors
     return [];
   }
 };

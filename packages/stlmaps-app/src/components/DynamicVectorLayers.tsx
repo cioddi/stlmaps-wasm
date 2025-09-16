@@ -9,11 +9,19 @@ interface DynamicVectorLayersProps {
 const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() => {
     const { vtLayers, terrainSettings } = useAppStore();
 
+    // Helper function to create a safe layer ID from label and sourceLayer
+    const createLayerIdSuffix = (label: string, sourceLayer: string) => {
+      // Create a safe ID by removing spaces and special characters, then adding sourceLayer info
+      const safeLabelId = label.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      return `${safeLabelId}-${sourceLayer}`;
+    };
+
     // Create a stable dependency array
     const layerDeps = useMemo(
       () =>
         vtLayers.map((layer) => ({
           sourceLayer: layer.sourceLayer,
+          label: layer.label || layer.sourceLayer, // Use label or fallback to sourceLayer
           enabled: layer.enabled,
           colorHex: layer.color, // Color is already a hex string in the unified store
           filter: JSON.stringify(layer.filter), // Stringify filter for stable comparison
@@ -55,7 +63,7 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
           // Style roads
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const layer: any = {
-            id: `${layerDep.sourceLayer}-line`,
+            id: `${createLayerIdSuffix(layerDep.label, layerDep.sourceLayer)}-line`,
             type: "line",
             "source-layer": layerDep.sourceLayer,
             layout: {
@@ -75,7 +83,7 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
           // Style buildings
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const layer: any = {
-            id: `${layerDep.sourceLayer}-fill`,
+            id: `${createLayerIdSuffix(layerDep.label, layerDep.sourceLayer)}-fill`,
             type: "fill",
             "source-layer": layerDep.sourceLayer,
             layout: {
@@ -97,7 +105,7 @@ const DynamicVectorLayers: React.FC<DynamicVectorLayersProps> = React.memo(() =>
           // Style other layers (water, landuse, etc.)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const layer: any = {
-            id: `${layerDep.sourceLayer}-fill`,
+            id: `${createLayerIdSuffix(layerDep.label, layerDep.sourceLayer)}-fill`,
             type: "fill",
             "source-layer": layerDep.sourceLayer,
             layout: {

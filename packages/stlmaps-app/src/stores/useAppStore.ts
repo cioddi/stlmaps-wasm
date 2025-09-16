@@ -24,6 +24,7 @@ export interface BuildingSettings {
 // VT Layer configuration interface
 export interface VtDataSet {
   sourceLayer: string;
+  label?: string; // Display label for grouping (defaults to sourceLayer if not provided)
   subClass?: string;
   geometry?: THREE.BufferGeometry;
   geometries?: THREE.BufferGeometry[];
@@ -193,25 +194,26 @@ interface AppState {
 const defaultLayers: VtDataSet[] = [
   {
     sourceLayer: "landuse",
+    label: "Land Use Areas",
     enabled: true,
-    color: "#4caf50", // Green color for landuse
+    color: "#4caf50",
     bufferSize: 2,
-    extrusionDepth: 0.8, // Thin extrusion for landuse
+    extrusionDepth: 0.8,
     zOffset: -0.4,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 1,
-    // Filter to include green areas
     filter: ["in", "class", "commercial", "residential"]
   },
   {
     sourceLayer: "landcover",
+    label: "Natural Areas",
     enabled: true,
-    color: "#74e010", // Green color for landcover
+    color: "#74e010",
     bufferSize: 2,
-    extrusionDepth: 1.2, // Thin extrusion for landcover
+    extrusionDepth: 1.2,
     zOffset: -0.3,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
@@ -221,10 +223,11 @@ const defaultLayers: VtDataSet[] = [
   },
   {
     sourceLayer: "park",
+    label: "Parks & Recreation",
     enabled: true,
-    color: "#26CB00", // Green color for parks
+    color: "#26CB00",
     bufferSize: 2,
-    extrusionDepth: 0.8, // Thin extrusion for parks
+    extrusionDepth: 0.8,
     zOffset: -0.3,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
@@ -234,8 +237,9 @@ const defaultLayers: VtDataSet[] = [
   },
   {
     sourceLayer: "transportation",
+    label: "Footways",
     enabled: true,
-    color: "#ffefda", // Gray color for streets
+    color: "#ffefda",
     bufferSize: 1.5,
     extrusionDepth: 1.6,
     zOffset: -0.2,
@@ -252,8 +256,9 @@ const defaultLayers: VtDataSet[] = [
   },
   {
     sourceLayer: "transportation",
+    label: "Roads & Streets",
     enabled: true,
-    color: "#989898", // Gray color for streets
+    color: "#989898",
     bufferSize: 2,
     extrusionDepth: 1.6,
     zOffset: -0.2,
@@ -266,7 +271,7 @@ const defaultLayers: VtDataSet[] = [
       "in",
       "class",
       "motorway",
-      "trunk", 
+      "trunk",
       "primary",
       "secondary",
       "tertiary",
@@ -278,10 +283,11 @@ const defaultLayers: VtDataSet[] = [
   },
   {
     sourceLayer: "water",
+    label: "Water Bodies",
     enabled: true,
-    color: "#76bcff", // Lighter blue color for water
+    color: "#76bcff",
     bufferSize: 0,
-    extrusionDepth: 1.4, // Thin extrusion for water
+    extrusionDepth: 1.4,
     zOffset: 0.2,
     heightScaleFactor: 1,
     useAdaptiveScaleFactor: false,
@@ -291,8 +297,9 @@ const defaultLayers: VtDataSet[] = [
   },
   {
     sourceLayer: "building",
+    label: "Buildings",
     enabled: true,
-    color: "#afafaf", // Gray color for buildings
+    color: "#afafaf",
     bufferSize: 0,
     zOffset: -0.1,
     heightScaleFactor: 1, // 50% taller than default to make buildings more visible

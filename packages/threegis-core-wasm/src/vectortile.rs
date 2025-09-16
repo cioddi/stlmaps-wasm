@@ -31,12 +31,12 @@ pub struct VectortileProcessingInput {
     pub zoom: u32,
     pub grid_width: u32,
     pub grid_height: u32,
-    // Bbox key for consistent caching across the application
-    pub bbox_key: Option<String>,
+    // Process reference for consistent resource management
+    pub process_id: String,
 }
 
 // Result structure compatible with JS expectations
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct VectorTileResult {
     pub tile: TileRequest,
     pub data: Vec<u8>, // Vector tile binary data
@@ -49,6 +49,7 @@ pub struct GeometryData {
     pub r#type: Option<String>,  // Geometry type (e.g., "Polygon", "LineString")
     pub height: Option<f64>,     // Feature height
     pub layer: Option<String>,   // Source layer name
+    pub label: Option<String>,   // Display label for grouping
     pub tags: Option<serde_json::Value>, // Tags/attributes from the tile
     pub properties: Option<serde_json::Value>, // Feature properties from MVT
 }
@@ -59,10 +60,10 @@ pub struct ExtractFeaturesInput {
     pub bbox: Vec<f64>,                   // [minLng, minLat, maxLng, maxLat]
     #[serde(rename = "vtDataSet")]
     pub vt_data_set: VtDataSet,             // Configuration for the layer
-    #[serde(rename = "bboxKey")]
-    pub bbox_key: String,                  // Cache key for vector tiles
-    #[serde(rename = "elevationBBoxKey")]
-    pub elevation_bbox_key: Option<String>, // ID to find cached elevation data
+    #[serde(rename = "processId")]
+    pub process_id: String,                 // Process reference for resource management
+    #[serde(rename = "elevationProcessId")]
+    pub elevation_process_id: Option<String>, // Process ID to find cached elevation data
 }
 
 // Feature geometry types
@@ -539,35 +540,23 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     // Log VtDataSet to check if filter is arriving
 
-    // Compute consistent bbox_key using central function
-    let bbox_key = cache_keys::make_bbox_key(min_lng, min_lat, max_lng, max_lat);
-
-    // Log if input.bbox_key was in a non-standard format
-    if input.bbox_key != bbox_key {
-        console_log!(
-            "Converting non-standard key to standard bbox_key format: {} -> {}",
-            input.bbox_key,
-            bbox_key
-        );
-    }
-
     console_log!(
-        "Starting feature extraction for layer '{}' using cache key: {}",
+        "Starting feature extraction for layer '{}' using process ID: {}",
         vt_dataset.source_layer,
-        bbox_key
+        input.process_id
     );
 
     // Retrieve module state (mutable for parsed tile cache)
     let module_state_mutex = ModuleState::get_instance();
     let mut module_state = module_state_mutex.lock().unwrap();
 
-    // Try to access cached vector tile data using the provided bbox_key
-    let vector_tiles_data = match module_state.get_vector_tiles(&bbox_key) {
+    // Try to access cached vector tile data using the provided process_id
+    let vector_tiles_data = match module_state.get_process_vector_tiles(&input.process_id) {
         Some(tiles) => tiles,
         None => {
             console_log!(
-                "❌ ERROR: No cached vector tiles found for key: {}. Cannot extract features.",
-                bbox_key
+                "❌ ERROR: No cached vector tiles found for process ID: {}. Cannot extract features.",
+                input.process_id
             );
             // Return empty array instead of error, as fetching might happen separately
             return Ok(to_value(&Vec::<GeometryData>::new())?);
@@ -575,18 +564,18 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     };
 
     // Get cached elevation data if available
-    // Use the specific elevation_bbox_key provided in the input
-    let elevation_data = match &input.elevation_bbox_key {
-        Some(key) => {
-            
-            module_state.get_elevation_data(key)
+    // Use the specific elevation_process_id provided in the input
+    let elevation_data: Option<crate::module_state::ElevationData> = match &input.elevation_process_id {
+        Some(_process_id) => {
+            // TODO: Implement elevation data retrieval from process-specific cache
+            None
         }
         None => {
             console_log!(
-                "No elevation_bbox_key provided, using default bbox_key for elevation lookup: {}",
-                bbox_key
+                "No elevation_process_id provided, using default process_id for elevation lookup: {}",
+                input.process_id
             );
-            module_state.get_elevation_data(&bbox_key) // Fallback to main bbox_key if specific one not given
+            None // Fallback to main process_id if specific one not given
         }
     };
 
@@ -868,10 +857,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                             // 
 
                             transformed_geometry_parts.push(GeometryData {
-                                geometry: transformed_ring, // Store transformed coords
+                                geometry: transformed_ring,
                                 r#type: Some("Polygon".to_string()),
                                 height: Some(height_value),
                                 layer: Some(vt_dataset.source_layer.clone()),
+                                label: vt_dataset.label.clone(),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
@@ -923,9 +913,10 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_line,
-                                r#type: Some("LineString".to_string()), // Always output as LineString
+                                r#type: Some("LineString".to_string()),
                                 height: Some(height_value),
                                 layer: Some(vt_dataset.source_layer.clone()),
+                                label: vt_dataset.label.clone(),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
@@ -963,10 +954,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 // 
 
                                 transformed_geometry_parts.push(GeometryData {
-                                    geometry: vec![transformed_point], // Store as [[lng, lat]]
+                                    geometry: vec![transformed_point],
                                     r#type: Some("Point".to_string()),
-                                    height: Some(height_value), // Height might represent magnitude for points
+                                    height: Some(height_value),
                                     layer: Some(vt_dataset.source_layer.clone()),
+                                    label: vt_dataset.label.clone(),
                                     tags: None,
                                     properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                                 });
@@ -1008,9 +1000,10 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_ring,
-                                r#type: Some("Polygon".to_string()), // Convert MultiPolygon to individual Polygons
+                                r#type: Some("Polygon".to_string()),
                                 height: Some(height_value),
                                 layer: Some(vt_dataset.source_layer.clone()),
+                                label: vt_dataset.label.clone(),
                                 tags: None,
                                 properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
                             });
@@ -1084,12 +1077,12 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     // Cache the extracted feature data for later use
     {
-        // Build inner cache key using central function
-        let inner_key = cache_keys::make_inner_key_from_filter(&vt_dataset.source_layer, input.vt_data_set.filter.as_ref());
+        // Build process cache key using the VtDataSet configuration
+        let data_key = cache_keys::make_process_vtdataset_key(&input.process_id, &vt_dataset);
         let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
-        module_state.add_feature_data(&bbox_key, &inner_key, cached_value_str.clone());
+        module_state.add_process_feature_data(&input.process_id, &data_key, cached_value_str.clone());
     }
-    // Return undefined since data is cached at bbox_key level
+    // Return undefined since data is cached at process level
     Ok(JsValue::undefined())
 }
 
@@ -1099,23 +1092,10 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse input
     let input: VectortileProcessingInput = from_value(input_js)?;
 
-    // Compute consistent bbox_key using central function
-    let standard_bbox_key = cache_keys::make_bbox_key(
-        input.min_lng, input.min_lat, input.max_lng, input.max_lat
+    console_log!(
+        "Fetching vector tiles for process ID: {}",
+        input.process_id
     );
-
-    // Use the standard bbox_key or override with input.bbox_key if provided and it matches the format
-    let bbox_key = match &input.bbox_key {
-        Some(key) => {
-            if key.contains("{") || key.contains("}") {
-                // 
-                standard_bbox_key
-            } else {
-                key.clone()
-            }
-        }
-        None => standard_bbox_key.clone(),
-    };
 
     // Calculate tiles for the requested bounding box
     let tiles = get_tiles_for_bbox(
@@ -1142,10 +1122,8 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     for tile in tiles {
         let tile_key = format!("{}/{}/{}", tile.z, tile.x, tile.y);
 
-        // Check if we already have this tile cached
-        let tile_data = if let Some(existing_data) = module_state_lock.get_tile_data(&tile_key) {
-            existing_data
-        } else {
+        // Fetch the tile - no caching for now
+        let tile_data = {
             // Construct the appropriate URL for vector tiles
             // Using Mapbox Vector Tile format
             let url = format!(
@@ -1312,8 +1290,6 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 rust_parsed_mvt: Some(data_vec.clone()), // Store the raw MVT data for Rust parsing
             };
 
-            // Cache the tile
-            module_state_lock.set_tile_data(&tile_key, tile_data.clone());
             tile_data
         };
 
@@ -1324,13 +1300,25 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         });
     }
 
-    // Only store tiles under the standard bbox_key format for consistency
+    // Store tiles under the process ID for consistency
     console_log!(
-        "🔍 DEBUG: Storing {} vector tiles under bbox_key: {}",
+        "🔍 DEBUG: Storing {} vector tiles under process ID: {}",
         tile_results.len(),
-        bbox_key
+        input.process_id
     );
-    module_state_lock.store_vector_tiles(&bbox_key, &tile_results);
+    module_state_lock.store_process_vector_tiles(&input.process_id, tile_results.clone().into_iter().map(|vtr| TileData {
+        width: 256,
+        height: 256,
+        x: vtr.tile.x,
+        y: vtr.tile.y,
+        z: vtr.tile.z,
+        data: vtr.data.clone(),
+        timestamp: Date::now(),
+        key: format!("{}/{}/{}", vtr.tile.z, vtr.tile.x, vtr.tile.y),
+        buffer: vtr.data.clone(),
+        parsed_layers: None,
+        rust_parsed_mvt: Some(vtr.data),
+    }).collect());
 
     // Return tile data that has been processed by Rust
     // We're still returning the VectorTileResult format for compatibility,

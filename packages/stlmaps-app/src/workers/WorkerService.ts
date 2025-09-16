@@ -61,7 +61,6 @@ export class WorkerService {
       }
       
       this.workerPools.set(workerName, pool);
-      console.log(`🏭 Created worker pool for '${workerName}' with ${this.MAX_WORKERS} workers`);
     }
     
     return this.workerPools.get(workerName)!;
@@ -127,7 +126,6 @@ export class WorkerService {
     const worker = this.getLeastBusyWorker(pool);
     const requestId = `${workerName}-pool-${++this.requestCounter}`;
     
-    console.log(`🔄 Assigning task ${requestId} to worker pool`);
     
     return new Promise((resolve, reject) => {
       // Set up timeout to prevent hanging requests
@@ -177,7 +175,6 @@ export class WorkerService {
    * Handle worker errors
    */
   private static handleWorkerError(event: ErrorEvent) {
-    console.error('Worker error:', event);
     
     // In case of general worker error, reject all pending requests
     for (const [id, request] of this.requests.entries()) {
@@ -219,7 +216,6 @@ export class WorkerService {
     
     // Also terminate worker pools
     for (const [poolName, pool] of this.workerPools.entries()) {
-      console.log(`🏭 Terminating worker pool: ${poolName}`);
       pool.forEach(worker => worker.terminate());
     }
     this.workerPools.clear();
@@ -231,7 +227,6 @@ export class WorkerService {
    * @param taskType - Type of task to cancel (e.g., 'polygonGeometry')
    */
   public static cancelActiveTasks(taskType: string): void {
-    console.log(`Canceling all active ${taskType} tasks`);
     
     // Find all active requests for this task type
     const requestsToCancel: string[] = [];
@@ -263,6 +258,5 @@ export class WorkerService {
       }
     }
     
-    console.log(`Canceled ${requestsToCancel.length} active ${taskType} tasks`);
   }
 }

@@ -1,106 +1,158 @@
 // filepath: /home/tobi/project/stlmaps/packages/threegis-core/src/wasm/wasmBridge.ts
 // A simplified bridge to the WebAssembly module
-import init, * as WasmModule from "@threegis/core-wasm";
+import wasmInit, * as WasmModule from "@threegis/core-wasm";
 
 // Store the module instance globally once initialized
 let wasmModuleInstance: typeof WasmModule | null = null;
+let initializationPromise: Promise<void> | null = null;
+let isInitialized = false;
 
 /**
- * Initialize the WebAssembly module
+ * Initialize the WebAssembly module with enhanced error handling
  */
 export async function initializeWasm(): Promise<void> {
-  try {
-    // Configure WASM memory and tables for dynamic growth with large limits
-    if (typeof window !== "undefined") {
-      // Create a memory object with large initial and maximum size
-      // 128MB initial (2048 pages of 64KB)
-      // 2GB maximum (32768 pages of 64KB)
-      const memory = new WebAssembly.Memory({
-        initial: 2048,
-        maximum: 32768
-      });
-      
-      // Store memory globally to prevent garbage collection
-      (window as any).__WASM_MEMORY = memory;
-      
-      // Create function table with generous size and maximum growth limit
-      const table = new WebAssembly.Table({
-        initial: 10000,    // Increased initial size
-        maximum: 50000,    // Higher maximum limit
-        element: "anyfunc",
-      });
+  if (isInitialized) {
+    return;
+  }
 
-      // Store it globally to prevent garbage collection
-      (window as any).__WASM_TABLE = table;
-      
-      // Also create a reference table for externref (used by wasm-bindgen)
-      const refTable = new WebAssembly.Table({
-        initial: 10000,    // Increased initial size
-        maximum: 50000,    // Higher maximum limit
-        element: "externref",
-      });
-      
-      // Store it globally as well
-      (window as any).__WASM_EXTERNREF_TABLE = refTable;
-      
-      // Make it accessible to wasm-bindgen explicitly
-      (window as any).__wbindgen_externref_table_ptr = refTable;
-      (window as any).__wbindgen_anyfunc_table_ptr = table;
-    }
+  if (initializationPromise) {
+    return initializationPromise;
+  }
 
-    // For the wasm-bindgen generated modules, we don't need to call default()
-    // The module initializes itself when imported
+  initializationPromise = (async () => {
+    try {
+      if (typeof window === "undefined") {
+        throw new Error("WASM initialization requires browser environment");
+      }
 
-    // Check if the module was properly imported
-    if (!WasmModule) {
-      throw new Error("WASM Module failed to import properly");
-    }
+      // Validate WebAssembly support
+      if (!WebAssembly) {
+        throw new Error("WebAssembly not supported in this environment");
+      }
 
-    // Modern wasm-bindgen modules often don't have an explicit initialize function
-    // Instead, they initialize automatically when imported
-    // Only try to call initialize if it actually exists
-    if (typeof WasmModule === "object" && WasmModule !== null) {
-      // Check for explicit initialization functions with different possible names
-      if (init && typeof init === "function") {
+      // Configure WASM memory with validation
+      try {
+        const memory = new WebAssembly.Memory({
+          initial: 2048,
+          maximum: 32768
+        });
+        (window as any).__WASM_MEMORY = memory;
+
+        const table = new WebAssembly.Table({
+          initial: 10000,
+          maximum: 50000,
+          element: "anyfunc"
+        });
+        (window as any).__WASM_TABLE = table;
+
+        const refTable = new WebAssembly.Table({
+          initial: 10000,
+          maximum: 50000,
+          element: "externref"
+        });
+        (window as any).__WASM_EXTERNREF_TABLE = refTable;
+        (window as any).__wbindgen_externref_table_ptr = refTable;
+        (window as any).__wbindgen_anyfunc_table_ptr = table;
+      } catch (memoryError) {
+        throw new Error(`Failed to create WASM memory/tables: ${memoryError}`);
+      }
+
+      // Validate module import
+      if (!WasmModule || typeof WasmModule !== "object") {
+        throw new Error("WASM module failed to import properly");
+      }
+
+      // Initialize module - this is required for wasm-bindgen modules
+      if (wasmInit && typeof wasmInit === "function") {
         try {
-          init();
-          console.log("WASM module explicitly initialized");
+          await wasmInit();
         } catch (initError) {
-          console.warn(
-            "Non-critical: Error during explicit WASM initialization:",
-            initError
-          );
-          // Continue anyway, as many WASM modules self-initialize on import
+          throw new Error(`WASM initialization failed: ${initError}`);
         }
       } else {
-        console.log(
-          "WASM module has no explicit initialization function (normal for wasm-bindgen modules)"
-        );
+        throw new Error('WASM initialization function not available');
       }
+
+      // Validate essential functions exist (non-critical for basic initialization)
+      const requiredFunctions = [
+        'fetch_vector_tiles',
+        'extract_features_from_vector_tiles',
+        'create_polygon_geometry'
+      ];
+
+      const missingFunctions = requiredFunctions.filter(
+        fn => !(WasmModule as any)[fn] || typeof (WasmModule as any)[fn] !== 'function'
+      );
+
+      if (missingFunctions.length > 0) {
+        console.warn(`Some WASM functions not available: ${missingFunctions.join(', ')}`);
+        // Don't throw error - allow initialization to continue
+      }
+
+      wasmModuleInstance = WasmModule;
+      (window as any).wasmDebugInstance = wasmModuleInstance;
+
+      // Initialize WASM helper functions after module is loaded
+      const { initWasmFetchHelpers } = await import('./wasmFetchUtils');
+      initWasmFetchHelpers();
+
+      isInitialized = true;
+
+    } catch (error) {
+      initializationPromise = null;
+      throw new Error(`Failed to initialize WASM module: ${error}`);
     }
+  })();
 
-    // Store the module instance for later use
-    wasmModuleInstance = WasmModule;
-    (window as any).wasmDebugInstance = wasmModuleInstance;
-
-    console.log("WASM module initialized successfully");
-  } catch (error) {
-    console.error("Failed to initialize WASM module:", error);
-    throw error;
-  }
+  return initializationPromise;
 }
 
 /**
- * Get the initialized WASM module instance
+ * Get the initialized WASM module instance with validation
  * @returns The WASM module instance
  */
 export function getWasmModule(): typeof WasmModule {
-  if (!wasmModuleInstance) {
-    throw new Error(
-      "WASM module not initialized. Call initializeWasm() first."
-    );
+  if (!isInitialized || !wasmModuleInstance) {
+    throw new Error("WASM module not initialized. Call initializeWasm() first.");
   }
   return wasmModuleInstance;
+}
+
+/**
+ * Check if WASM module is initialized
+ * @returns True if the module is ready for use
+ */
+export function isWasmReady(): boolean {
+  return isInitialized && wasmModuleInstance !== null;
+}
+
+/**
+ * Safely call a WASM function with error handling
+ * @param functionName Name of the WASM function to call
+ * @param args Arguments to pass to the function
+ * @returns Function result or throws enhanced error
+ */
+export async function safeWasmCall<T>(
+  functionName: string,
+  ...args: any[]
+): Promise<T> {
+  if (!isWasmReady()) {
+    throw new Error(`WASM not ready for function call: ${functionName}`);
+  }
+
+  const wasmModule = getWasmModule();
+  const fn = (wasmModule as any)[functionName];
+
+  if (!fn || typeof fn !== 'function') {
+    throw new Error(`WASM function not found: ${functionName}`);
+  }
+
+  try {
+    const result = await fn(...args);
+    return result;
+  } catch (error) {
+    throw new Error(`WASM function ${functionName} failed: ${error}`);
+  }
 }
 
 /**

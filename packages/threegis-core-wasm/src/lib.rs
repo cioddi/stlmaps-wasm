@@ -149,7 +149,8 @@ pub fn clear_caches() -> bool {
     state.clear_all_caches();
     true
 }
-/// Store extracted feature data under a bbox_key and inner_key
+/// Store extracted feature data under a bbox_key and inner_key (DEPRECATED)
+#[deprecated(note = "Use add_process_feature_data_js instead")]
 #[wasm_bindgen]
 pub fn add_feature_data_js(bbox_key: &str, inner_key: &str, value: JsValue) -> bool {
     let mut state = ModuleState::global().lock().unwrap();
@@ -158,7 +159,8 @@ pub fn add_feature_data_js(bbox_key: &str, inner_key: &str, value: JsValue) -> b
     state.add_feature_data(bbox_key, inner_key, json);
     true
 }
-/// Retrieve stored feature data by bbox_key and inner_key
+/// Retrieve stored feature data by bbox_key and inner_key (DEPRECATED)
+#[deprecated(note = "Use get_process_feature_data_js instead")]
 #[wasm_bindgen]
 pub fn get_feature_data_js(bbox_key: &str, inner_key: &str) -> JsValue {
     let state = ModuleState::global().lock().unwrap();
@@ -166,12 +168,50 @@ pub fn get_feature_data_js(bbox_key: &str, inner_key: &str) -> JsValue {
         .get_feature_data(bbox_key, inner_key)
         .unwrap_or(JsValue::undefined())
 }
-/// Clear feature data entries for a given bbox_key
+/// Clear feature data entries for a given bbox_key (DEPRECATED)
+#[deprecated(note = "Use clear_process_cache_js instead")]
 #[wasm_bindgen]
 pub fn clear_feature_data_for_bbox_js(bbox_key: &str) -> bool {
     let mut state = ModuleState::global().lock().unwrap();
     state.clear_feature_data_for_bbox(bbox_key);
     true
+}
+
+// ========== New Process-based Cache Functions ==========
+
+/// Store extracted feature data for a specific process
+#[wasm_bindgen]
+pub fn add_process_feature_data_js(process_id: &str, data_key: &str, value: JsValue) -> bool {
+    let mut state = ModuleState::global().lock().unwrap();
+    // Convert JsValue to String before storing
+    let json = value.as_string().unwrap_or_else(|| String::from("{}"));
+    state.add_process_feature_data(process_id, data_key, json);
+    true
+}
+
+/// Retrieve stored feature data for a specific process
+#[wasm_bindgen]
+pub fn get_process_feature_data_js(process_id: &str, data_key: &str) -> JsValue {
+    let state = ModuleState::global().lock().unwrap();
+    state
+        .get_process_feature_data(process_id, data_key)
+        .unwrap_or(JsValue::undefined())
+}
+
+/// Clear all cached data for a specific process
+#[wasm_bindgen]
+pub fn clear_process_cache_js(process_id: &str) -> bool {
+    let mut state = ModuleState::global().lock().unwrap();
+    state.clear_process_data(process_id);
+    true
+}
+
+/// Get list of cached process IDs
+#[wasm_bindgen]
+pub fn get_cached_process_ids_js() -> JsValue {
+    let state = ModuleState::global().lock().unwrap();
+    let process_ids = state.get_cached_process_ids();
+    to_value(&process_ids).unwrap_or(JsValue::undefined())
 }
 
 #[wasm_bindgen]
@@ -190,15 +230,6 @@ pub fn hello_from_rust(name: &str) -> Result<JsValue, JsValue> {
     Ok(to_value(&response)?)
 }
 
-// Add a placeholder for projection testing later
-#[wasm_bindgen]
-pub fn transform_coordinate(_lon: f64, _lat: f64, _from_epsg: u32, _to_epsg: u32) -> Result<JsValue, JsValue> {
-    // Simple implementation without using the 'proj' crate
-    // For EPSG:4326 (WGS84) to EPSG:3857 (Web Mercator)
-    // This is a basic implementation - for production, use a proper projection library
-    
-    Ok(to_value(&"Placeholder for transform_coordinate function")?)
-}
 
 // Re-export the vector tile fetching function
 // Note: We don't use #[wasm_bindgen] on the use statement
@@ -318,20 +349,6 @@ pub fn buffer_line_string(geojson_str: &str, dist: f64) -> String {
     }
 }
 
-// Function to create 3D building geometry from a GeoJSON polygon
-#[wasm_bindgen]
-pub fn create_building_geometry(_building_json: &str, height: f64) -> String {
-    
-    
-    // In a real implementation, this would:
-    // 1. Parse the building GeoJSON
-    // 2. Extrude the building polygon to the specified height
-    // 3. Return a JSON representation of the 3D geometry
-    // 
-    // This is just a placeholder function for demonstration
-    
-    format!("{{\"success\": true, \"message\": \"Building with height {} created\"}}", height)
-}
 
 // An example struct that can be passed between Rust and JavaScript
 #[wasm_bindgen]
@@ -509,8 +526,11 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     let min_lat = bbox[1].as_f64().unwrap_or(0.0);
     let max_lng = bbox[2].as_f64().unwrap_or(0.0);
     let max_lat = bbox[3].as_f64().unwrap_or(0.0);
-    // Compute consistent bbox_key using central function
-    let bbox_key = cache_keys::make_bbox_key(min_lng, min_lat, max_lng, max_lat);
+    // Extract process_id from input
+    let process_id = input_val.get("processId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsValue::from_str("Missing 'processId' field"))?
+        .to_string();
     // Determine source layer from vtDataSet
     let source_layer = input_val
         .get("vtDataSet")
@@ -528,8 +548,9 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     );
     
     
-    // Retrieve features from feature_data_cache
-    let features: Vec<crate::polygon_geometry::GeometryData> = if let Some(js_val) = state.get_feature_data(&bbox_key, &inner_key) {
+    // Retrieve features from process-based cache
+    let process_data_key = cache_keys::make_process_cache_key(&process_id, &inner_key);
+    let features: Vec<crate::polygon_geometry::GeometryData> = if let Some(js_val) = state.get_process_feature_data(&process_id, &process_data_key) {
         // Stored as JSON string in JsValue
         let json_str = js_val.as_string().unwrap_or_else(|| "[]".to_string());
         
@@ -547,13 +568,7 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         
         
         // List what cache keys are actually available
-        if let Some(bbox_cache) = state.feature_data_cache.get(&bbox_key) {
-            for (_key, _) in bbox_cache.iter() {
-                
-            }
-        } else {
-            
-        }
+        // No features found in process cache
         Vec::new()
     };
 
@@ -561,8 +576,8 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     let features_value: serde_json::Value = serde_json::to_value(&features)
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize features: {}", e)))?;
     input_val["polygons"] = features_value;
-    // Update bbox_key in input
-    input_val["bbox_key"] = serde_json::Value::String(bbox_key.clone());
+    // Ensure processId is in input
+    input_val["processId"] = serde_json::Value::String(process_id.clone());
 
     // Serialize modified input for geometry creation
     let new_input = serde_json::to_string(&input_val)

@@ -1,931 +1,103 @@
-import { useState, useEffect, useMemo } from "react";
-import * as THREE from "three";
-import { useAppStore } from "../stores/useAppStore";
-import {
-  createComponentHashes,
-  createConfigHash,
-  hashBbox,
-  hashVtLayerConfig,
-  hashTerrainConfig,
-} from "../utils/configHashing";
-import { WorkerService } from "../workers/WorkerService";
-import GeometryWorker from "../workers/geometryWorker?worker";
-import { tokenManager } from "../utils/CancellationToken";
-import { VtDataSet } from "../types/VtDataSet";
-// Import WASM functionality
-import { 
-  useWasm, 
-  useElevationProcessor, 
-  getWasmModule,
-  fetchVtData,
-  calculateTileCount
-} from "@threegis/core";
+import React from "react";
+import { useGenerateMesh } from "../hooks/useGenerateMesh";
 
-// Define interfaces for our data structures
-export interface GridSize {
-  width: number;
-  height: number;
-}
-
-
-
-
-// Helper function to convert JS VtDataSet to Rust-compatible format
-function convertToRustVtDataSet(jsVtDataSet: VtDataSet) {
-  return {
-    sourceLayer: jsVtDataSet.sourceLayer,
-    subClass: jsVtDataSet.subClass ? [jsVtDataSet.subClass] : undefined,
-    enabled: jsVtDataSet.enabled,
-    bufferSize: jsVtDataSet.bufferSize,
-    extrusionDepth: jsVtDataSet.extrusionDepth ?? null,
-    minExtrusionDepth: jsVtDataSet.minExtrusionDepth ?? null,
-    heightScaleFactor: jsVtDataSet.heightScaleFactor ?? null,
-    useAdaptiveScaleFactor: jsVtDataSet.useAdaptiveScaleFactor ?? null,
-    zOffset: jsVtDataSet.zOffset ?? null,
-    alignVerticesToTerrain: jsVtDataSet.alignVerticesToTerrain ?? null,
-    csgClipping: jsVtDataSet.useCsgClipping ?? null,
-    filter: jsVtDataSet.filter ?? null, // Pass the filter to Rust
-  };
-}
-
-export const GenerateMeshButton = function () {
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
-    null
-  );
-
-  // Store the last processed bbox hash to detect changes for cache management
-  const [lastProcessedBboxHash, setLastProcessedBboxHash] =
-    useState<string>("");
-
-  // Get WASM-related hooks
-  const { isInitialized: isWasmInitialized } = useWasm();
-  const { processElevationForBbox } = useElevationProcessor();
-
-  // Get settings and setter functions directly from Zustand store
+/**
+ * GenerateMeshButton Component (Refactored)
+ *
+ * This component has been completely refactored to use the new useGenerateMesh hook.
+ * All processing logic has been moved to the hook for better separation of concerns,
+ * reusability, and maintainability.
+ *
+ * Key improvements:
+ * - Clean separation between UI and business logic
+ * - Parallel processing with multiple WASM contexts
+ * - Background processing to prevent main thread blocking
+ * - Better error handling and progress reporting
+ * - Cancellation support
+ * - Resource cleanup
+ */
+export const GenerateMeshButton: React.FC = () => {
   const {
-    bbox,
-    vtLayers,
-    terrainSettings,
-    buildingSettings,
-    debugSettings,
-    setGeometryDataSets,
-    geometryDataSets,
-    setIsProcessing,
-    updateProgress,
-    resetProcessing,
-    configHashes,
-    setConfigHashes,
-    setProcessedTerrainData,
-  } = useAppStore();
+    // State
+    isProcessingMesh,
+    processingProgress,
 
-  // Modify generate3DModel function to include buildings
-  const generate3DModel = async (): Promise<void> => {
-    if (!bbox) {
-      console.error("Cannot generate 3D model: bbox is undefined");
-      return;
-    }
+    // Actions
+    startMeshGeneration,
+    cancelMeshGeneration,
 
-    // Create a new cancellation token for this operation
-    // This will automatically cancel any previously running operations
-    const cancellationToken = tokenManager.getNewToken("generate3DModel");
+    // Utils
+    isWasmInitialized,
 
-    // Cancel any ongoing polygon geometry tasks as well
-    try {
-      WorkerService.cancelActiveTasks("polygon-geometry");
-      // Also cancel any WASM operations
-      const wasmModule = getWasmModule();
-      if (wasmModule?.cancel_operation) {
-        wasmModule.cancel_operation("polygon_processing");
-        wasmModule.cancel_operation("terrain_generation");
-      }
-    } catch (err) {
-      console.warn("Error cancelling existing tasks:", err);
-    }
+    // Debug info (can be removed in production)
+    currentProcessId,
+    hasActiveContexts
+  } = useGenerateMesh();
 
-    updateProgress("Processing...");
+  // Render processing status for debugging (optional)
+  if (process.env.NODE_ENV === 'development') {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '10px',
+        right: '10px',
+        background: 'rgba(0,0,0,0.8)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px',
+        fontSize: '12px',
+        zIndex: 1000,
+        maxWidth: '300px'
+      }}>
+        <div><strong>Mesh Generation Status</strong></div>
+        <div>WASM Initialized: {isWasmInitialized ? '✅' : '❌'}</div>
+        <div>Processing: {isProcessingMesh ? '🔄' : '⏸️'}</div>
+        <div>Stage: {processingProgress.stage}</div>
+        <div>Progress: {processingProgress.percentage.toFixed(1)}%</div>
+        <div>Message: {processingProgress.message}</div>
+        {currentProcessId && <div>Process ID: {currentProcessId.slice(-8)}...</div>}
+        <div>Active Contexts: {hasActiveContexts ? '🟢' : '🔴'}</div>
 
+        {processingProgress.currentLayerIndex !== undefined && (
+          <div>
+            Layer: {processingProgress.currentLayerIndex + 1}/{processingProgress.totalLayers}
+          </div>
+        )}
 
-    // Generate configuration hashes for efficiency checks
-    const currentFullConfigHash = createConfigHash(
-      bbox,
-      terrainSettings,
-      vtLayers
+        <div style={{ marginTop: '10px' }}>
+          <button
+            onClick={startMeshGeneration}
+            disabled={isProcessingMesh || !isWasmInitialized}
+            style={{
+              marginRight: '5px',
+              padding: '5px 10px',
+              fontSize: '11px',
+              cursor: isProcessingMesh ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {isProcessingMesh ? 'Generating...' : 'Generate Mesh'}
+          </button>
+
+          <button
+            onClick={cancelMeshGeneration}
+            disabled={!isProcessingMesh}
+            style={{
+              padding: '5px 10px',
+              fontSize: '11px',
+              cursor: !isProcessingMesh ? 'not-allowed' : 'pointer',
+              background: '#dc3545',
+              color: 'white',
+              border: 'none'
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     );
-    const { terrainHash: currentTerrainHash, layerHashes: currentLayerHashes } =
-      createComponentHashes(bbox, terrainSettings, vtLayers);
-
-    // Skip full regeneration if configuration hasn't changed
-    if (currentFullConfigHash === configHashes.fullConfigHash) {
-      return;
-    }
-
-
-    // Check which specific components need regeneration
-
-
-    try {
-      // Extract bbox coordinates from the feature
-      const feature = bbox;
-
-      if (!feature.geometry || feature.geometry.type !== "Polygon") {
-        console.error("Invalid geometry: expected a Polygon");
-        return;
-      }
-
-      // Check for cancellation before continuing
-      cancellationToken.throwIfCancelled();
-
-      const coordinates = feature.geometry.coordinates[0]; // First ring of the polygon
-
-      // Find min/max coordinates
-      let minLng = Infinity,
-        minLat = Infinity,
-        maxLng = -Infinity,
-        maxLat = -Infinity;
-      coordinates.forEach((coord: number[]) => {
-        const [lng, lat] = coord;
-        minLng = Math.min(minLng, lng);
-        minLat = Math.min(minLat, lat);
-        maxLng = Math.max(maxLng, lng);
-        maxLat = Math.max(maxLat, lat);
-      });
-
-      // Find appropriate zoom level where we get at most 4 tiles
-      // Start with maximum supported zoom level (12)
-      let zoom = 12;
-      while (zoom > 0) {
-        const tileCount = calculateTileCount(
-          minLng,
-          minLat,
-          maxLng,
-          maxLat,
-          zoom
-        );
-        if (tileCount <= 4) break;
-        zoom--;
-      }
-
-
-      // Update processing status
-      // updateProgress("Calculating tile coordinates...");
-
-      // Get tile coordinates
-
-      // Update processing status
-      // updateProgress("Processing elevation data...", 20);
-
-      // Check for cancellation before processing elevation data
-      cancellationToken.throwIfCancelled();
-
-      // Get the bbox hash to check for changes
-      const currentBboxHash = hashBbox(bbox);
-      const bboxChanged = currentBboxHash !== lastProcessedBboxHash;
-
-      if (bboxChanged) {
-        setLastProcessedBboxHash(currentBboxHash);
-      }
-
-      // Only attempt to process elevation data if WASM is initialized
-      if (!isWasmInitialized) {
-        throw new Error("WASM module not initialized. Please try again later.");
-      }
-
-      // Use the WASM-based elevation processing with the bboxHash as bbox_key
-
-      // updateProgress("Fetching elevation data...");
-      let elevationResult;
-      try {
-        // Pass the currentBboxHash as the bbox_key to store data in WASM
-        // This will automatically register the data with this ID in the WASM context
-        elevationResult = await processElevationForBbox(bbox, currentBboxHash);
-
-        // Debug: Log elevation processing results
-        console.log("🏔️ Elevation processing result:", {
-          gridSize: elevationResult.gridSize,
-          minElevation: elevationResult.minElevation,
-          maxElevation: elevationResult.maxElevation,
-          elevationRange: elevationResult.maxElevation - elevationResult.minElevation,
-          gridLength: elevationResult.elevationGrid?.length || 0
-        });
-
-        // updateProgress("Processing elevation data...");
-
-        // Store just the metadata for JavaScript-side operations, the actual grid
-        // remains in WASM memory and is accessible via the bbox_key (currentBboxHash)
-        setProcessedTerrainData({
-          processedElevationGrid: elevationResult.elevationGrid,
-          processedMinElevation: elevationResult.minElevation,
-          processedMaxElevation: elevationResult.maxElevation,
-        });
-      } catch (error) {
-        console.error("Error processing elevation data with WASM:", error);
-        throw new Error(
-          `Elevation processing failed: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-
-      // Check for cancellation before generating terrain geometry
-      cancellationToken.throwIfCancelled();
-
-      // Always process terrain geometry (visibility controlled in 3D preview)
-      let terrainGeometry = geometryDataSets.terrainGeometry;
-      let processedElevationGrid = elevationResult.elevationGrid;
-      let processedMinElevation = elevationResult.minElevation;
-      let processedMaxElevation = elevationResult.maxElevation;
-      const gridSize = elevationResult.gridSize;
-      // Initialize original elevation values (will be updated if WASM terrain is used)
-      let originalMinElevation = elevationResult.minElevation;
-      let originalMaxElevation = elevationResult.maxElevation;
-
-      // Re-calculate the current terrain hash here to ensure it's available
-      const { terrainHash: currentTerrainHashHere } = createComponentHashes(
-        bbox,
-        terrainSettings,
-        vtLayers
-      );
-
-      // Compare current and previous terrain hash
-      const terrainConfigChanged =
-        currentTerrainHashHere !== configHashes.terrainHash;
-
-      // Generate three.js geometry from elevation grid using WASM
-      // updateProgress("Generating terrain mesh...");
-
-      try {
-        // Get the WASM module instance
-        const wasmModule = getWasmModule();
-
-        // First, we need to process and register the elevation data with the bbox_key
-        // This step is crucial - create_terrain_geometry expects this data to be pre-registered
-
-        // We need to explicitly register the elevation data again for terrain generation
-        // Even though processElevationForBbox was called earlier, we need to ensure
-        // the elevation data is registered specifically for terrain generation
-        try {
-          // Call processElevationForBbox again to ensure the data is properly registered
-          // This will register the data with the same bbox_key (currentBboxHash)
-          await processElevationForBbox(bbox, currentBboxHash);
-        } catch (error) {
-          console.error(
-            "Failed to register elevation data for terrain:",
-            error
-          );
-          throw new Error(
-            `Failed to register elevation data: ${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-
-        // Now we can create the terrain geometry
-        const terrainParams = {
-          min_lng: minLng,
-          min_lat: minLat,
-          max_lng: maxLng,
-          max_lat: maxLat,
-          vertical_exaggeration: terrainSettings.verticalExaggeration,
-          terrain_base_height: terrainSettings.baseHeight,
-          bbox_key: currentBboxHash, // Use the bbox hash as the cache key
-        };
-
-        // Debug: Log terrain parameters to verify values
-        console.log("🏔️ Terrain generation parameters:", {
-          verticalExaggeration: terrainSettings.verticalExaggeration,
-          baseHeight: terrainSettings.baseHeight,
-          bbox: [minLng, minLat, maxLng, maxLat],
-          bbox_key: currentBboxHash
-        });
-
-        // Call the WASM terrain geometry generator (now async)
-        const wasmTerrainResult = await wasmModule.create_terrain_geometry(terrainParams);
-
-        // Debug: Log WASM terrain result statistics
-        console.log("🏔️ WASM terrain result:", {
-          vertexCount: wasmTerrainResult.positions.length / 3,
-          minElevation: wasmTerrainResult.processedMinElevation,
-          maxElevation: wasmTerrainResult.processedMaxElevation,
-          originalMinElevation: wasmTerrainResult.originalMinElevation,
-          originalMaxElevation: wasmTerrainResult.originalMaxElevation,
-          elevationRange: wasmTerrainResult.processedMaxElevation - wasmTerrainResult.processedMinElevation
-        });
-
-        // Convert WASM TypedArrays to THREE.js BufferGeometry with optimizations
-        const geometry = new THREE.BufferGeometry();
-        
-        // Use direct TypedArray references for better performance
-        geometry.setAttribute(
-          "position",
-          new THREE.BufferAttribute(wasmTerrainResult.positions, 3)
-        );
-        geometry.setAttribute(
-          "normal",
-          new THREE.BufferAttribute(wasmTerrainResult.normals, 3)
-        );
-        geometry.setAttribute(
-          "color",
-          new THREE.BufferAttribute(wasmTerrainResult.colors, 3)
-        );
-        
-        // Use Uint32Array directly instead of converting to Array for better performance
-        geometry.setIndex(new THREE.BufferAttribute(wasmTerrainResult.indices, 1));
-
-        terrainGeometry = geometry;
-        processedElevationGrid = wasmTerrainResult.processedElevationGrid;
-        processedMinElevation = wasmTerrainResult.processedMinElevation;
-        processedMaxElevation = wasmTerrainResult.processedMaxElevation;
-        // Use original elevation values for polygon alignment consistency
-        originalMinElevation = wasmTerrainResult.originalMinElevation;
-        originalMaxElevation = wasmTerrainResult.originalMaxElevation;
-
-      } catch (error) {
-        console.error("Error creating terrain geometry with WASM:", error);
-        throw new Error(
-          `Failed to create terrain geometry: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-      // Set generated geometries based on settings
-
-      // Fetch vt data for this bbox
-      await fetchVtData({
-        bbox: [minLng, minLat, maxLng, maxLat],
-        zoom: 14,
-        gridSize,
-      });
-
-      // CRITICAL: Ensure terrain data is fully processed and registered in WASM before layer processing
-      // This addresses the core issue where terrain alignment wasn't working after refactoring
-      console.log("🏔️ Terrain processing complete, ready for layer alignment...");
-      
-      // Update progress after terrain/VT data is complete
-      // updateProgress("Processing vector data...");
-
-      // Initialize or get existing polygon geometries
-      const vtPolygonGeometries: VtDataSet[] = [];
-
-      // Array to store geometry generation promises
-      const geometryPromises: {
-        layer: VtDataSet;
-        promise: Promise<THREE.BufferGeometry>;
-      }[] = [];
-
-      // Check if we have existing geometries to reuse
-      const existingGeometries = geometryDataSets.polygonGeometries || [];
-
-      // Get changed layer indices from our hash comparison
-      const changedLayerIndices = currentLayerHashes
-        .filter((layerHash) => {
-          const previousHash = configHashes.layerHashes.find(
-            (lh) => lh.index === layerHash.index
-          )?.hash;
-          return previousHash !== layerHash.hash;
-        })
-        .map((lh) => lh.index);
-
-      // Process vector tile layers
-      for (let i = 0; i < vtLayers.length; i++) {
-        // Check for cancellation before processing each layer
-        cancellationToken.throwIfCancelled();
-
-        const currentLayer = vtLayers[i];
-        const layerProgress = 50 + ((i + 1) * 40) / vtLayers.length;
-        
-        // updateProgress("Processing vector data...");
-
-        // Process all layers regardless of enabled state for 3D preview
-        // (Disabled layers will be hidden in the 3D preview but geometry is still generated)
-        console.log(`Processing layer: ${currentLayer.sourceLayer} (enabled: ${currentLayer.enabled !== false})`);
-
-        // Check if this layer's configuration has changed
-        const layerNeedsUpdate =
-          changedLayerIndices.includes(i) || terrainConfigChanged;
-        const existingLayerGeometry = existingGeometries.find(
-          (g) =>
-            g.sourceLayer === currentLayer.sourceLayer &&
-            g.subClass?.toString() === currentLayer.subClass?.toString()
-        );
-
-        // If layer config hasn't changed and we have existing geometry, reuse it
-        if (!layerNeedsUpdate && existingLayerGeometry?.geometry) {
-          console.log(
-            `%c ♻️ Reusing existing ${currentLayer.sourceLayer} geometry - configuration unchanged`,
-            "color: #4CAF50;"
-          );
-
-          // Update with the current color but keep the existing geometry
-          vtPolygonGeometries.push({
-            ...currentLayer,
-            geometry: existingLayerGeometry.geometry,
-          });
-          continue;
-        }
-
-        // Otherwise, regenerate the geometry
-        console.log(
-          `%c 🔄 Generating ${currentLayer.sourceLayer} geometry - configuration changed`,
-          "color: #FF9800;"
-        );
-        console.log(`Fetching ${currentLayer.sourceLayer} data...`);
-
-        // Check for cancellation before fetching layer data
-        cancellationToken.throwIfCancelled();
-
-
-        // First, extract and cache features using WASM
-        console.log(`Extracting and caching ${currentLayer.sourceLayer} features...`);
-        
-        try {
-          // This call extracts and caches features in WASM memory - it doesn't return them
-          await getWasmModule().extract_features_from_vector_tiles({
-            bbox: [minLng, minLat, maxLng, maxLat],
-            vtDataSet: convertToRustVtDataSet(currentLayer),
-            bboxKey: currentBboxHash,
-            elevationBBoxKey: currentBboxHash // Note: correct capitalization
-          });
-          
-          console.log(`✅ Features extracted and cached for ${currentLayer.sourceLayer}`);
-        } catch (error) {
-          console.error(`Failed to extract features for ${currentLayer.sourceLayer}:`, error);
-          continue; // Skip this layer if feature extraction fails
-        }
-
-
-        // Check for cancellation before creating polygon geometry
-        cancellationToken.throwIfCancelled();
-
-        // Check if debug mode is enabled for this layer or globally
-        const useDebugMode = debugSettings.geometryDebugMode || currentLayer.geometryDebugMode;
-        let layerGeometryPromise = Promise.resolve(new THREE.BufferGeometry());
-
-        if (useDebugMode) {
-          // Debug mode: use WASM but with debug flag to skip complex processing
-          console.log(`Creating debug geometry for ${currentLayer.sourceLayer} (skipping extrusion and buffering)`);
-          
-          try {
-            // Prepare the input for the Rust function but with debug flag
-            const polygonGeometryInput = {
-              terrainBaseHeight: terrainSettings.baseHeight,
-              verticalExaggeration: terrainSettings.verticalExaggeration,
-              bbox: [minLng, minLat, maxLng, maxLat],
-              elevationGrid: processedElevationGrid,
-              gridSize,
-              minElevation: originalMinElevation ?? elevationResult.minElevation,
-              maxElevation: originalMaxElevation ?? elevationResult.maxElevation,
-              vtDataSet: { 
-                ...convertToRustVtDataSet(currentLayer),
-                geometryDebugMode: true // Enable debug mode in WASM
-              },
-              useSameZOffset: true,
-              bbox_key: currentBboxHash,
-            };
-
-            const serializedInput = JSON.stringify(polygonGeometryInput);
-            
-            // Call the Rust implementation with debug mode
-            const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
-            const geometryDataArray = JSON.parse(geometryJson) as Array<{
-              vertices: number[];
-              normals: number[] | null;
-              colors: number[] | null;
-              indices: number[] | null;
-              uvs: number[] | null;
-              hasData: boolean;
-              properties?: Record<string, unknown>;
-            }>;
-
-            // For debug mode, we still need to handle individual geometries
-            // Create a container geometry similar to normal mode
-            const geometries: THREE.BufferGeometry[] = [];
-            
-            for (const geometryData of geometryDataArray) {
-              if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
-                continue;
-              }
-
-              const geometry = new THREE.BufferGeometry();
-              
-              // Add position attribute (vertices)
-              geometry.setAttribute(
-                "position", 
-                new THREE.BufferAttribute(new Float32Array(geometryData.vertices), 3)
-              );
-              
-              // Add color attribute if available
-              if (geometryData.colors && geometryData.colors.length > 0) {
-                geometry.setAttribute(
-                  "color",
-                  new THREE.BufferAttribute(new Float32Array(geometryData.colors), 3)
-                );
-              }
-              
-              // Add index attribute if available
-              if (geometryData.indices && geometryData.indices.length > 0) {
-                geometry.setIndex(Array.from(geometryData.indices));
-              }
-
-              // Add properties to userData for hover interaction
-              if (geometryData.properties) {
-                console.log(`Debug geometry ${geometries.length} properties:`, geometryData.properties);
-                geometry.userData = {
-                  properties: geometryData.properties
-                };
-              } else {
-                console.log(`Debug geometry ${geometries.length} has NO properties`);
-              }
-              
-              geometries.push(geometry);
-            }
-
-            // Create a container geometry that holds individual geometries as userData
-            const containerGeometry = new THREE.BufferGeometry();
-            containerGeometry.userData = {
-              isContainer: true,
-              individualGeometries: geometries,
-              geometryCount: geometries.length
-            };
-
-            layerGeometryPromise = Promise.resolve(containerGeometry);
-            console.log(`✅ Debug geometry created for ${currentLayer.sourceLayer} with ${geometries.length} individual meshes`);
-          } catch (error) {
-            console.error(`Failed to create debug geometry for ${currentLayer.sourceLayer}:`, error);
-            // Fallback to empty geometry
-            layerGeometryPromise = Promise.resolve(new THREE.BufferGeometry());
-          }
-        } else {
-          // Normal mode: use the Rust implementation to create polygon geometry
-          // This will retrieve the cached features from WASM memory
-          console.log(`Creating polygon geometry for ${currentLayer.sourceLayer} using Rust implementation`);
-        
-          try {
-          // Prepare the input for the Rust function
-          // Debug logging for elevation values
-          console.log("Polygon geometry elevation values:", {
-            originalMinElevation,
-            originalMaxElevation,
-            processedMinElevation,
-            processedMaxElevation
-          });
-          
-          // Ensure elevation values are valid numbers (not Infinity or -Infinity)
-          const safeMinElevation = Number.isFinite(originalMinElevation) ? originalMinElevation : elevationResult.minElevation;
-          const safeMaxElevation = Number.isFinite(originalMaxElevation) ? originalMaxElevation : elevationResult.maxElevation;
-          
-          const polygonGeometryInput = {
-            terrainBaseHeight: terrainSettings.baseHeight,
-            verticalExaggeration: terrainSettings.verticalExaggeration,
-            bbox: [minLng, minLat, maxLng, maxLat],
-            elevationGrid: processedElevationGrid,
-            gridSize,
-            minElevation: safeMinElevation,
-            maxElevation: safeMaxElevation,
-            vtDataSet: convertToRustVtDataSet(currentLayer), // Convert to format compatible with Rust
-            useSameZOffset: true,
-            bbox_key: currentBboxHash, // Pass the bbox key to access cached features
-          };
-
-          const serializedInput = JSON.stringify(polygonGeometryInput);
-          
-          // Create cancellation token for this layer processing
-          const layerToken = `layer_${currentLayer.sourceLayer}_${cancellationToken.id}`;
-          getWasmModule().create_cancellation_token(layerToken);
-          
-          // Call the Rust implementation directly with cancellation support
-          const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
-          
-          // Parse JSON asynchronously to avoid blocking
-          const parseJsonAsync = async (jsonString: string) => {
-            return new Promise((resolve) => {
-              setTimeout(() => {
-                resolve(JSON.parse(jsonString));
-              }, 0);
-            });
-          };
-          
-          const geometryDataArray = await parseJsonAsync(geometryJson) as Array<{
-            vertices: number[];
-            normals: number[] | null;
-            colors: number[] | null;
-            indices: number[] | null;
-            uvs: number[] | null;
-            hasData: boolean;
-            properties?: Record<string, unknown>;
-          }>;
-
-          console.log(`WASM returned ${geometryDataArray.length} individual geometries`);
-          
-          // Debug: Log details of returned geometries
-          geometryDataArray.forEach((geom, idx) => {
-            console.log(`Geometry ${idx}: hasData=${geom.hasData}, vertices=${geom.vertices?.length || 0}, indices=${geom.indices?.length || 0}`);
-          });
-
-          // Process geometries in web worker to avoid blocking main thread
-          // updateProgress("Processing geometries in worker...");
-          
-          // Cancel any existing geometry processing tasks
-          WorkerService.cancelActiveTasks('geometryProcessor');
-          
-          const workerResult = await WorkerService.runWorkerTask(
-            'geometryProcessor',
-            GeometryWorker,
-            {
-              geometryDataArray,
-              layerName: currentLayer.sourceLayer
-            }
-          );
-          
-          // Check for cancellation after worker completes
-          if (cancellationToken.isCancelled) {
-            console.log("Geometry processing cancelled by user after worker completion");
-            return;
-          }
-          
-          // Convert worker results back to Three.js geometries on main thread
-          const geometries: THREE.BufferGeometry[] = [];
-          const processedGeometries = workerResult.geometries;
-          
-          console.log(`Worker returned ${processedGeometries.length} processed geometries`);
-          
-          for (const processedGeom of processedGeometries) {
-            if (!processedGeom.hasData || !processedGeom.vertices || processedGeom.vertices.length === 0) {
-              console.log(`Skipping empty geometry: hasData=${processedGeom.hasData}, vertices=${processedGeom.vertices?.length || 0}`);
-              continue;
-            }
-
-            const geometry = new THREE.BufferGeometry();
-            
-            // Add position attribute (vertices)
-            geometry.setAttribute(
-              "position", 
-              new THREE.BufferAttribute(new Float32Array(processedGeom.vertices), 3)
-            );
-            
-            // Add normal attribute if available
-            if (processedGeom.normals && processedGeom.normals.length > 0) {
-              geometry.setAttribute(
-                "normal",
-                new THREE.BufferAttribute(new Float32Array(processedGeom.normals), 3)
-              );
-            }
-            
-            // Add color attribute if available
-            if (processedGeom.colors && processedGeom.colors.length > 0) {
-              geometry.setAttribute(
-                "color",
-                new THREE.BufferAttribute(new Float32Array(processedGeom.colors), 3)
-              );
-            }
-            
-            // Add index attribute if available
-            if (processedGeom.indices && processedGeom.indices.length > 0) {
-              geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(processedGeom.indices), 1));
-            }
-
-            // Add properties to userData for hover interaction
-            if (processedGeom.properties) {
-              geometry.userData = {
-                properties: processedGeom.properties
-              };
-            }
-            
-            // Compute normals if needed (minimal main thread work)
-            if (processedGeom.needsNormals) {
-              geometry.computeVertexNormals();
-            }
-
-            geometries.push(geometry);
-          }
-
-          console.log(`Created ${geometries.length} individual Three.js geometries from worker results`);
-
-          // Create a container geometry that holds individual geometries as userData
-          // This allows the system to expect a single geometry while preserving individual ones
-          const containerGeometry = new THREE.BufferGeometry();
-          containerGeometry.userData = {
-            isContainer: true,
-            individualGeometries: geometries,
-            geometryCount: geometries.length
-          };
-          
-          console.log(`Successfully created ${currentLayer.sourceLayer} container with ${geometries.length} individual geometries`);
-          
-          // Use the container geometry as the promise result
-          layerGeometryPromise = Promise.resolve(containerGeometry);
-          } catch (error) {
-            console.error(`Error creating ${currentLayer.sourceLayer} geometry with Rust:`, error);
-            // Keep the empty geometry as fallback
-          }
-        }
-
-        // Store the promise for later resolution
-        geometryPromises.push({
-          layer: currentLayer,
-          promise: layerGeometryPromise,
-        });
-
-        // Create a placeholder entry in the polygon geometries array
-        // It will be updated when all promises are resolved
-        vtPolygonGeometries.push({
-          ...currentLayer,
-          // Initially use an empty geometry that will be replaced later
-          geometry: new THREE.BufferGeometry(),
-        });
-
-      }
-
-      // Wait for all async geometry promises to resolve before updating the UI
-      if (geometryPromises.length > 0) {
-        console.log(
-          `Waiting for ${geometryPromises.length} geometries to be generated...`
-        );
-
-        // Check for cancellation before waiting for worker results
-        cancellationToken.throwIfCancelled();
-
-        // Check if any layers have terrain alignment enabled
-        const hasTerrainAlignment = vtLayers.some(layer => layer.alignVerticesToTerrain);
-
-        try {
-          setIsProcessing(true);
-          let results;
-          
-          if (hasTerrainAlignment) {
-            // Process layers SEQUENTIALLY when terrain alignment is enabled
-            // This ensures terrain data is properly available for each layer
-            console.log("🏔️ Processing layers sequentially due to terrain alignment");
-            results = [];
-            
-            for (const { layer, promise } of geometryPromises) {
-              try {
-                console.log(`Processing ${layer.sourceLayer} with terrain alignment...`);
-                const geometry = await promise;
-                results.push({ layer, geometry, success: true });
-              } catch (error) {
-                console.error(`Error generating ${layer.sourceLayer} geometry:`, error);
-                results.push({
-                  layer,
-                  geometry: new THREE.BufferGeometry(),
-                  success: false,
-                });
-              }
-            }
-          } else {
-            // Process layers in parallel when no terrain alignment is needed
-            console.log("⚡ Processing layers in parallel (no terrain alignment)");
-            results = await Promise.all(
-              geometryPromises.map(async ({ layer, promise }) => {
-                try {
-                  const geometry = await promise;
-                  return { layer, geometry, success: true };
-                } catch (error) {
-                  console.error(
-                    `Error generating ${layer.sourceLayer} geometry:`,
-                    error
-                  );
-                  return {
-                    layer,
-                    geometry: new THREE.BufferGeometry(),
-                    success: false,
-                  };
-                }
-              })
-            );
-          }
-
-          // updateProgress("Finalizing geometries...");
-          // Update the placeholder geometries with actual results
-          results.forEach(({ layer, geometry, success }) => {
-            if (success) {
-              console.log(
-                `Created valid ${layer.sourceLayer} geometry with ${geometry.attributes.position?.count || 0} vertices`
-              );
-            } else {
-              console.warn(
-                `Failed to create ${layer.sourceLayer} geometry with web worker`
-              );
-            }
-
-            // Find and update the placeholder entry for this layer
-            const layerIndex = vtPolygonGeometries.findIndex(
-              (item) =>
-                item.sourceLayer === layer.sourceLayer &&
-                JSON.stringify(item.subClass) === JSON.stringify(layer.subClass)
-            );
-
-            if (layerIndex !== -1) {
-              vtPolygonGeometries[layerIndex].geometry = geometry;
-            }
-          });
-
-          console.log(
-            "All worker geometries have been generated and integrated"
-          );
-          
-          // CSG union is now handled automatically in the WASM module
-          console.log("✅ Geometry processing completed with integrated CSG union optimization");
-        } catch (error) {
-          console.error("Error waiting for geometry workers:", error);
-        }
-      }
-
-      cancellationToken.throwIfCancelled();
-
-      // Update the Zustand store with our geometries
-      // Final step - updating 3D model
-      // updateProgress("Updating 3D model...");
-
-      setGeometryDataSets({
-        terrainGeometry: terrainGeometry, // Always store terrain geometry, visibility controlled in 3D preview
-        polygonGeometries: vtPolygonGeometries,
-      });
-      // Store the hashes for future comparisons
-      setConfigHashes({
-        fullConfigHash: currentFullConfigHash,
-        terrainHash: currentTerrainHash,
-        layerHashes: currentLayerHashes,
-      });
-
-      // Show completion message briefly then hide popup
-      updateProgress("Complete!");
-      
-      // Hide progress popup after showing completion message briefly
-      setTimeout(() => {
-        resetProcessing();
-      }, 1500);
-
-      console.log(
-        "%c ✅ 3D model generation complete!",
-        "background: #4CAF50; color: white; padding: 4px; font-weight: bold;"
-      );
-
-      // Hide the processing indicator after a short delay to let users see the completion
-      setTimeout(() => {
-        setIsProcessing(false);
-      }, 2000);
-    } catch (error: unknown) {
-      // Check if this was a cancellation error (which is expected when the user changes the selection)
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-
-      if (errorMessage.includes("Operation was cancelled")) {
-        console.log("3D model generation was cancelled by user action");
-        // Don't update UI state for cancelled operations
-        return;
-      }
-
-      console.error("Error generating 3D model:", error);
-
-      // Only show error in processing indicator for non-cancellation errors
-      const displayErrorMessage =
-        error instanceof Error ? error.message : "Failed to generate 3D model";
-      updateProgress(`Error: ${displayErrorMessage}`);
-
-      // Hide the indicator after showing the error
-      setTimeout(() => {
-        resetProcessing();
-      }, 3000);
-    }
-  };
-
-  // Create a geometry-only hash that excludes color changes
-  const geometryOnlyLayersHash = useMemo(() => {
-    return vtLayers.map(hashVtLayerConfig).join(':');
-  }, [vtLayers]);
-
-  // Create a geometry-only terrain hash that excludes color changes
-  const geometryOnlyTerrainHash = useMemo(() => {
-    return hashTerrainConfig(terrainSettings);
-  }, [terrainSettings]);
-
-  useEffect(() => {
-    console.log("GenerateMeshButton dependencies changed:", {
-      hasBbox: !!bbox,
-      terrainEnabled: terrainSettings?.enabled,
-      buildingsEnabled: buildingSettings?.enabled,
-      layerCount: vtLayers?.length,
-    });
-
-    // Cancel any previous operations when dependencies change
-    tokenManager.cancelCurrentOperation();
-
-    if (debounceTimer) clearTimeout(debounceTimer);
-    if (!bbox) {
-      console.warn("No bbox available, skipping model generation");
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      console.log("Debounce timer expired, generating 3D model");
-      generate3DModel();
-    }, 1000);
-
-    setDebounceTimer(timer);
-
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [
-    bbox, 
-    // Use useMemo to create stable geometry-only hashes
-    geometryOnlyLayersHash,
-    geometryOnlyTerrainHash
-  ]); // Only trigger on geometry-affecting changes, not color changes
-
-  return <></>;
+  }
+
+  // In production, this component is invisible as processing happens automatically
+  // The hook handles all the generation logic internally based on store changes
+  return null;
 };

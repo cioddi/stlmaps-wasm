@@ -127,7 +127,6 @@ const ExportButtons: React.FC = () => {
       
       // If indices are out of bounds, remove them and let Three.js create valid ones
       if (hasInvalidIndex || maxIndex >= positionCount) {
-        console.warn(`Fixing out-of-bounds indices: max index ${maxIndex} exceeds vertex count ${positionCount}`);
         validatedGeometry.setIndex(null);
       }
     }

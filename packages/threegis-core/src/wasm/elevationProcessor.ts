@@ -76,18 +76,18 @@ export const initWasmJsHelpers = () => {
     }
   };
   
-  console.log('WebAssembly elevation helpers initialized');
 };
 
 /**
  * Process elevation data using the WASM module
- * 
+ *
  * @param wasmModule The WebAssembly module instance
  * @param minLng Minimum longitude of the bounding box
  * @param minLat Minimum latitude of the bounding box
  * @param maxLng Maximum longitude of the bounding box
  * @param maxLat Maximum latitude of the bounding box
  * @param tiles Array of tile coordinates
+ * @param processId Unique process identifier for resource management
  * @returns Promise resolving to the processed elevation data
  */
 export const processElevationDataWasm = async (
@@ -96,9 +96,9 @@ export const processElevationDataWasm = async (
   minLat: number,
   maxLng: number,
   maxLat: number,
-  tiles: Tile[]
+  tiles: Tile[],
+  processId: string
 ): Promise<ElevationProcessingResult> => {
-  console.log('Processing elevation data with WASM', { minLng, minLat, maxLng, maxLat, tileCount: tiles.length });
   
   // Make sure our JS helper functions are initialized
   if (!(window as any).wasmJsHelpers) {
@@ -117,7 +117,8 @@ export const processElevationDataWasm = async (
       z: tile.z
     })),
     grid_width: 200,  // Default tile width
-    grid_height: 200  // Default tile height
+    grid_height: 200, // Default tile height
+    process_id: processId  // Process reference for resource management
   };
   
   // Convert to JSON string to pass to WASM
@@ -126,7 +127,6 @@ export const processElevationDataWasm = async (
   try {
     // Call the WASM function
     const result = await wasmModule.process_elevation_data_async(inputJson);
-    console.log('WASM elevation processing complete', result);
     
     // Validate the result structure and provide defaults if needed
     if (!result) {
@@ -152,7 +152,6 @@ export const processElevationDataWasm = async (
     
     return processedResult;
   } catch (error) {
-    console.error('Failed to process elevation data in WASM:', error);
     throw error;
   }
 };

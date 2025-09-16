@@ -29,9 +29,42 @@ pub struct GeometryData {
     pub geometry: Vec<Vec<f64>>,  // Array of [lng, lat] points
     pub r#type: Option<String>,   // Geometry type (e.g., "Polygon", "LineString")
     pub height: Option<f64>,
-    pub layer: Option<String>,
+    pub layer: Option<String>,    // Source layer for processing
+    pub label: Option<String>,    // Display label for grouping
     pub tags: Option<serde_json::Value>,
     pub properties: Option<serde_json::Value>, // Original properties from MVT
+}
+
+// Helper functions for GeometryData
+impl GeometryData {
+    pub fn get_label(&self) -> &str {
+        self.label.as_deref().unwrap_or(self.layer.as_deref().unwrap_or("unknown"))
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.geometry.is_empty() {
+            return Err("geometry cannot be empty".to_string());
+        }
+        for point in &self.geometry {
+            if point.len() < 2 {
+                return Err("geometry points must have at least 2 coordinates".to_string());
+            }
+            let lng = point[0];
+            let lat = point[1];
+            if lng < -180.0 || lng > 180.0 {
+                return Err(format!("invalid longitude: {}", lng));
+            }
+            if lat < -90.0 || lat > 90.0 {
+                return Err(format!("invalid latitude: {}", lat));
+            }
+        }
+        if let Some(h) = self.height {
+            if h < 0.0 || h > MAX_HEIGHT {
+                return Err(format!("invalid height: {} (must be 0-{})", h, MAX_HEIGHT));
+            }
+        }
+        Ok(())
+    }
 }
 
 // Struct to match GridSize from TypeScript
@@ -46,6 +79,8 @@ pub struct GridSize {
 pub struct VtDataSet {
     #[serde(default, rename = "sourceLayer")]
     pub source_layer: String,
+    #[serde(default, rename = "label")]
+    pub label: Option<String>,
     #[serde(default = "default_color")]
     pub color: String,
     #[serde(rename = "extrusionDepth")]
@@ -61,6 +96,30 @@ pub struct VtDataSet {
     #[serde(rename = "alignVerticesToTerrain")]
     pub align_vertices_to_terrain: Option<bool>,
     pub filter: Option<serde_json::Value>,
+}
+
+// Helper function to get display label for a VtDataSet
+impl VtDataSet {
+    pub fn get_label(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.source_layer)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.source_layer.is_empty() {
+            return Err("source_layer cannot be empty".to_string());
+        }
+        if let Some(depth) = self.extrusion_depth {
+            if depth < 0.0 {
+                return Err("extrusion_depth cannot be negative".to_string());
+            }
+        }
+        if let Some(scale) = self.height_scale_factor {
+            if scale <= 0.0 {
+                return Err("height_scale_factor must be positive".to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 // Default color function for VtDataSet
@@ -92,7 +151,8 @@ pub struct PolygonGeometryInput {
     #[serde(default, rename = "useSameZOffset")]
     pub use_same_z_offset: bool,
     #[allow(dead_code)] // Part of public API structure
-    pub bbox_key: String,
+    #[serde(rename = "processId")]
+    pub process_id: String,
     // Optionally override CSG clipping for this request
     #[serde(rename = "csgClipping")]
     pub csg_clipping: Option<bool>,

@@ -23,8 +23,8 @@ pub struct ElevationProcessingInput {
     pub tiles: Vec<TileRequest>,
     pub grid_width: u32,
     pub grid_height: u32,
-    // NEW: bbox key for grouping cache entries
-    pub bbox_key: Option<String>,
+    // Process reference for grouping cache entries
+    pub process_id: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -321,34 +321,15 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
 	}
 	
 	// After computing elevation_grid and before returning the result:
-    let bbox_key = format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat);
     {
         let state = ModuleState::global();
         let mut state = state.lock().unwrap();
-        
-        
-        // Store the processed result in cache using the bbox key
-        state.store_elevation_grid(bbox_key.clone(), elevation_grid.clone());
-        
+
+        // Store the processed result in cache using the process ID
+        state.store_elevation_grid(input.process_id.clone(), elevation_grid.clone());
+
         // Debug current cache state
-        
-        // If a bbox_key is provided, store the elevation grid with that ID directly
-        // This ensures the terrain generation can find it using just the bbox_key
-        if let Some(ref bbox_key) = input.bbox_key {
-            
-            // Store using the bbox_key directly as the key
-            state.elevation_grids.insert(bbox_key.clone(), elevation_grid.clone());
-            
-            // Also store with a prefixed version of the bbox_key for redundancy
-            let alt_key = format!("bbox_{}", bbox_key);
-            state.elevation_grids.insert(alt_key.clone(), elevation_grid.clone());
-            
-            // Create a mapping for debugging
-            
-            // List all keys in cache for debugging 
-            let _keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
-        } else {
-        }
+        let _keys: Vec<String> = state.elevation_grids.keys().cloned().collect();
     }
     
     // Calculate tile cache hit rate as before
