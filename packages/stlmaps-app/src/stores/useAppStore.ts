@@ -410,7 +410,7 @@ export const useAppStore = create<AppState>()(
           vtLayers: newVtLayers,
           layerColorUpdates: {
             ...state.layerColorUpdates,
-            [layer.sourceLayer]: threeColor
+            [layer.label]: threeColor
           },
           colorOnlyUpdate: true
         };
@@ -440,7 +440,7 @@ export const useAppStore = create<AppState>()(
           vtLayers: newVtLayers,
           layerColorUpdates: {
             ...state.layerColorUpdates,
-            [`${layer.sourceLayer}_zOffset`]: offset
+            [`${layer.label}_zOffset`]: offset
           },
           colorOnlyUpdate: true
         };
@@ -475,7 +475,7 @@ export const useAppStore = create<AppState>()(
           vtLayers: newVtLayers,
           layerColorUpdates: {
             ...state.layerColorUpdates,
-            [`${layer.sourceLayer}_heightScaleFactor`]: factor
+            [`${layer.label}_heightScaleFactor`]: factor
           },
           colorOnlyUpdate: true
         };

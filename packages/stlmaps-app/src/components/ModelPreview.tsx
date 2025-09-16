@@ -819,9 +819,10 @@ const ModelPreview = () => {
     
     modelGroup.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        // Handle layer color updates
-        if (child.userData?.sourceLayer) {
-          const newColor = layerColorUpdates[child.userData.sourceLayer];
+        // Handle layer color updates (support both old and new layer identification)
+        const layerKey = child.userData?.label || child.userData?.sourceLayer;
+        if (layerKey) {
+          const newColor = layerColorUpdates[layerKey];
           if (newColor && child.material) {
             if (Array.isArray(child.material)) {
               child.material.forEach(mat => {
@@ -854,15 +855,16 @@ const ModelPreview = () => {
         }
 
         // Handle layer z-offset updates (real-time z-translation)
-        if (child.userData?.sourceLayer) {
-          const zOffsetKey = `${child.userData.sourceLayer}_zOffset`;
-          const heightScaleKey = `${child.userData.sourceLayer}_heightScaleFactor`;
-          
+        const layerKey2 = child.userData?.label || child.userData?.sourceLayer;
+        if (layerKey2) {
+          const zOffsetKey = `${layerKey2}_zOffset`;
+          const heightScaleKey = `${layerKey2}_heightScaleFactor`;
+
           if (layerColorUpdates[zOffsetKey] !== undefined) {
             const zOffset = layerColorUpdates[zOffsetKey] as number;
             // Always position at terrain base height + layer zOffset (no magic numbers)
             child.position.z = terrainSettings.baseHeight + zOffset;
-            console.log(`🔧 Updated ${child.userData.sourceLayer} zOffset: terrain base (${terrainSettings.baseHeight}) + zOffset (${zOffset}) = ${child.position.z}`);
+            console.log(`🔧 Updated ${layerKey2} zOffset: terrain base (${terrainSettings.baseHeight}) + zOffset (${zOffset}) = ${child.position.z}`);
           }
 
           // Handle height scale factor updates (real-time scaling)
@@ -945,9 +947,9 @@ const ModelPreview = () => {
       if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
         geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
           if (!geometry) return; // Skip if geometry is undefined
-          
+
           // Look up current enabled state from layer store instead of using stored state
-          const currentLayer = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+          const currentLayer = vtLayers.find(layer => layer.label === vtDataset.label);
           const isCurrentlyEnabled = currentLayer?.enabled !== false;
           
           
@@ -963,7 +965,7 @@ const ModelPreview = () => {
               }
               
               // Create color for polygon from current layer config (not stored geometry data)
-              const currentLayerConfig = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+              const currentLayerConfig = vtLayers.find(layer => layer.label === vtDataset.label);
               const layerColor = currentLayerConfig?.color || "#81ecec";
               const baseColor = new THREE.Color(layerColor);
               
@@ -1081,10 +1083,10 @@ const ModelPreview = () => {
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
           
           // Position mesh using the layer's configured zOffset value
-          const currentLayerConfig = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+          const currentLayerConfig = vtLayers.find(layer => layer.label === vtDataset.label);
           const layerZOffset = currentLayerConfig?.zOffset || 0;
           polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
-          console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh:`, {
+          console.log(`🏗️ Positioned ${vtDataset.label} mesh:`, {
             terrainBaseHeight: terrainSettings.baseHeight,
             layerZOffset: layerZOffset,
             finalPosition: polygonMesh.position.z,
@@ -1144,11 +1146,14 @@ const ModelPreview = () => {
     
     // Update visibility of existing meshes based on current layer enabled states
     scene.traverse((object) => {
-      if (object instanceof THREE.Mesh && object.userData?.sourceLayer) {
-        const sourceLayer = object.userData.sourceLayer;
-        const currentLayer = vtLayers.find(layer => layer.sourceLayer === sourceLayer);
+      if (object instanceof THREE.Mesh && (object.userData?.sourceLayer || object.userData?.label)) {
+        // Support both old (sourceLayer) and new (label) identification systems
+        const layerIdentifier = object.userData.label || object.userData.sourceLayer;
+        const currentLayer = vtLayers.find(layer =>
+          layer.label === layerIdentifier || layer.sourceLayer === layerIdentifier
+        );
         const isCurrentlyEnabled = currentLayer?.enabled !== false;
-        
+
         // Update mesh visibility
         object.visible = isCurrentlyEnabled;
       }

@@ -199,7 +199,7 @@ const ExportButtons: React.FC = () => {
           return;
         }
         // Check current enabled state from layer store instead of stored state
-        const currentLayer = vtLayers.find(layer => layer.sourceLayer === vtDataset.sourceLayer);
+        const currentLayer = vtLayers.find(layer => layer.label === vtDataset.label);
         const isCurrentlyEnabled = currentLayer?.enabled !== false;
         
         if (!isCurrentlyEnabled) {

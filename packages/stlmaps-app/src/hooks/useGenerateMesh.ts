@@ -517,7 +517,7 @@ export function useGenerateMesh() {
 
       // Parse JSON in background to avoid blocking main thread
       const geometryDataArray = await BackgroundProcessor.processInBackground(
-        `layer-${layer.sourceLayer}-parsing`,
+        `layer-${layer.label}-parsing`,
         {
           type: 'parse-json',
           data: { jsonString: geometryJson }
@@ -534,12 +534,12 @@ export function useGenerateMesh() {
 
       // Process geometries in background worker
       const workerResult = await BackgroundProcessor.processInBackground(
-        `layer-${layer.sourceLayer}-processing`,
+        `layer-${layer.label}-processing`,
         {
           type: 'process-geometries',
           data: {
             geometryDataArray,
-            layerName: layer.sourceLayer
+            layerName: layer.label
           }
         },
         (progress) => {
@@ -603,7 +603,7 @@ export function useGenerateMesh() {
         return sum + (positions ? positions.count : 0);
       }, 0);
 
-      console.log(`🔍 Layer ${layer.sourceLayer}: ${geometries.length} geometries, ${totalVertices} total vertices`);
+      console.log(`🔍 Layer "${layer.label}" (${layer.sourceLayer}): ${geometries.length} geometries, ${totalVertices} total vertices`);
       geometries.forEach((geo, i) => {
         const positions = geo.attributes.position;
         const vertexCount = positions ? positions.count : 0;
@@ -711,7 +711,7 @@ export function useGenerateMesh() {
 
       // Create layer contexts for parallel processing
       const layerContextPromises = vtLayers.map(async (layer) => {
-        const contextId = await contextManager.createLayerContext(layer.sourceLayer);
+        const contextId = await contextManager.createLayerContext(layer.label);
         return { layer, contextId };
       });
       const layerContexts = await Promise.all(layerContextPromises);

@@ -32,6 +32,7 @@ export function hashVtLayerConfig(vtLayer: VtDataSet): string {
   // Only include geometry-affecting properties, exclude visual properties and real-time adjustable properties
   return JSON.stringify({
     sourceLayer: vtLayer.sourceLayer,
+    label: vtLayer.label, // Include label to differentiate layers with same sourceLayer
     subClass: vtLayer.subClass,
     extrusionDepth: vtLayer.extrusionDepth,
     // zOffset excluded - can be updated in real-time
@@ -51,6 +52,7 @@ export function hashVtLayerConfig(vtLayer: VtDataSet): string {
 export function hashVtLayerVisuals(vtLayer: VtDataSet): string {
   return JSON.stringify({
     sourceLayer: vtLayer.sourceLayer,
+    label: vtLayer.label, // Include label to differentiate layers with same sourceLayer
     color: vtLayer.color ? { 
       r: vtLayer.color.r, 
       g: vtLayer.color.g, 
