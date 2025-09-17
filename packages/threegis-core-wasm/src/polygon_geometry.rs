@@ -920,42 +920,56 @@ fn create_extruded_shape(
         if let (Some(elev_grid), Some(grid_sz), Some(bbox_arr), Some(min_elev), Some(max_elev), Some(vert_exag), Some(base_height)) = 
             (elevation_grid, grid_size, bbox, min_elevation, max_elevation, vertical_exaggeration, terrain_base_height) {
             
-            // Apply terrain alignment to vertices
-            // Bottom vertices align to terrain surface, top vertices maintain relative height
+            // Apply terrain alignment to vertices - both top and bottom proportionally aligned
+            // First pass: determine the Z range of this geometry
+            let mut min_z = f64::INFINITY;
+            let mut max_z = f64::NEG_INFINITY;
+
+            for i in (0..vertices.len()).step_by(3) {
+                let z = vertices[i + 2] as f64;
+                min_z = min_z.min(z);
+                max_z = max_z.max(z);
+            }
+
+            let geometry_height = max_z - min_z;
+
+            // Second pass: align all vertices to terrain with proper proportional heights
             for i in (0..vertices.len()).step_by(3) {
                 // Get vertex position in mesh coordinates
                 let mesh_x = vertices[i] as f64;
                 let mesh_y = vertices[i + 1] as f64;
                 let current_z = vertices[i + 2] as f64;
-                
+
                 // Convert mesh coordinates (-100 to +100) to geographic coordinates
                 let mesh_size = 200.0;
                 let half_size = mesh_size / 2.0;
-                
+
                 // Normalize to 0-1 range
                 let norm_x = (mesh_x + half_size) / mesh_size;
                 let norm_y = (mesh_y + half_size) / mesh_size;
-                
+
                 // Convert to geographic coordinates
                 let lng = bbox_arr[0] + (bbox_arr[2] - bbox_arr[0]) * norm_x;
                 let lat = bbox_arr[1] + (bbox_arr[3] - bbox_arr[1]) * norm_y;
-                
+
                 // Get terrain height at this position
                 let terrain_height = sample_terrain_elevation_at_point(
                     lng, lat, elev_grid, grid_sz, bbox_arr, min_elev, max_elev,
                     vert_exag, base_height
                 );
-                
-                // Determine if this is a bottom or top vertex based on its Z position relative to z_offset
-                let vertex_height_above_base = current_z - z_offset;
-                
-                if vertex_height_above_base <= 0.01 {
-                    // This is a bottom vertex - align to terrain surface
-                    vertices[i + 2] = terrain_height as f32;
+
+                // Calculate the relative position of this vertex within the geometry's height range
+                let height_ratio = if geometry_height > 0.0001 {
+                    (current_z - min_z) / geometry_height
                 } else {
-                    // This is a top vertex - align to terrain surface + original height above bottom
-                    vertices[i + 2] = (terrain_height + vertex_height_above_base) as f32;
-                }
+                    0.0 // Single-height geometry (like flat surfaces)
+                };
+
+                // Apply proportional terrain alignment:
+                // - Bottom vertices (height_ratio = 0) align exactly to terrain surface
+                // - Top vertices (height_ratio = 1) align to terrain surface + original geometry height
+                // - Middle vertices interpolate proportionally
+                vertices[i + 2] = (terrain_height + height_ratio * geometry_height) as f32;
             }
         }
     } else {
