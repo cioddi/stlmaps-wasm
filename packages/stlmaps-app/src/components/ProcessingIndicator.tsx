@@ -1,8 +1,8 @@
 import React from 'react';
 import { styled, keyframes } from '@mui/material/styles';
-import { Box, Typography, Paper, useMediaQuery, useTheme } from '@mui/material';
+import { Box, Typography, Paper, useMediaQuery, useTheme, Button } from '@mui/material';
 import CodeIcon from '@mui/icons-material/Code';
-import { useAppStore } from '../stores/useAppStore';
+import { useGenerateMesh } from '../hooks/useGenerateMesh';
 
 // Pulsating animation for the icon
 const pulse = keyframes`
@@ -108,12 +108,16 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  
-  // Get state from the app store
-  const { isProcessing, processingStatus } = useAppStore();
+
+  // Get state from the mesh generation hook
+  const {
+    isProcessingMesh,
+    processingProgress,
+    cancelMeshGeneration,
+  } = useGenerateMesh();
 
   // Don't render if not processing
-  if (!isProcessing) {
+  if (!isProcessingMesh) {
     return null;
   }
 
@@ -122,7 +126,7 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
       elevation={8}
       sx={{
         opacity: 1,
-        pointerEvents: 'none'
+        pointerEvents: 'auto'
       }}
     >
       <TechLines sx={{backgroundImage:"linear-gradient(90deg, #42a5f5, #64ffda, #42a5f5)"}} />
@@ -134,12 +138,44 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
           {title}
         </Typography>
       </Box>
-      
-      {processingStatus && (
+
+      <Box sx={{ width: '100%', mb: 1 }}>
         <StatusText variant="body2">
-          {processingStatus}
+          Progress: {processingProgress.percentage.toFixed(1)}%
         </StatusText>
-      )}
+
+        {processingProgress.message && (
+          <StatusText variant="body2" sx={{ fontSize: '0.75rem', opacity: 0.8 }}>
+            {processingProgress.message}
+          </StatusText>
+        )}
+
+        {processingProgress.currentLayerIndex !== undefined && (
+          <StatusText variant="body2" sx={{ fontSize: '0.75rem', opacity: 0.8 }}>
+            Layer: {processingProgress.currentLayerIndex + 1}/{processingProgress.totalLayers}
+          </StatusText>
+        )}
+      </Box>
+
+      <Button
+        variant="outlined"
+        size="small"
+        color="error"
+        onClick={cancelMeshGeneration}
+        sx={{
+          fontSize: '0.75rem',
+          py: 0.5,
+          px: 1.5,
+          color: '#ff6b6b',
+          borderColor: '#ff6b6b',
+          '&:hover': {
+            borderColor: '#ff5252',
+            backgroundColor: 'rgba(255, 107, 107, 0.1)',
+          }
+        }}
+      >
+        Cancel
+      </Button>
     </ProcessingContainer>
   );
 };
