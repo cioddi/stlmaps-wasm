@@ -149,33 +149,6 @@ pub fn clear_caches() -> bool {
     state.clear_all_caches();
     true
 }
-/// Store extracted feature data under a bbox_key and inner_key (DEPRECATED)
-#[deprecated(note = "Use add_process_feature_data_js instead")]
-#[wasm_bindgen]
-pub fn add_feature_data_js(bbox_key: &str, inner_key: &str, value: JsValue) -> bool {
-    let mut state = ModuleState::global().lock().unwrap();
-    // Convert JsValue to String before storing
-    let json = value.as_string().unwrap_or_else(|| String::from("{}"));
-    state.add_feature_data(bbox_key, inner_key, json);
-    true
-}
-/// Retrieve stored feature data by bbox_key and inner_key (DEPRECATED)
-#[deprecated(note = "Use get_process_feature_data_js instead")]
-#[wasm_bindgen]
-pub fn get_feature_data_js(bbox_key: &str, inner_key: &str) -> JsValue {
-    let state = ModuleState::global().lock().unwrap();
-    state
-        .get_feature_data(bbox_key, inner_key)
-        .unwrap_or(JsValue::undefined())
-}
-/// Clear feature data entries for a given bbox_key (DEPRECATED)
-#[deprecated(note = "Use clear_process_cache_js instead")]
-#[wasm_bindgen]
-pub fn clear_feature_data_for_bbox_js(bbox_key: &str) -> bool {
-    let mut state = ModuleState::global().lock().unwrap();
-    state.clear_feature_data_for_bbox(bbox_key);
-    true
-}
 
 // ========== New Process-based Cache Functions ==========
 
@@ -522,10 +495,10 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
     if bbox.len() != 4 {
         return Err(JsValue::from_str("Invalid 'bbox': must contain [minLng, minLat, maxLng, maxLat]"));
     }
-    let min_lng = bbox[0].as_f64().unwrap_or(0.0);
-    let min_lat = bbox[1].as_f64().unwrap_or(0.0);
-    let max_lng = bbox[2].as_f64().unwrap_or(0.0);
-    let max_lat = bbox[3].as_f64().unwrap_or(0.0);
+    let _min_lng = bbox[0].as_f64().unwrap_or(0.0);
+    let _min_lat = bbox[1].as_f64().unwrap_or(0.0);
+    let _max_lng = bbox[2].as_f64().unwrap_or(0.0);
+    let _max_lat = bbox[3].as_f64().unwrap_or(0.0);
     // Extract process_id from input
     let process_id = input_val.get("processId")
         .and_then(|v| v.as_str())

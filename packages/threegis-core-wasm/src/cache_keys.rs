@@ -7,6 +7,7 @@ pub fn make_process_cache_key(process_id: &str, data_type: &str) -> String {
 
 /// Generate a legacy bbox key for backward compatibility (deprecated).
 #[deprecated(note = "Use process-based keys instead")]
+#[allow(dead_code)]
 pub fn make_bbox_key(min_lng: f64, min_lat: f64, max_lng: f64, max_lat: f64) -> String {
     format!("{}_{}_{}_{}", min_lng, min_lat, max_lng, max_lat)
 }
@@ -42,6 +43,7 @@ pub fn make_inner_key_from_filter(source_layer: &str, filter: Option<&serde_json
 }
 
 /// Generate an inner cache key from a VtDataSet using its label.
+#[allow(dead_code)]
 pub fn make_inner_key_from_vtdataset(vt_dataset: &crate::polygon_geometry::VtDataSet) -> String {
     let filter_str = vt_dataset.filter
         .as_ref()

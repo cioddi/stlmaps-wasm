@@ -97,11 +97,6 @@ pub struct ModuleState {
     pub cache_hits: usize,
     pub cache_misses: usize,
 
-    // Legacy caches (deprecated)
-    #[deprecated(note = "Use process-based caching instead")]
-    pub bbox_vector_tiles: HashMap<String, Vec<TileData>>,
-    #[deprecated(note = "Use process-based caching instead")]
-    pub feature_data_cache: HashMap<String, HashMap<String, String>>,
 }
 
 // Create a global static instance of the module state
@@ -122,9 +117,6 @@ impl ModuleState {
             max_vector_tiles: 50,
             cache_hits: 0,
             cache_misses: 0,
-            // Legacy caches
-            bbox_vector_tiles: HashMap::new(),
-            feature_data_cache: HashMap::new(),
         }
     }
     
@@ -221,6 +213,7 @@ impl ModuleState {
     }
 
     // Store fetched vector tiles under bbox_key
+    #[allow(dead_code)]
     pub fn store_vector_tiles(&mut self, bbox_key: &str, results: &[crate::vectortile::VectorTileResult]) {
         
         let mut tile_list = Vec::with_capacity(results.len());
@@ -242,13 +235,14 @@ impl ModuleState {
             };
             tile_list.push(tile_data);
         }
-        self.bbox_vector_tiles.insert(bbox_key.to_string(), tile_list);
+        // Legacy method - storing in process cache instead
+        self.process_vector_tiles.insert(bbox_key.to_string(), tile_list);
     }
 
     // Retrieve cached vector tiles by bbox_key
     pub fn get_vector_tiles(&self, bbox_key: &str) -> Option<&Vec<TileData>> {
         
-        if let Some(tiles) = self.bbox_vector_tiles.get(bbox_key) {
+        if let Some(tiles) = self.process_vector_tiles.get(bbox_key) {
             
             Some(tiles)
         } else {
@@ -359,27 +353,24 @@ impl ModuleState {
 
     /// Store extracted feature data under a bbox_key and inner_key as JSON string
     #[deprecated(note = "Use add_process_feature_data instead")]
+    #[allow(dead_code)]
     pub fn add_feature_data(&mut self, bbox_key: &str, inner_key: &str, json: String) {
-        let entry = self.feature_data_cache
-            .entry(bbox_key.to_string())
-            .or_insert_with(HashMap::new);
-        entry.insert(inner_key.to_string(), json);
-        
+        // Redirect to process-based caching
+        self.add_process_feature_data(bbox_key, inner_key, json);
     }
     
     /// Retrieve stored feature data by bbox_key and inner_key
+    #[allow(dead_code)]
     pub fn get_feature_data(&self, bbox_key: &str, inner_key: &str) -> Option<JsValue> {
-        self.feature_data_cache
-            .get(bbox_key)
-            .and_then(|inner| inner.get(inner_key).cloned())
-            .map(|s| JsValue::from_str(&s))
+        // Redirect to process-based caching
+        self.get_process_feature_data(bbox_key, inner_key)
     }
     
     /// Clear all feature data entries for a given bbox_key
+    #[allow(dead_code)]
     pub fn clear_feature_data_for_bbox(&mut self, bbox_key: &str) {
-        if self.feature_data_cache.remove(bbox_key).is_some() {
-            
-        }
+        // Redirect to process-based clearing
+        self.clear_process_data(bbox_key);
     }
     
     // Get cache statistics
@@ -399,8 +390,9 @@ impl ModuleState {
         self.raster_tiles.clear();
         self.vector_tiles.clear();
         self.elevation_grids.clear();
-        self.bbox_vector_tiles.clear();
-        self.feature_data_cache.clear();
+        self.process_vector_tiles.clear();
+        self.mvt_parsed_tiles.clear();
+        self.process_feature_data.clear();
         // Reset stats
         self.cache_hits = 0;
         self.cache_misses = 0;

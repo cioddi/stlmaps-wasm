@@ -37,10 +37,12 @@ pub struct GeometryData {
 
 // Helper functions for GeometryData
 impl GeometryData {
+    #[allow(dead_code)]
     pub fn get_label(&self) -> &str {
         self.label.as_deref().unwrap_or(self.layer.as_deref().unwrap_or("unknown"))
     }
 
+    #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
         if self.geometry.is_empty() {
             return Err("geometry cannot be empty".to_string());
@@ -104,6 +106,7 @@ impl VtDataSet {
         self.label.as_deref().unwrap_or(&self.source_layer)
     }
 
+    #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
         if self.source_layer.is_empty() {
             return Err("source_layer cannot be empty".to_string());
