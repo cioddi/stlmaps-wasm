@@ -239,7 +239,7 @@ const defaultLayers: VtDataSet[] = [
     sourceLayer: "transportation",
     label: "Footways",
     enabled: true,
-    color: "#ffefda",
+    color: "#8a8a8a",
     bufferSize: 1.5,
     extrusionDepth: 1.6,
     zOffset: -0.2,
@@ -258,7 +258,7 @@ const defaultLayers: VtDataSet[] = [
     sourceLayer: "transportation",
     label: "Roads & Streets",
     enabled: true,
-    color: "#989898",
+    color: "#808080",
     bufferSize: 2,
     extrusionDepth: 1.6,
     zOffset: -0.2,
@@ -299,7 +299,7 @@ const defaultLayers: VtDataSet[] = [
     sourceLayer: "building",
     label: "Buildings",
     enabled: true,
-    color: "#afafaf",
+    color: "#969696",
     bufferSize: 0,
     zOffset: -0.1,
     heightScaleFactor: 1, // 50% taller than default to make buildings more visible
@@ -333,7 +333,7 @@ export const useAppStore = create<AppState>()(
       enabled: true,
       verticalExaggeration: 2,
       baseHeight: 5,
-      color: "#8B4513"
+      color: "#db7329"
     },
     buildingSettings: {
       enabled: true,
