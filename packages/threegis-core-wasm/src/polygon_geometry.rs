@@ -102,6 +102,8 @@ pub struct VtDataSet {
     pub z_offset: Option<f64>,
     #[serde(rename = "alignVerticesToTerrain")]
     pub align_vertices_to_terrain: Option<bool>,
+    #[serde(rename = "applyMedianHeight")]
+    pub apply_median_height: Option<bool>,
     pub filter: Option<serde_json::Value>,
 }
 

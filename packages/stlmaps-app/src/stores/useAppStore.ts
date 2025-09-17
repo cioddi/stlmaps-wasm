@@ -38,6 +38,7 @@ export interface VtDataSet {
   useAdaptiveScaleFactor: boolean;
   zOffset: number;
   alignVerticesToTerrain: boolean;
+  applyMedianHeight: boolean;
   useCsgClipping: boolean;
   order?: number; // Layer rendering/processing order
   geometryDebugMode?: boolean;
@@ -305,6 +306,7 @@ const defaultLayers: VtDataSet[] = [
     heightScaleFactor: 1, // 50% taller than default to make buildings more visible
     useAdaptiveScaleFactor: true,
     alignVerticesToTerrain: false,
+    applyMedianHeight: false,
     useCsgClipping: false,
     order: 6
   }

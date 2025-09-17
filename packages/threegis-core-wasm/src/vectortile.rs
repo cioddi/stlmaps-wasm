@@ -1070,8 +1070,8 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         geometry_data_list.len()
     );
 
-    // Apply median height fallback for buildings without height data
-    if vt_dataset.source_layer == "building" {
+    // Apply median height fallback for buildings without height data if enabled
+    if vt_dataset.source_layer == "building" && vt_dataset.apply_median_height.unwrap_or(false) {
         apply_median_height_fallback(&mut geometry_data_list);
     }
 

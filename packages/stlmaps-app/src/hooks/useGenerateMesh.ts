@@ -195,6 +195,7 @@ class ParallelLayerProcessor {
           useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor ?? null,
           zOffset: layer.zOffset ?? null,
           alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
+          applyMedianHeight: layer.applyMedianHeight ?? null,
           csgClipping: layer.useCsgClipping ?? null,
           filter: layer.filter ?? null,
           geometryDebugMode: useDebugMode
@@ -361,6 +362,7 @@ class ParallelLayerProcessor {
           useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor ?? null,
           zOffset: layer.zOffset ?? null,
           alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
+          applyMedianHeight: layer.applyMedianHeight ?? null,
           csgClipping: layer.useCsgClipping ?? null,
           filter: layer.filter ?? null,
           geometryDebugMode: useDebugMode
@@ -700,6 +702,7 @@ export function useGenerateMesh() {
           useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor,
           zOffset: layer.zOffset,
           alignVerticesToTerrain: layer.alignVerticesToTerrain,
+          applyMedianHeight: layer.applyMedianHeight,
           filter: layer.filter
         }))
       };

@@ -17,6 +17,7 @@ export interface VtDataSet {
   useAdaptiveScaleFactor: boolean;
   zOffset: number;
   alignVerticesToTerrain: boolean;
+  applyMedianHeight: boolean;
   useCsgClipping: boolean; // Renamed for consistency
   geometryDebugMode?: boolean; // Skip processing like linestring buffering and polygon extrusion
   
