@@ -931,7 +931,7 @@ export function useGenerateMesh() {
     vtLayers
   ]);
 
-  const cancelMeshGeneration = useCallback(() => {
+  const cancelMeshGeneration = useCallback(async () => {
     if (abortControllerRef.current) {
       console.log('🛑 Cancelling optimized mesh generation...');
       abortControllerRef.current.abort();
@@ -941,9 +941,9 @@ export function useGenerateMesh() {
       processManager.cancelProcess(currentProcessIdRef.current);
     }
 
-    // Clean up layer processor
+    // Clean up layer processor with proper async handling
     if (layerProcessorRef.current) {
-      layerProcessorRef.current.cleanup();
+      await layerProcessorRef.current.cleanup();
     }
 
     setIsProcessingMesh(false);
@@ -952,6 +952,9 @@ export function useGenerateMesh() {
       percentage: 0,
       message: 'Ready'
     });
+
+    // Small delay to ensure WASM cleanup completes before next operation
+    await new Promise(resolve => setTimeout(resolve, 50));
   }, []);
 
   // ================================================================================
@@ -966,6 +969,9 @@ export function useGenerateMesh() {
     return hashTerrainConfig(terrainSettings);
   }, [terrainSettings]);
 
+  // Track if we should use immediate processing (when interrupting an active process)
+  const immediateProcessingRef = useRef(false);
+
   useEffect(() => {
     console.log("useGenerateMeshOptimized dependencies changed:", {
       hasBbox: !!bbox,
@@ -974,24 +980,42 @@ export function useGenerateMesh() {
       layerCount: vtLayers?.length,
     });
 
-    // Cancel any existing operation
-    cancelMeshGeneration();
+    // Check if there was an active process before cancelling
+    const hadActiveProcess = isProcessingMesh;
 
-    if (debounceTimer) clearTimeout(debounceTimer);
-    if (!bbox) {
-      console.warn("No bbox available, skipping optimized mesh generation");
-      return;
-    }
+    // Handle async cancellation
+    const handleBboxChange = async () => {
+      // Cancel any existing operation
+      await cancelMeshGeneration();
 
-    const timer = setTimeout(() => {
-      console.log("Debounce timer expired, starting optimized mesh generation");
-      startMeshGeneration();
-    }, 1000);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (!bbox) {
+        console.warn("No bbox available, skipping optimized mesh generation");
+        immediateProcessingRef.current = false;
+        return;
+      }
 
-    setDebounceTimer(timer);
+      // If there was an active process, use immediate processing for responsive UX
+      // Otherwise use normal debouncing for initial changes
+      const delay = hadActiveProcess ? 150 : 1000; // Slightly longer for WASM cleanup
+
+      // Set flag for next iteration (only if we had an active process)
+      immediateProcessingRef.current = hadActiveProcess;
+
+      const timer = setTimeout(() => {
+        console.log(`${hadActiveProcess ? 'Immediate' : 'Debounce'} timer expired, starting optimized mesh generation`);
+        startMeshGeneration();
+        // Reset immediate processing flag after starting
+        immediateProcessingRef.current = false;
+      }, delay);
+
+      setDebounceTimer(timer);
+    };
+
+    handleBboxChange();
 
     return () => {
-      if (timer) clearTimeout(timer);
+      if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [
     bbox,
@@ -1005,11 +1029,13 @@ export function useGenerateMesh() {
 
   useEffect(() => {
     return () => {
-      // Cleanup on unmount
-      cancelMeshGeneration();
-      if (layerProcessorRef.current) {
-        layerProcessorRef.current.cleanup();
-      }
+      // Cleanup on unmount - use fire-and-forget async
+      (async () => {
+        await cancelMeshGeneration();
+        if (layerProcessorRef.current) {
+          await layerProcessorRef.current.cleanup();
+        }
+      })();
 
       if (debounceTimer) {
         clearTimeout(debounceTimer);
