@@ -150,11 +150,6 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
           </StatusText>
         )}
 
-        {processingProgress.currentLayerIndex !== undefined && (
-          <StatusText variant="body2" sx={{ fontSize: '0.75rem', opacity: 0.8 }}>
-            Layer: {processingProgress.currentLayerIndex + 1}/{processingProgress.totalLayers}
-          </StatusText>
-        )}
       </Box>
 
       <Button

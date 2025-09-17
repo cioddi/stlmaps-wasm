@@ -88,6 +88,8 @@ pub struct VtDataSet {
     pub label: Option<String>,
     #[serde(default = "default_color")]
     pub color: String,
+    #[serde(rename = "bufferSize")]
+    pub buffer_size: Option<f64>,
     #[serde(rename = "extrusionDepth")]
     pub extrusion_depth: Option<f64>,
     #[serde(rename = "minExtrusionDepth")]
@@ -1082,14 +1084,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             .map(|(chunk_i, polygon_data)| -> Result<Option<BufferGeometry>, String> {
             let i = chunk_start + chunk_i; // Global polygon index
         
-        // First, check if this polygon intersects with the bbox at all
-        // This ensures any feature with at least one vertex inside the bbox is processed
-        if !polygon_intersects_bbox(&polygon_data.geometry, &input.bbox) {
-            // Skip polygons that don't intersect with the bbox
-            return Ok(None);
-        }
-
         // No filtering - process all geometries within bbox as requested
+        // As requested by user: "I want everything that is inside the bbox with at least one vertex"
         
         // Debug: log the first few polygon properties to see what's available
         if i < 3 {
@@ -1126,15 +1122,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             } else { "no_props".to_string() };
             
             
-            // FAST SOLUTION: Simple line buffering without expensive JSON operations
+            // COMPLETE SOLUTION: Process all segments of LineString for complete road/footway rendering
             if polygon_data.geometry.len() >= 2 {
-                // Simple buffering: create a thin rectangle around the line
+                // Create complete buffered polygon from all LineString segments
                 let mut buffered_points = Vec::new();
 
-                // Use fixed buffer distance for performance
-                let buffer_distance = if is_major_road { 0.00003 } else { 0.00002 };
+                // Use buffer size from layer configuration, with fallback to reasonable defaults
+                let config_buffer_size = input.vt_data_set.buffer_size.unwrap_or(if is_major_road { 2.0 } else { 1.5 });
+                // Convert buffer size to appropriate coordinate scale (assuming meter-like units)
+                let buffer_distance = config_buffer_size * 0.00001; // Scale factor for coordinate space
 
-                // For each line segment, create a simple buffered rectangle
+                // Create offset points for the entire LineString
+                let mut left_side = Vec::new();
+                let mut right_side = Vec::new();
+
+                // Process all segments to create complete road geometry
                 for window in polygon_data.geometry.windows(2) {
                     if window.len() == 2 && window[0].len() >= 2 && window[1].len() >= 2 {
                         let p1 = Vector2 { x: window[0][0], y: window[0][1] };
@@ -1149,15 +1151,23 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             let norm_x = -dy / length * buffer_distance;
                             let norm_y = dx / length * buffer_distance;
 
-                            // Create buffered rectangle around line segment
-                            buffered_points.push(Vector2 { x: p1.x + norm_x, y: p1.y + norm_y });
-                            buffered_points.push(Vector2 { x: p2.x + norm_x, y: p2.y + norm_y });
-                            buffered_points.push(Vector2 { x: p2.x - norm_x, y: p2.y - norm_y });
-                            buffered_points.push(Vector2 { x: p1.x - norm_x, y: p1.y - norm_y });
-                            break; // Only process first segment for performance
+                            // Add offset points for this segment
+                            if left_side.is_empty() {
+                                left_side.push(Vector2 { x: p1.x + norm_x, y: p1.y + norm_y });
+                            }
+                            left_side.push(Vector2 { x: p2.x + norm_x, y: p2.y + norm_y });
+
+                            if right_side.is_empty() {
+                                right_side.push(Vector2 { x: p1.x - norm_x, y: p1.y - norm_y });
+                            }
+                            right_side.push(Vector2 { x: p2.x - norm_x, y: p2.y - norm_y });
                         }
                     }
                 }
+
+                // Combine left and right sides to form complete polygon
+                buffered_points.extend(left_side);
+                buffered_points.extend(right_side.into_iter().rev()); // Reverse right side for proper winding
 
                 buffered_points
             } else {
