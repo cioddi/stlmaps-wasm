@@ -14,7 +14,6 @@ import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
 // @ts-expect-error - Three.js types don't include postprocessing
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { useAppStore } from "../stores/useAppStore";
-import HoverTooltip from "./HoverTooltip";
 
 
 // Interface for scene data to be stored in ref
@@ -24,12 +23,6 @@ interface SceneData {
   controls: OrbitControls;
   modelGroup: THREE.Group;
   composer: EffectComposer;
-  raycaster: THREE.Raycaster;
-  mouse: THREE.Vector2;
-  hoveredMesh: THREE.Object3D | null;
-  originalMaterials: Map<THREE.Object3D, THREE.Material | THREE.Material[]>;
-  handleMouseMove?: (event: MouseEvent) => void;
-  handleMouseLeave?: () => void;
   animationFrameId?: number;
   initialized: boolean;
   buttons: HTMLButtonElement[];
@@ -265,17 +258,14 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
 
 const ModelPreview = () => {
   // Get geometry data and settings from the Zustand store
-  const { 
-    geometryDataSets, 
+  const {
+    geometryDataSets,
     vtLayers,
-    terrainSettings, 
-    renderingSettings, 
+    terrainSettings,
+    renderingSettings,
     colorOnlyUpdate,
     layerColorUpdates,
     setRenderingSettings,
-    setHoveredMesh,
-    setMousePosition,
-    clearHover,
     clearColorOnlyUpdate,
     setSceneGetter
   } = useAppStore();
@@ -291,7 +281,6 @@ const ModelPreview = () => {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const lastMouseMoveTime = useRef<number>(0); // For throttling hover performance
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [hasSetInitialMode, setHasSetInitialMode] = useState<boolean>(false);
@@ -572,158 +561,7 @@ const ModelPreview = () => {
       frontButton.style.left = '60px';
       
       // Store all the scene data in the ref
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2();
-      const originalMaterials = new Map<THREE.Object3D, THREE.Material | THREE.Material[]>();
 
-  // Mouse interaction handlers for hover detection
-  const handleMouseMove = (event: MouseEvent) => {
-    const now = Date.now();
-    if (now - lastMouseMoveTime.current < 16) {
-      return; // Skip if called too frequently
-    }
-    lastMouseMoveTime.current = now;
-    
-    if (!containerRef.current || !sceneDataRef.current) return;
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    
-    sceneDataRef.current.mouse.set(x, y);
-    setMousePosition({ x: event.clientX, y: event.clientY });
-    
-    // Perform raycasting with performance optimization
-    sceneDataRef.current.raycaster.setFromCamera(sceneDataRef.current.mouse, camera);
-    
-    // Only intersect with visible objects and limit depth for performance
-    const visibleObjects = modelGroup.children.filter(child => child.visible);
-    const intersects = sceneDataRef.current.raycaster.intersectObjects(visibleObjects, false); // Don't recurse for performance
-    
-    if (intersects.length > 0) {
-      const intersectedObject = intersects[0].object;
-      
-      // Skip hover effects for terrain meshes
-      if (intersectedObject.name === 'terrain') {
-        // Clear any existing hover state and return early
-        if (sceneDataRef.current.hoveredMesh) {
-          restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
-          sceneDataRef.current.hoveredMesh = null;
-          clearHover();
-        }
-        return;
-      }
-      
-      // Check if this is a different mesh than currently hovered
-      if (sceneDataRef.current.hoveredMesh !== intersectedObject) {
-        // Clear previous hover state
-        if (sceneDataRef.current.hoveredMesh) {
-          restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
-        }
-        
-        // Set new hover state
-        sceneDataRef.current.hoveredMesh = intersectedObject;
-        
-        // Store original material and apply hover effect
-        applyHoverMaterial(intersectedObject);
-        
-        // Extract properties directly from the intersected mesh
-        // Since we now create individual meshes for each feature, this is straightforward
-        let properties = null;
-        
-        // Check mesh userData first (most direct)
-        if (intersectedObject.userData && intersectedObject.userData.properties) {
-          properties = intersectedObject.userData.properties;
-          console.log('✅ Found mesh properties:', properties);
-        } 
-        // Fallback to geometry userData (cast to Mesh for type safety)
-        else if ((intersectedObject as THREE.Mesh).geometry?.userData?.properties) {
-          properties = (intersectedObject as THREE.Mesh).geometry.userData.properties;
-          console.log('✅ Found geometry properties:', properties);
-        } else {
-          console.log('❌ No properties found on geometry or mesh. Checking available data:');
-          console.log('  - intersectedObject.userData:', intersectedObject.userData);
-          console.log('  - geometry.userData:', (intersectedObject as THREE.Mesh).geometry?.userData);
-        }
-        
-        setHoveredMesh(intersectedObject, properties);
-      }
-    } else {
-      // No intersection, clear hover state
-      if (sceneDataRef.current.hoveredMesh) {
-        restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
-        sceneDataRef.current.hoveredMesh = null;
-        clearHover();
-      }
-    }
-  };      const handleMouseLeave = () => {
-        if (sceneDataRef.current?.hoveredMesh) {
-          restoreOriginalMaterial(sceneDataRef.current.hoveredMesh);
-          sceneDataRef.current.hoveredMesh = null;
-        }
-        clearHover();
-      };
-
-      // Material manipulation functions
-      const applyHoverMaterial = (object: THREE.Object3D) => {
-        if (!sceneDataRef.current) return;
-        
-        const mesh = object as THREE.Mesh;
-        if (!mesh.material) return;
-        
-        // Store original material
-        sceneDataRef.current.originalMaterials.set(object, mesh.material);
-        
-        // Create highlight material
-        const isArray = Array.isArray(mesh.material);
-        if (isArray) {
-          const materials = mesh.material as THREE.Material[];
-          const highlightMaterials = materials.map(material => {
-            if (material instanceof THREE.LineBasicMaterial) {
-              return new THREE.LineBasicMaterial({
-                color: 0xffff00,
-                linewidth: 4
-              });
-            } else {
-              return new THREE.MeshStandardMaterial({
-                color: 0xffff00,
-                emissive: 0x444400,
-                transparent: true,
-                opacity: 0.8,
-                side: THREE.DoubleSide
-              });
-            }
-          });
-          mesh.material = highlightMaterials;
-        } else {
-          const material = mesh.material as THREE.Material;
-          if (material instanceof THREE.LineBasicMaterial) {
-            mesh.material = new THREE.LineBasicMaterial({
-              color: 0xffff00,
-              linewidth: 4
-            });
-          } else {
-            mesh.material = new THREE.MeshStandardMaterial({
-              color: 0xffff00,
-              emissive: 0x444400,
-              transparent: true,
-              opacity: 0.8,
-              side: THREE.DoubleSide
-            });
-          }
-        }
-      };
-
-      const restoreOriginalMaterial = (object: THREE.Object3D) => {
-        if (!sceneDataRef.current) return;
-        
-        const originalMaterial = sceneDataRef.current.originalMaterials.get(object);
-        if (originalMaterial) {
-          const mesh = object as THREE.Mesh;
-          mesh.material = originalMaterial;
-          sceneDataRef.current.originalMaterials.delete(object);
-        }
-      };
 
       sceneDataRef.current = {
         scene,
@@ -731,26 +569,13 @@ const ModelPreview = () => {
         controls,
         modelGroup,
         composer,
-        raycaster,
-        mouse,
-        hoveredMesh: null,
-        originalMaterials,
         initialized: true,
         buttons,
-        isFirstRender: true,
-        // Store event handlers for cleanup
-        handleMouseMove,
-        handleMouseLeave
+        isFirstRender: true
       };
 
       // Register scene getter for export functionality
       setCurrentSceneGetter(() => sceneDataRef.current?.scene || null);
-
-      // Add event listeners
-      if (containerRef.current) {
-        containerRef.current.addEventListener('mousemove', handleMouseMove);
-        containerRef.current.addEventListener('mouseleave', handleMouseLeave);
-      }
       
       // Animation loop
       const animate = () => {
@@ -921,14 +746,18 @@ const ModelPreview = () => {
           vertexCount: geometryDataSets.terrainGeometry.attributes?.position?.count || 0,
           valid: !!geometryDataSets.terrainGeometry.attributes?.position?.count
         });
-        // Create terrain material based on rendering mode
-        // Use the same matte material approach for both modes - just like performance mode works
+        // Create terrain material exactly like live updates do
         const terrainMaterial = new THREE.MeshLambertMaterial({
           vertexColors: terrainSettings.color ? false : true,
-          color: terrainSettings.color ? new THREE.Color(terrainSettings.color) : undefined,
           flatShading: true,
           side: THREE.DoubleSide
         });
+
+        // Set color after material creation (exactly like live updates)
+        if (terrainSettings.color) {
+          const terrainColor = new THREE.Color(terrainSettings.color);
+          terrainMaterial.color = terrainColor.clone();
+        }
         
         // Apply the material to the terrain mesh
         const geometryMesh = new THREE.Mesh(
@@ -948,9 +777,9 @@ const ModelPreview = () => {
         geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
           if (!geometry) return; // Skip if geometry is undefined
 
-          // Look up current enabled state from layer store instead of using stored state
-          const currentLayer = vtLayers.find(layer => layer.label === vtDataset.label);
-          const isCurrentlyEnabled = currentLayer?.enabled !== false;
+          // Look up current layer configuration once (used for enabled state, color, zOffset, etc.)
+          const currentLayerConfig = vtLayers.find(layer => layer.label === vtDataset.label);
+          const isCurrentlyEnabled = currentLayerConfig?.enabled !== false;
           
           
           // Check if this is a container geometry with individual geometries
@@ -964,23 +793,18 @@ const ModelPreview = () => {
                 return; // Skip empty geometries
               }
               
-              // Create color for polygon from current layer config (not stored geometry data)
-              const currentLayerConfig = vtLayers.find(layer => layer.label === vtDataset.label);
+              // Create color for polygon exactly like live updates do
               const layerColor = currentLayerConfig?.color || "#81ecec";
               const baseColor = new THREE.Color(layerColor);
-              
-              // Always render as solid mesh
-              const enhancedColor = new THREE.Color().copy(baseColor).convertSRGBToLinear();
-              enhancedColor.r = Math.min(1, enhancedColor.r * 1.2);
-              enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
-              enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
-              
+
               // Use simple Lambert material like performance mode - it works perfectly
               const polygonMaterial = new THREE.MeshLambertMaterial({
-                color: enhancedColor,
                 flatShading: true,
                 side: THREE.DoubleSide
               });
+
+              // Set color after material creation (exactly like live updates)
+              polygonMaterial.color = baseColor.clone();
               
               // Adjust geometry origin to bottom for proper scaling
               let originalBottomZ = 0;
@@ -999,7 +823,6 @@ const ModelPreview = () => {
               const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
               
               // Position mesh using the layer's configured zOffset value
-              // (currentLayerConfig already retrieved above for color)
               const layerZOffset = currentLayerConfig?.zOffset || 0;
               const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
               
@@ -1024,22 +847,8 @@ const ModelPreview = () => {
               polygonMesh.visible = isCurrentlyEnabled;
               
               
-              // Preserve individual properties for hover interaction
-              // Prioritize MVT feature properties over layer configuration
-              const mvtProperties = individualGeometry.userData?.properties || {};
-              const properties = {
-                // First add MVT feature properties (these are what we want to show)
-                ...mvtProperties,
-                // Then add only essential layer info (but don't override MVT properties)
-                _sourceLayer: vtDataset.sourceLayer,
-                _layerType: "solid",
-                _geometryIndex: index,
-              };
-              
-              
-              individualGeometry.userData = { properties };
+              // Set minimal userData needed for layer identification in live updates
               polygonMesh.userData = {
-                properties,
                 sourceLayer: vtDataset.sourceLayer,
                 label: vtDataset.label || vtDataset.sourceLayer
               };
@@ -1051,22 +860,18 @@ const ModelPreview = () => {
           }
           
           // Original processing for non-container geometries
-          // Create color for polygon
-          const baseColor = vtDataset.color || new THREE.Color(0x81ecec);
-          
-          // Always render as solid mesh
-          // Create slightly brightened color
-          const enhancedColor = new THREE.Color().copy(baseColor).convertSRGBToLinear();
-          enhancedColor.r = Math.min(1, enhancedColor.r * 1.2);
-          enhancedColor.g = Math.min(1, enhancedColor.g * 1.2);
-          enhancedColor.b = Math.min(1, enhancedColor.b * 1.2);
-          
+          // Create color for polygon exactly like live updates do
+          const layerColor = currentLayerConfig?.color || "#81ecec";
+          const baseColor = new THREE.Color(layerColor);
+
           // Use simple Lambert material like performance mode - it works perfectly
           const polygonMaterial = new THREE.MeshLambertMaterial({
-            color: enhancedColor,
             flatShading: true,
             side: THREE.DoubleSide
           });
+
+          // Set color after material creation (exactly like live updates)
+          polygonMaterial.color = baseColor.clone();
           
           // Adjust geometry origin to bottom for proper scaling
           let originalBottomZ = 0;
@@ -1083,7 +888,6 @@ const ModelPreview = () => {
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
           
           // Position mesh using the layer's configured zOffset value
-          const currentLayerConfig = vtLayers.find(layer => layer.label === vtDataset.label);
           const layerZOffset = currentLayerConfig?.zOffset || 0;
           polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
           console.log(`🏗️ Positioned ${vtDataset.label} mesh:`, {
@@ -1099,23 +903,8 @@ const ModelPreview = () => {
           polygonMesh.visible = isCurrentlyEnabled;
           
           
-          // Attach properties to the geometry and mesh for hover interaction  
-          const mvtProperties = geometry.userData?.properties || {};
-          console.log('Existing geometry properties from userData:', mvtProperties);
-          
-          // Prioritize MVT feature properties over layer configuration
-          const properties = {
-            // First add MVT feature properties (these are what we want to show)
-            ...mvtProperties,
-            // Then add only essential layer info (but don't override MVT properties)
-            _sourceLayer: vtDataset.sourceLayer,
-            _layerType: "solid",
-          };
-          
-          
-          geometry.userData = { properties };
+          // Set minimal userData needed for layer identification in live updates
           polygonMesh.userData = {
-            properties,
             sourceLayer: vtDataset.sourceLayer,
             label: vtDataset.label || vtDataset.sourceLayer
           };
@@ -1230,14 +1019,6 @@ const ModelPreview = () => {
         });
       }
 
-      // Remove event listeners
-      if (sceneDataRef.current?.handleMouseMove && sceneDataRef.current?.handleMouseLeave) {
-        const container = containerRef.current;
-        if (container) {
-          container.removeEventListener('mousemove', sceneDataRef.current.handleMouseMove);
-          container.removeEventListener('mouseleave', sceneDataRef.current.handleMouseLeave);
-        }
-      }
 
       // Dispose of ThreeJS resources
       if (sceneDataRef.current) {
@@ -1331,7 +1112,6 @@ const ModelPreview = () => {
           {error}
         </div>
       )}
-      <HoverTooltip />
     </div>
   );
 };
