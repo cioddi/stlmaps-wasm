@@ -281,6 +281,7 @@ const ModelPreview = () => {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneDataRef = useRef<SceneData | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const updateDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [hasSetInitialMode, setHasSetInitialMode] = useState<boolean>(false);
@@ -638,7 +639,7 @@ const ModelPreview = () => {
   // Function to update only material colors without recreating geometry
   const updateMaterialColors = useCallback(() => {
     if (!sceneDataRef.current || !Object.keys(layerColorUpdates).length) return;
-    
+
     console.log("Updating material colors only", layerColorUpdates);
     const { modelGroup } = sceneDataRef.current;
     
@@ -702,7 +703,21 @@ const ModelPreview = () => {
     });
     
     clearColorOnlyUpdate();
-  }, [layerColorUpdates, clearColorOnlyUpdate]);
+  }, [layerColorUpdates, clearColorOnlyUpdate, terrainSettings.baseHeight]);
+
+  // Debounced version of updateMaterialColors
+  const debouncedUpdateMaterialColors = useCallback(() => {
+    // Clear any existing debounce timeout
+    if (updateDebounceRef.current) {
+      clearTimeout(updateDebounceRef.current);
+    }
+
+    // Set a new debounce timeout
+    updateDebounceRef.current = setTimeout(() => {
+      updateMaterialColors();
+      updateDebounceRef.current = null;
+    }, 50); // 50ms debounce delay
+  }, [updateMaterialColors]);
 
   const updateScene = useCallback(() => {
     if (!sceneDataRef.current || !rendererRef.current) return;
@@ -999,7 +1014,13 @@ const ModelPreview = () => {
     return () => {
       console.log("Cleaning up ModelPreview resources");
       window.removeEventListener('resize', handleResizeWrapper);
-      
+
+      // Clear debounce timeout
+      if (updateDebounceRef.current) {
+        clearTimeout(updateDebounceRef.current);
+        updateDebounceRef.current = null;
+      }
+
       if (resizeObserverRef.current && containerRef.current) {
         resizeObserverRef.current.unobserve(containerRef.current);
         resizeObserverRef.current.disconnect();
@@ -1055,13 +1076,13 @@ const ModelPreview = () => {
   }, [initScene, handleResize]);
   
   // Update scene when geometry data or rendering mode changes
-  // Handle color-only updates
+  // Handle color-only updates (debounced)
   useEffect(() => {
     if (colorOnlyUpdate && sceneDataRef.current?.initialized) {
-      console.log("Handling color-only update");
-      updateMaterialColors();
+      console.log("Handling debounced color-only update");
+      debouncedUpdateMaterialColors();
     }
-  }, [colorOnlyUpdate, updateMaterialColors]);
+  }, [colorOnlyUpdate, debouncedUpdateMaterialColors]);
 
   // Handle full geometry updates
   useEffect(() => {
