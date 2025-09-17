@@ -8,10 +8,9 @@ import {
   hashVtLayerConfig,
   hashTerrainConfig,
 } from "../utils/configHashing";
-import { WorkerService } from "../workers/WorkerService";
-import GeometryWorker from "../workers/geometryWorker?worker";
-import BackgroundProcessor from "../workers/backgroundProcessor?worker";
-import { tokenManager } from "../utils/CancellationToken";
+import { getWasmContextPool } from "../utils/WasmContextPool";
+import { performanceMonitor } from "../utils/PerformanceMonitor";
+import { sharedResourceManager } from "../utils/SharedResourceManager";
 import { VtDataSet } from "../types/VtDataSet";
 import {
   useWasm,
@@ -37,13 +36,6 @@ export interface MeshGenerationConfig {
   layers: VtDataSet[];
 }
 
-export interface ProcessingContextManager {
-  createTerrainContext(): Promise<string>;
-  createLayerContext(layerName: string): Promise<string>;
-  terminateContext(contextId: string): Promise<void>;
-  shareResourcesBetweenContexts(fromContext: string, toContext: string, resourceKeys: string[]): Promise<void>;
-}
-
 export interface TerrainProcessingResult {
   terrainGeometry: THREE.BufferGeometry;
   processedElevationGrid: number[][];
@@ -59,12 +51,16 @@ export interface LayerProcessingResult {
   geometry: THREE.BufferGeometry;
   success: boolean;
   error?: Error;
+  processingTimeMs: number;
+  vertexCount: number;
+  geometryCount: number;
 }
 
 export interface MeshGenerationResult {
   terrainResult: TerrainProcessingResult | null;
   layerResults: LayerProcessingResult[];
   totalProcessingTimeMs: number;
+  parallelizationEfficiency: number;
   success: boolean;
   error?: Error;
 }
@@ -75,172 +71,414 @@ export interface ProcessingProgress {
   totalLayers?: number;
   percentage: number;
   message: string;
+  layerProgress?: Map<string, number>;
 }
 
 // ================================================================================
-// WASM Context Management
+// Optimized Layer Processing Manager
 // ================================================================================
 
-class WasmContextManager implements ProcessingContextManager {
-  private activeContexts = new Map<string, any>();
-  private sharedResources = new Map<string, Set<string>>();
+class ParallelLayerProcessor {
+  private contextPool = getWasmContextPool({
+    maxContexts: Math.min(navigator.hardwareConcurrency || 4, 8),
+    timeoutMs: 60000,
+    enableDebugLogging: false
+  });
 
-  async createTerrainContext(): Promise<string> {
-    const contextId = `terrain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  private activeProcesses = new Map<string, AbortController>();
+  private layerProgressTracking = new Map<string, number>();
+
+  async initializeContexts(layerCount: number): Promise<void> {
+    const contextsNeeded = Math.min(layerCount, navigator.hardwareConcurrency || 4);
+    console.log(`🚀 Initializing ${contextsNeeded} WASM contexts for ${layerCount} layers`);
+
+    await this.contextPool.ensureMinimumContexts(contextsNeeded);
+
+    const stats = this.contextPool.getStats();
+    console.log(`✅ Context pool ready:`, stats);
+  }
+
+  async processLayersInParallel(
+    layers: VtDataSet[],
+    bboxCoords: [number, number, number, number],
+    processId: string,
+    terrainData: any,
+    terrainSettings: any,
+    debugSettings: any,
+    onProgress: (progress: ProcessingProgress) => void
+  ): Promise<LayerProcessingResult[]> {
+    if (layers.length === 0) {
+      return [];
+    }
+
+    // Initialize progress tracking
+    this.layerProgressTracking.clear();
+    layers.forEach(layer => {
+      this.layerProgressTracking.set(layer.label, 0);
+    });
+
+    // Create abort controllers for each layer
+    const abortControllers = new Map<string, AbortController>();
+    layers.forEach(layer => {
+      const controller = new AbortController();
+      abortControllers.set(layer.label, controller);
+      this.activeProcesses.set(layer.label, controller);
+    });
+
     try {
-      // Create new WASM instance for terrain processing
-      // Since WASM is single-threaded per instance, we need separate instances for parallel processing
-      const wasmModule = getWasmModule();
-      this.activeContexts.set(contextId, wasmModule);
-      this.sharedResources.set(contextId, new Set());
+      // Check if any layers require terrain alignment (must be sequential)
+      const hasTerrainAlignment = layers.some(layer => layer.alignVerticesToTerrain);
 
-      console.log(`🏔️ Created terrain processing context: ${contextId}`);
-      return contextId;
-    } catch (error) {
-      throw new Error(`Failed to create terrain context: ${error}`);
+      if (hasTerrainAlignment) {
+        console.log('🏔️ Sequential processing due to terrain alignment');
+        return await this.processLayersSequentially(
+          layers,
+          bboxCoords,
+          processId,
+          terrainData,
+          terrainSettings,
+          debugSettings,
+          onProgress,
+          abortControllers
+        );
+      } else {
+        console.log('⚡ Parallel processing enabled');
+        return await this.processLayersParallel(
+          layers,
+          bboxCoords,
+          processId,
+          terrainData,
+          terrainSettings,
+          debugSettings,
+          onProgress,
+          abortControllers
+        );
+      }
+
+    } finally {
+      // Clean up abort controllers
+      abortControllers.forEach(controller => controller.abort());
+      this.activeProcesses.clear();
+      this.layerProgressTracking.clear();
     }
   }
 
-  async createLayerContext(layerName: string): Promise<string> {
-    const contextId = `layer-${layerName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    try {
-      // For now, we'll use the same WASM instance but with different process IDs
-      // In a more advanced implementation, we could spawn Web Workers with WASM instances
-      const wasmModule = getWasmModule();
-      this.activeContexts.set(contextId, wasmModule);
-      this.sharedResources.set(contextId, new Set());
+  private async processLayersParallel(
+    layers: VtDataSet[],
+    bboxCoords: [number, number, number, number],
+    processId: string,
+    terrainData: any,
+    terrainSettings: any,
+    debugSettings: any,
+    onProgress: (progress: ProcessingProgress) => void,
+    abortControllers: Map<string, AbortController>
+  ): Promise<LayerProcessingResult[]> {
+    const startTime = Date.now();
 
-      console.log(`📊 Created layer processing context for ${layerName}: ${contextId}`);
-      return contextId;
-    } catch (error) {
-      throw new Error(`Failed to create layer context for ${layerName}: ${error}`);
-    }
-  }
+    // Create processing promises for all layers
+    const processingPromises = layers.map(async (layer, index) => {
+      const layerStartTime = Date.now();
+      const abortController = abortControllers.get(layer.label)!;
 
-  async terminateContext(contextId: string): Promise<void> {
-    try {
-      const wasmInstance = this.activeContexts.get(contextId);
-      if (wasmInstance) {
-        // Clean up any resources associated with this context
-        if (wasmInstance.clear_process_cache_js) {
-          wasmInstance.clear_process_cache_js(contextId);
+      try {
+        const useDebugMode = debugSettings.geometryDebugMode || layer.geometryDebugMode;
+
+        // Convert layer configuration
+        const layerConfig = {
+          sourceLayer: layer.sourceLayer,
+          subClass: layer.subClass ? [layer.subClass] : undefined,
+          enabled: layer.enabled,
+          bufferSize: layer.bufferSize,
+          extrusionDepth: layer.extrusionDepth ?? null,
+          minExtrusionDepth: layer.minExtrusionDepth ?? null,
+          heightScaleFactor: layer.heightScaleFactor ?? null,
+          useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor ?? null,
+          zOffset: layer.zOffset ?? null,
+          alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
+          csgClipping: layer.useCsgClipping ?? null,
+          filter: layer.filter ?? null,
+          geometryDebugMode: useDebugMode
+        };
+
+        // Process layer in dedicated WASM context
+        const workerResult = await this.contextPool.processLayerInContext(
+          layerConfig,
+          bboxCoords,
+          processId,
+          terrainData,
+          terrainSettings,
+          useDebugMode,
+          {
+            timeout: 60000,
+            onProgress: (progress, message) => {
+              // Update progress for this specific layer
+              this.layerProgressTracking.set(layer.label, progress);
+
+              // Calculate overall progress
+              const totalProgress = Array.from(this.layerProgressTracking.values())
+                .reduce((sum, prog) => sum + prog, 0) / layers.length;
+
+              onProgress({
+                stage: 'layers',
+                currentLayerIndex: index,
+                totalLayers: layers.length,
+                percentage: 20 + (totalProgress * 0.6), // 20% terrain + 60% layers
+                message: `${message} (${index + 1}/${layers.length})`,
+                layerProgress: new Map(this.layerProgressTracking)
+              });
+            }
+          }
+        );
+
+        // Check for cancellation
+        if (abortController.signal.aborted) {
+          throw new Error('Layer processing was cancelled');
         }
+
+        // Convert worker results to Three.js geometries (minimal main thread work)
+        const geometries: THREE.BufferGeometry[] = [];
+        const processedGeometries = workerResult.geometries;
+
+        let totalVertexCount = 0;
+
+        for (const processedGeom of processedGeometries) {
+          if (!processedGeom.hasData || !processedGeom.vertices || processedGeom.vertices.length === 0) {
+            continue;
+          }
+
+          const geometry = new THREE.BufferGeometry();
+
+          // Use TypedArrays directly from worker (avoid copying)
+          geometry.setAttribute('position', new THREE.BufferAttribute(processedGeom.vertices, 3));
+          totalVertexCount += processedGeom.vertices.length / 3;
+
+          if (processedGeom.normals) {
+            geometry.setAttribute('normal', new THREE.BufferAttribute(processedGeom.normals, 3));
+          }
+
+          if (processedGeom.colors) {
+            geometry.setAttribute('color', new THREE.BufferAttribute(processedGeom.colors, 3));
+          }
+
+          if (processedGeom.indices) {
+            geometry.setIndex(new THREE.BufferAttribute(processedGeom.indices, 1));
+          }
+
+          if (processedGeom.properties) {
+            geometry.userData = { properties: processedGeom.properties };
+          }
+
+          if (processedGeom.needsNormals) {
+            geometry.computeVertexNormals();
+          }
+
+          geometries.push(geometry);
+        }
+
+        // Create container geometry
+        const containerGeometry = new THREE.BufferGeometry();
+        containerGeometry.userData = {
+          isContainer: true,
+          individualGeometries: geometries,
+          geometryCount: geometries.length
+        };
+
+        const processingTime = Date.now() - layerStartTime;
+
+        console.log(`✅ Layer "${layer.label}" processed in ${processingTime}ms: ${geometries.length} geometries, ${totalVertexCount} vertices`);
+
+        return {
+          layer,
+          geometry: containerGeometry,
+          success: true,
+          processingTimeMs: processingTime,
+          vertexCount: totalVertexCount,
+          geometryCount: geometries.length
+        } as LayerProcessingResult;
+
+      } catch (error) {
+        const processingTime = Date.now() - layerStartTime;
+
+        console.error(`❌ Layer "${layer.label}" failed after ${processingTime}ms:`, error);
+
+        return {
+          layer,
+          geometry: new THREE.BufferGeometry(),
+          success: false,
+          error: error instanceof Error ? error : new Error(String(error)),
+          processingTimeMs: processingTime,
+          vertexCount: 0,
+          geometryCount: 0
+        } as LayerProcessingResult;
+      }
+    });
+
+    // Execute all layer processing in parallel
+    const results = await Promise.all(processingPromises);
+
+    const totalTime = Date.now() - startTime;
+    const sequentialEstimate = results.reduce((sum, r) => sum + r.processingTimeMs, 0);
+    const efficiency = sequentialEstimate > 0 ? Math.min(100, (sequentialEstimate / totalTime) * 100) : 0;
+
+    console.log(`🎯 Parallel processing completed: ${totalTime}ms (${efficiency.toFixed(1)}% efficiency)`);
+
+    return results;
+  }
+
+  private async processLayersSequentially(
+    layers: VtDataSet[],
+    bboxCoords: [number, number, number, number],
+    processId: string,
+    terrainData: any,
+    terrainSettings: any,
+    debugSettings: any,
+    onProgress: (progress: ProcessingProgress) => void,
+    abortControllers: Map<string, AbortController>
+  ): Promise<LayerProcessingResult[]> {
+    const results: LayerProcessingResult[] = [];
+
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
+      const abortController = abortControllers.get(layer.label)!;
+
+      if (abortController.signal.aborted) {
+        break;
       }
 
-      this.activeContexts.delete(contextId);
-      this.sharedResources.delete(contextId);
+      const layerStartTime = Date.now();
 
-      console.log(`🗑️ Terminated processing context: ${contextId}`);
-    } catch (error) {
-      console.warn(`Failed to clean up context ${contextId}:`, error);
-    }
-  }
+      try {
+        const useDebugMode = debugSettings.geometryDebugMode || layer.geometryDebugMode;
 
-  async shareResourcesBetweenContexts(fromContext: string, toContext: string, resourceKeys: string[]): Promise<void> {
-    try {
-      const fromResources = this.sharedResources.get(fromContext);
-      const toResources = this.sharedResources.get(toContext);
+        const layerConfig = {
+          sourceLayer: layer.sourceLayer,
+          subClass: layer.subClass ? [layer.subClass] : undefined,
+          enabled: layer.enabled,
+          bufferSize: layer.bufferSize,
+          extrusionDepth: layer.extrusionDepth ?? null,
+          minExtrusionDepth: layer.minExtrusionDepth ?? null,
+          heightScaleFactor: layer.heightScaleFactor ?? null,
+          useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor ?? null,
+          zOffset: layer.zOffset ?? null,
+          alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
+          csgClipping: layer.useCsgClipping ?? null,
+          filter: layer.filter ?? null,
+          geometryDebugMode: useDebugMode
+        };
 
-      if (!fromResources || !toResources) {
-        throw new Error(`Context not found: from=${!!fromResources}, to=${!!toResources}`);
-      }
+        const workerResult = await this.contextPool.processLayerInContext(
+          layerConfig,
+          bboxCoords,
+          processId,
+          terrainData,
+          terrainSettings,
+          useDebugMode,
+          {
+            timeout: 60000,
+            onProgress: (progress, message) => {
+              const baseProgress = 20 + (i * 60) / layers.length;
+              const layerProgress = (progress * 60) / (layers.length * 100);
 
-      // Mark resources as shared between contexts
-      resourceKeys.forEach(key => {
-        fromResources.add(key);
-        toResources.add(key);
-      });
+              onProgress({
+                stage: 'layers',
+                currentLayerIndex: i,
+                totalLayers: layers.length,
+                percentage: baseProgress + layerProgress,
+                message: `${message} (${i + 1}/${layers.length})`
+              });
+            }
+          }
+        );
 
-      console.log(`🔄 Shared ${resourceKeys.length} resources from ${fromContext} to ${toContext}`);
-    } catch (error) {
-      console.warn(`Failed to share resources: ${error}`);
-    }
-  }
+        // Convert to Three.js geometries (same as parallel version)
+        const geometries: THREE.BufferGeometry[] = [];
+        let totalVertexCount = 0;
 
-  getContext(contextId: string): any {
-    return this.activeContexts.get(contextId);
-  }
+        for (const processedGeom of workerResult.geometries) {
+          if (!processedGeom.hasData || !processedGeom.vertices || processedGeom.vertices.length === 0) {
+            continue;
+          }
 
-  async terminateAllContexts(): Promise<void> {
-    const terminatePromises = Array.from(this.activeContexts.keys()).map(
-      contextId => this.terminateContext(contextId)
-    );
-    await Promise.all(terminatePromises);
-  }
-}
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute('position', new THREE.BufferAttribute(processedGeom.vertices, 3));
+          totalVertexCount += processedGeom.vertices.length / 3;
 
-// ================================================================================
-// Background Processing Utilities
-// ================================================================================
+          if (processedGeom.normals) {
+            geometry.setAttribute('normal', new THREE.BufferAttribute(processedGeom.normals, 3));
+          }
+          if (processedGeom.colors) {
+            geometry.setAttribute('color', new THREE.BufferAttribute(processedGeom.colors, 3));
+          }
+          if (processedGeom.indices) {
+            geometry.setIndex(new THREE.BufferAttribute(processedGeom.indices, 1));
+          }
+          if (processedGeom.properties) {
+            geometry.userData = { properties: processedGeom.properties };
+          }
+          if (processedGeom.needsNormals) {
+            geometry.computeVertexNormals();
+          }
 
-/**
- * Moves heavy computations to a background thread to prevent main thread blocking
- */
-class BackgroundProcessor {
-  private static workerPool = new Map<string, Worker>();
+          geometries.push(geometry);
+        }
 
-  static async processInBackground<T, R>(
-    taskName: string,
-    data: T,
-    onProgress?: (progress: number) => void
-  ): Promise<R> {
-    return new Promise((resolve, reject) => {
-      // Create or reuse worker
-      let worker = this.workerPool.get(taskName);
-      if (!worker) {
-        // Create worker from the background processor file
-        worker = new Worker(new URL('/src/workers/backgroundProcessor.ts', import.meta.url), {
-          type: 'module'
+        const containerGeometry = new THREE.BufferGeometry();
+        containerGeometry.userData = {
+          isContainer: true,
+          individualGeometries: geometries,
+          geometryCount: geometries.length
+        };
+
+        const processingTime = Date.now() - layerStartTime;
+
+        results.push({
+          layer,
+          geometry: containerGeometry,
+          success: true,
+          processingTimeMs: processingTime,
+          vertexCount: totalVertexCount,
+          geometryCount: geometries.length
         });
-        this.workerPool.set(taskName, worker);
+
+        console.log(`✅ Sequential layer "${layer.label}" processed in ${processingTime}ms`);
+
+      } catch (error) {
+        const processingTime = Date.now() - layerStartTime;
+
+        results.push({
+          layer,
+          geometry: new THREE.BufferGeometry(),
+          success: false,
+          error: error instanceof Error ? error : new Error(String(error)),
+          processingTimeMs: processingTime,
+          vertexCount: 0,
+          geometryCount: 0
+        });
+
+        console.error(`❌ Sequential layer "${layer.label}" failed:`, error);
       }
-
-      const timeout = setTimeout(() => {
-        reject(new Error(`Background processing timeout for task: ${taskName}`));
-      }, 30000); // 30 second timeout
-
-      worker.onmessage = (event) => {
-        const { type, data: responseData, progress, error } = event.data;
-
-        if (type === 'progress' && onProgress) {
-          onProgress(progress);
-        } else if (type === 'complete') {
-          clearTimeout(timeout);
-          resolve(responseData);
-        } else if (type === 'error') {
-          clearTimeout(timeout);
-          reject(new Error(error || 'Background processing failed'));
-        }
-      };
-
-      worker.onerror = (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      };
-
-      // Send data to worker
-      worker.postMessage(data);
-    });
-  }
-
-  static terminateWorker(taskName: string): void {
-    const worker = this.workerPool.get(taskName);
-    if (worker) {
-      worker.terminate();
-      this.workerPool.delete(taskName);
     }
+
+    return results;
   }
 
-  static terminateAllWorkers(): void {
-    this.workerPool.forEach((worker, taskName) => {
-      worker.terminate();
-    });
-    this.workerPool.clear();
+  async cleanup(): Promise<void> {
+    // Cancel all active processes
+    this.activeProcesses.forEach(controller => controller.abort());
+    this.activeProcesses.clear();
+    this.layerProgressTracking.clear();
+
+    // Cleanup idle contexts
+    await this.contextPool.cleanupIdleContexts(30000); // Clean contexts idle for 30s
+  }
+
+  getStats() {
+    return this.contextPool.getStats();
   }
 }
 
 // ================================================================================
-// Main Hook Implementation
+// Main Optimized Hook Implementation
 // ================================================================================
 
 export function useGenerateMesh() {
@@ -255,11 +493,10 @@ export function useGenerateMesh() {
   });
 
   const [isProcessingMesh, setIsProcessingMesh] = useState(false);
-  const [lastProcessedBboxHash, setLastProcessedBboxHash] = useState<string>("");
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Refs for cleanup and cancellation
-  const contextManagerRef = useRef<WasmContextManager | null>(null);
+  const layerProcessorRef = useRef<ParallelLayerProcessor | null>(null);
   const currentProcessIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -287,23 +524,6 @@ export function useGenerateMesh() {
   // ================================================================================
   // Utility Functions
   // ================================================================================
-
-  const convertToRustVtDataSet = useCallback((jsVtDataSet: VtDataSet) => {
-    return {
-      sourceLayer: jsVtDataSet.sourceLayer,
-      subClass: jsVtDataSet.subClass ? [jsVtDataSet.subClass] : undefined,
-      enabled: jsVtDataSet.enabled,
-      bufferSize: jsVtDataSet.bufferSize,
-      extrusionDepth: jsVtDataSet.extrusionDepth ?? null,
-      minExtrusionDepth: jsVtDataSet.minExtrusionDepth ?? null,
-      heightScaleFactor: jsVtDataSet.heightScaleFactor ?? null,
-      useAdaptiveScaleFactor: jsVtDataSet.useAdaptiveScaleFactor ?? null,
-      zOffset: jsVtDataSet.zOffset ?? null,
-      alignVerticesToTerrain: jsVtDataSet.alignVerticesToTerrain ?? null,
-      csgClipping: jsVtDataSet.useCsgClipping ?? null,
-      filter: jsVtDataSet.filter ?? null,
-    };
-  }, []);
 
   const calculateOptimalZoomLevel = useCallback((
     minLng: number,
@@ -343,27 +563,26 @@ export function useGenerateMesh() {
   // Core Processing Functions
   // ================================================================================
 
-  const processTerrainInBackground = useCallback(async (
+  const processTerrainOptimized = useCallback(async (
     bboxCoords: [number, number, number, number],
     processId: string,
-    terrainContextId: string,
     onProgress: (progress: ProcessingProgress) => void
   ): Promise<TerrainProcessingResult> => {
     const [minLng, minLat, maxLng, maxLat] = bboxCoords;
 
     onProgress({
       stage: 'terrain',
-      percentage: 10,
+      percentage: 5,
       message: 'Processing elevation data...'
     });
 
     try {
-      // Process elevation data first
+      // Process elevation data
       const elevationResult = await processElevationForBbox(bboxCoords, processId);
 
       onProgress({
         stage: 'terrain',
-        percentage: 30,
+        percentage: 10,
         message: 'Generating terrain mesh...'
       });
 
@@ -379,11 +598,11 @@ export function useGenerateMesh() {
 
       onProgress({
         stage: 'terrain',
-        percentage: 50,
+        percentage: 15,
         message: 'Creating terrain geometry...'
       });
 
-      // Create terrain geometry using WASM
+      // Create terrain geometry using WASM (main thread)
       const wasmModule = getWasmModule();
       const terrainParams = {
         min_lng: minLng,
@@ -399,25 +618,19 @@ export function useGenerateMesh() {
 
       onProgress({
         stage: 'terrain',
-        percentage: 70,
-        message: 'Converting terrain to Three.js format...'
+        percentage: 20,
+        message: 'Terrain processing complete'
       });
 
-      // Convert WASM TypedArrays to THREE.js BufferGeometry directly (optimized)
+      // Convert WASM TypedArrays to THREE.js BufferGeometry directly
       const geometry = new THREE.BufferGeometry();
-
-      // Use direct TypedArray references for better performance
       geometry.setAttribute("position", new THREE.BufferAttribute(wasmTerrainResult.positions, 3));
       geometry.setAttribute("normal", new THREE.BufferAttribute(wasmTerrainResult.normals, 3));
       geometry.setAttribute("color", new THREE.BufferAttribute(wasmTerrainResult.colors, 3));
-
-      // Use Uint32Array directly instead of converting to Array
       geometry.setIndex(new THREE.BufferAttribute(wasmTerrainResult.indices, 1));
 
-      const terrainGeometry = geometry;
-
       const result: TerrainProcessingResult = {
-        terrainGeometry: terrainGeometry as THREE.BufferGeometry,
+        terrainGeometry: geometry,
         processedElevationGrid: wasmTerrainResult.processedElevationGrid,
         processedMinElevation: wasmTerrainResult.processedMinElevation,
         processedMaxElevation: wasmTerrainResult.processedMaxElevation,
@@ -425,12 +638,6 @@ export function useGenerateMesh() {
         originalMaxElevation: wasmTerrainResult.originalMaxElevation,
         gridSize: elevationResult.gridSize
       };
-
-      onProgress({
-        stage: 'terrain',
-        percentage: 90,
-        message: 'Terrain processing complete'
-      });
 
       console.log('🏔️ Terrain processing completed successfully', {
         vertexCount: wasmTerrainResult.positions.length / 3,
@@ -444,207 +651,11 @@ export function useGenerateMesh() {
     }
   }, [processElevationForBbox, terrainSettings, setProcessedTerrainData]);
 
-  const processLayerInBackground = useCallback(async (
-    layer: VtDataSet,
-    layerIndex: number,
-    totalLayers: number,
-    bboxCoords: [number, number, number, number],
-    processId: string,
-    layerContextId: string,
-    terrainResult: TerrainProcessingResult,
-    onProgress: (progress: ProcessingProgress) => void
-  ): Promise<LayerProcessingResult> => {
-    const [minLng, minLat, maxLng, maxLat] = bboxCoords;
-    const baseProgress = 20 + (layerIndex * 60) / totalLayers;
-    const progressStep = 60 / totalLayers;
-
-    try {
-      onProgress({
-        stage: 'layers',
-        currentLayerIndex: layerIndex,
-        totalLayers,
-        percentage: baseProgress,
-        message: `Processing ${layer.sourceLayer} layer...`
-      });
-
-      // Extract and cache features in background
-      await getWasmModule().extract_features_from_vector_tiles({
-        bbox: bboxCoords,
-        vtDataSet: convertToRustVtDataSet(layer),
-        processId: processId,
-        elevationProcessId: processId
-      });
-
-      onProgress({
-        stage: 'layers',
-        currentLayerIndex: layerIndex,
-        totalLayers,
-        percentage: baseProgress + progressStep * 0.3,
-        message: `Creating geometry for ${layer.sourceLayer}...`
-      });
-
-      // Determine if debug mode should be used
-      const useDebugMode = debugSettings.geometryDebugMode || layer.geometryDebugMode;
-
-      // Prepare geometry input
-      const polygonGeometryInput = {
-        terrainBaseHeight: terrainSettings.baseHeight,
-        verticalExaggeration: terrainSettings.verticalExaggeration,
-        bbox: bboxCoords,
-        elevationGrid: terrainResult.processedElevationGrid,
-        gridSize: terrainResult.gridSize,
-        minElevation: terrainResult.originalMinElevation,
-        maxElevation: terrainResult.originalMaxElevation,
-        vtDataSet: {
-          ...convertToRustVtDataSet(layer),
-          geometryDebugMode: useDebugMode
-        },
-        useSameZOffset: true,
-        processId: processId,
-      };
-
-      onProgress({
-        stage: 'layers',
-        currentLayerIndex: layerIndex,
-        totalLayers,
-        percentage: baseProgress + progressStep * 0.5,
-        message: `Processing ${layer.sourceLayer} geometry...`
-      });
-
-      // Process geometry in WASM
-      const serializedInput = JSON.stringify(polygonGeometryInput);
-      const geometryJson = await getWasmModule().process_polygon_geometry(serializedInput);
-
-      // Parse JSON in background to avoid blocking main thread
-      const geometryDataArray = await BackgroundProcessor.processInBackground(
-        `layer-${layer.label}-parsing`,
-        {
-          type: 'parse-json',
-          data: { jsonString: geometryJson }
-        }
-      );
-
-      onProgress({
-        stage: 'layers',
-        currentLayerIndex: layerIndex,
-        totalLayers,
-        percentage: baseProgress + progressStep * 0.8,
-        message: `Converting ${layer.sourceLayer} to Three.js...`
-      });
-
-      // Process geometries in background worker
-      const workerResult = await BackgroundProcessor.processInBackground(
-        `layer-${layer.label}-processing`,
-        {
-          type: 'process-geometries',
-          data: {
-            geometryDataArray,
-            layerName: layer.label
-          }
-        },
-        (progress) => {
-          onProgress({
-            stage: 'layers',
-            currentLayerIndex: layerIndex,
-            totalLayers,
-            percentage: baseProgress + progressStep * (0.8 + progress * 0.2),
-            message: `Converting ${layer.sourceLayer} to Three.js...`
-          });
-        }
-      );
-
-      // Convert worker results to Three.js geometries on main thread (minimal work)
-      const geometries: THREE.BufferGeometry[] = [];
-      const processedGeometries = workerResult.geometries;
-
-      for (const processedGeom of processedGeometries) {
-        if (!processedGeom.hasData || !processedGeom.vertices || processedGeom.vertices.length === 0) {
-          continue;
-        }
-
-        const geometry = new THREE.BufferGeometry();
-
-        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(processedGeom.vertices), 3));
-
-        if (processedGeom.normals && processedGeom.normals.length > 0) {
-          geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(processedGeom.normals), 3));
-        }
-
-        if (processedGeom.colors && processedGeom.colors.length > 0) {
-          geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(processedGeom.colors), 3));
-        }
-
-        if (processedGeom.indices && processedGeom.indices.length > 0) {
-          geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(processedGeom.indices), 1));
-        }
-
-        if (processedGeom.properties) {
-          geometry.userData = { properties: processedGeom.properties };
-        }
-
-        if (processedGeom.needsNormals) {
-          geometry.computeVertexNormals();
-        }
-
-        geometries.push(geometry);
-      }
-
-      // Create container geometry
-      const containerGeometry = new THREE.BufferGeometry();
-      containerGeometry.userData = {
-        isContainer: true,
-        individualGeometries: geometries,
-        geometryCount: geometries.length
-      };
-
-      // Debug geometry data
-      const totalVertices = geometries.reduce((sum, geo) => {
-        const positions = geo.attributes.position;
-        return sum + (positions ? positions.count : 0);
-      }, 0);
-
-      console.log(`🔍 Layer "${layer.label}" (${layer.sourceLayer}): ${geometries.length} geometries, ${totalVertices} total vertices`);
-      geometries.forEach((geo, i) => {
-        const positions = geo.attributes.position;
-        const vertexCount = positions ? positions.count : 0;
-        if (vertexCount > 0) {
-          console.log(`  - Geometry ${i}: ${vertexCount} vertices`);
-        }
-      });
-
-      onProgress({
-        stage: 'layers',
-        currentLayerIndex: layerIndex,
-        totalLayers,
-        percentage: baseProgress + progressStep,
-        message: `${layer.sourceLayer} processing complete`
-      });
-
-      console.log(`✅ Layer ${layer.sourceLayer} processed successfully with ${geometries.length} geometries`);
-
-      return {
-        layer,
-        geometry: containerGeometry,
-        success: true
-      };
-
-    } catch (error) {
-      console.error(`❌ Failed to process layer ${layer.sourceLayer}:`, error);
-
-      return {
-        layer,
-        geometry: new THREE.BufferGeometry(),
-        success: false,
-        error: error instanceof Error ? error : new Error(String(error))
-      };
-    }
-  }, [convertToRustVtDataSet, debugSettings, terrainSettings]);
-
   // ================================================================================
   // Main Generation Function
   // ================================================================================
 
-  const generateMeshInBackground = useCallback(async (): Promise<MeshGenerationResult> => {
+  const generateMeshOptimized = useCallback(async (): Promise<MeshGenerationResult> => {
     const startTime = Date.now();
 
     if (!bbox) {
@@ -655,12 +666,15 @@ export function useGenerateMesh() {
       throw new Error("WASM module not initialized. Please try again later.");
     }
 
+    // Start performance monitoring
+    const performanceSessionId = performanceMonitor.startSession(vtLayers.length);
+
     // Initialize processing state
     setIsProcessingMesh(true);
     setProcessingProgress({
       stage: 'initializing',
       percentage: 0,
-      message: 'Initializing mesh generation...'
+      message: 'Initializing optimized mesh generation...'
     });
 
     // Create abort controller for cancellation
@@ -694,31 +708,15 @@ export function useGenerateMesh() {
       const processId = await processManager.startProcess(processConfig);
       currentProcessIdRef.current = processId;
 
-      console.log(`🚀 Started mesh generation process: ${processId}`);
+      console.log(`🚀 Started optimized mesh generation process: ${processId}`);
 
-      // Initialize context manager
-      const contextManager = new WasmContextManager();
-      contextManagerRef.current = contextManager;
-
-      setProcessingProgress({
-        stage: 'initializing',
-        percentage: 5,
-        message: 'Creating processing contexts...'
-      });
-
-      // Create processing contexts
-      const terrainContextId = await contextManager.createTerrainContext();
-
-      // Create layer contexts for parallel processing
-      const layerContextPromises = vtLayers.map(async (layer) => {
-        const contextId = await contextManager.createLayerContext(layer.label);
-        return { layer, contextId };
-      });
-      const layerContexts = await Promise.all(layerContextPromises);
+      // Initialize layer processor
+      const layerProcessor = new ParallelLayerProcessor();
+      layerProcessorRef.current = layerProcessor;
 
       setProcessingProgress({
         stage: 'initializing',
-        percentage: 10,
+        percentage: 2,
         message: 'Fetching vector tile data...'
       });
 
@@ -727,8 +725,8 @@ export function useGenerateMesh() {
       await fetchVtData({
         bbox: bboxCoords,
         zoom: 14,
-        gridSize: { width: 256, height: 256 }, // Will be updated after terrain processing
-        bboxKey: processId, // Use process ID for caching
+        gridSize: { width: 256, height: 256 },
+        bboxKey: processId,
       });
 
       // Check for cancellation
@@ -736,13 +734,17 @@ export function useGenerateMesh() {
         throw new Error('Operation was cancelled');
       }
 
-      // Process terrain in background
-      const terrainResult = await processTerrainInBackground(
+      // Process terrain
+      const terrainStartTime = performance.now();
+      const terrainResult = await processTerrainOptimized(
         bboxCoords,
         processId,
-        terrainContextId,
         setProcessingProgress
       );
+      const terrainEndTime = performance.now();
+
+      // Record terrain processing performance
+      performanceMonitor.recordTerrainProcessing(terrainEndTime - terrainStartTime);
 
       // Check for cancellation after terrain
       if (abortController.signal.aborted) {
@@ -750,51 +752,32 @@ export function useGenerateMesh() {
       }
 
       setProcessingProgress({
-        stage: 'layers',
-        percentage: 20,
-        message: 'Processing layers in parallel...'
+        stage: 'initializing',
+        percentage: 25,
+        message: 'Preparing parallel processing...'
       });
 
-      // Share elevation resources between contexts
-      const elevationResourceKeys = [`elevation-${processId}`, `terrain-${processId}`];
-      await Promise.all(
-        layerContexts.map(({ contextId }) =>
-          contextManager.shareResourcesBetweenContexts(terrainContextId, contextId, elevationResourceKeys)
-        )
+      // Workers will handle their own vector tile fetching
+      console.log(`⚡ Workers will fetch vector tiles independently for optimal performance`);
+
+      // Initialize contexts for layer processing
+      await layerProcessor.initializeContexts(vtLayers.length);
+
+      // Process layers in parallel using dedicated WASM contexts
+      const layerResults = await layerProcessor.processLayersInParallel(
+        vtLayers,
+        bboxCoords,
+        processId,
+        {
+          processedElevationGrid: terrainResult.processedElevationGrid,
+          gridSize: terrainResult.gridSize,
+          originalMinElevation: terrainResult.originalMinElevation,
+          originalMaxElevation: terrainResult.originalMaxElevation
+        },
+        terrainSettings,
+        debugSettings,
+        setProcessingProgress
       );
-
-      // Process layers in parallel using separate contexts
-      const layerProcessingPromises = layerContexts.map(async ({ layer, contextId }, index) => {
-        return await processLayerInBackground(
-          layer,
-          index,
-          vtLayers.length,
-          bboxCoords,
-          processId,
-          contextId,
-          terrainResult,
-          setProcessingProgress
-        );
-      });
-
-      // Execute layer processing with controlled parallelism
-      const hasTerrainAlignment = vtLayers.some(layer => layer.alignVerticesToTerrain);
-      let layerResults: LayerProcessingResult[];
-
-      if (hasTerrainAlignment) {
-        console.log('🏔️ Processing layers sequentially due to terrain alignment');
-        layerResults = [];
-        for (const promise of layerProcessingPromises) {
-          if (abortController.signal.aborted) {
-            throw new Error('Operation was cancelled');
-          }
-          const result = await promise;
-          layerResults.push(result);
-        }
-      } else {
-        console.log('⚡ Processing layers in parallel');
-        layerResults = await Promise.all(layerProcessingPromises);
-      }
 
       // Check for cancellation before finalizing
       if (abortController.signal.aborted) {
@@ -804,35 +787,47 @@ export function useGenerateMesh() {
       setProcessingProgress({
         stage: 'finalizing',
         percentage: 90,
-        message: 'Finalizing mesh generation...'
+        message: 'Finalizing optimized mesh generation...'
       });
 
-      // Clean up contexts
-      await contextManager.terminateAllContexts();
+      // Clean up layer processor
+      await layerProcessor.cleanup();
 
       const totalTime = Date.now() - startTime;
+
+      // Calculate parallelization efficiency
+      const sequentialTime = layerResults.reduce((sum, r) => sum + r.processingTimeMs, 0);
+      const parallelTime = Math.max(...layerResults.map(r => r.processingTimeMs));
+      const efficiency = sequentialTime > 0 ? Math.min(100, (sequentialTime / parallelTime) * 100) : 0;
 
       setProcessingProgress({
         stage: 'complete',
         percentage: 100,
-        message: 'Mesh generation complete!'
+        message: 'Optimized mesh generation complete!'
       });
 
-      console.log(`🎉 Mesh generation completed in ${totalTime}ms`);
+      console.log(`🎉 Optimized mesh generation completed in ${totalTime}ms (${efficiency.toFixed(1)}% efficiency)`);
+
+      // End performance monitoring and log analysis
+      const performanceSession = performanceMonitor.endSession();
+      if (performanceSession) {
+        performanceMonitor.logPerformanceSummary(performanceSession);
+      }
 
       return {
         terrainResult,
         layerResults,
         totalProcessingTimeMs: totalTime,
+        parallelizationEfficiency: efficiency,
         success: true
       };
 
     } catch (error) {
-      console.error('❌ Mesh generation failed:', error);
+      console.error('❌ Optimized mesh generation failed:', error);
 
       // Clean up on error
-      if (contextManagerRef.current) {
-        await contextManagerRef.current.terminateAllContexts();
+      if (layerProcessorRef.current) {
+        await layerProcessorRef.current.cleanup();
       }
 
       const totalTime = Date.now() - startTime;
@@ -847,6 +842,7 @@ export function useGenerateMesh() {
         terrainResult: null,
         layerResults: [],
         totalProcessingTimeMs: totalTime,
+        parallelizationEfficiency: 0,
         success: false,
         error: error instanceof Error ? error : new Error(String(error))
       };
@@ -860,10 +856,10 @@ export function useGenerateMesh() {
     isWasmInitialized,
     terrainSettings,
     vtLayers,
+    debugSettings,
     extractBoundingBoxCoordinates,
     calculateOptimalZoomLevel,
-    processTerrainInBackground,
-    processLayerInBackground
+    processTerrainOptimized
   ]);
 
   // ================================================================================
@@ -881,20 +877,8 @@ export function useGenerateMesh() {
       abortControllerRef.current.abort();
     }
 
-    // Cancel WASM operations
     try {
-      WorkerService.cancelActiveTasks("polygon-geometry");
-      const wasmModule = getWasmModule();
-      if (wasmModule?.cancel_operation) {
-        wasmModule.cancel_operation("polygon_processing");
-        wasmModule.cancel_operation("terrain_generation");
-      }
-    } catch (err) {
-      console.warn("Error cancelling existing tasks:", err);
-    }
-
-    try {
-      const result = await generateMeshInBackground();
+      const result = await generateMeshOptimized();
 
       if (result.success && result.terrainResult) {
         // Update geometry data sets
@@ -919,17 +903,27 @@ export function useGenerateMesh() {
           layerHashes: currentLayerHashes,
         });
 
-        console.log('✅ Mesh generation completed successfully');
+        console.log('✅ Optimized mesh generation completed successfully');
+        console.log('📊 Performance metrics:', {
+          totalTime: result.totalProcessingTimeMs,
+          efficiency: `${result.parallelizationEfficiency.toFixed(1)}%`,
+          layerResults: result.layerResults.map(r => ({
+            layer: r.layer.label,
+            time: r.processingTimeMs,
+            vertices: r.vertexCount,
+            success: r.success
+          }))
+        });
       }
 
       return result;
     } catch (error) {
-      console.error('❌ Mesh generation error:', error);
+      console.error('❌ Optimized mesh generation error:', error);
       throw error;
     }
   }, [
     isProcessingMesh,
-    generateMeshInBackground,
+    generateMeshOptimized,
     setGeometryDataSets,
     setConfigHashes,
     bbox,
@@ -939,7 +933,7 @@ export function useGenerateMesh() {
 
   const cancelMeshGeneration = useCallback(() => {
     if (abortControllerRef.current) {
-      console.log('🛑 Cancelling mesh generation...');
+      console.log('🛑 Cancelling optimized mesh generation...');
       abortControllerRef.current.abort();
     }
 
@@ -947,8 +941,10 @@ export function useGenerateMesh() {
       processManager.cancelProcess(currentProcessIdRef.current);
     }
 
-    // Clean up background workers
-    BackgroundProcessor.terminateAllWorkers();
+    // Clean up layer processor
+    if (layerProcessorRef.current) {
+      layerProcessorRef.current.cleanup();
+    }
 
     setIsProcessingMesh(false);
     setProcessingProgress({
@@ -971,7 +967,7 @@ export function useGenerateMesh() {
   }, [terrainSettings]);
 
   useEffect(() => {
-    console.log("useGenerateMesh dependencies changed:", {
+    console.log("useGenerateMeshOptimized dependencies changed:", {
       hasBbox: !!bbox,
       terrainEnabled: terrainSettings?.enabled,
       buildingsEnabled: buildingSettings?.enabled,
@@ -983,12 +979,12 @@ export function useGenerateMesh() {
 
     if (debounceTimer) clearTimeout(debounceTimer);
     if (!bbox) {
-      console.warn("No bbox available, skipping mesh generation");
+      console.warn("No bbox available, skipping optimized mesh generation");
       return;
     }
 
     const timer = setTimeout(() => {
-      console.log("Debounce timer expired, starting mesh generation");
+      console.log("Debounce timer expired, starting optimized mesh generation");
       startMeshGeneration();
     }, 1000);
 
@@ -1011,10 +1007,9 @@ export function useGenerateMesh() {
     return () => {
       // Cleanup on unmount
       cancelMeshGeneration();
-      if (contextManagerRef.current) {
-        contextManagerRef.current.terminateAllContexts();
+      if (layerProcessorRef.current) {
+        layerProcessorRef.current.cleanup();
       }
-      BackgroundProcessor.terminateAllWorkers();
 
       if (debounceTimer) {
         clearTimeout(debounceTimer);
@@ -1040,6 +1035,7 @@ export function useGenerateMesh() {
 
     // Debug info
     currentProcessId: currentProcessIdRef.current,
-    hasActiveContexts: contextManagerRef.current ? true : false
+    hasActiveContexts: layerProcessorRef.current ? true : false,
+    contextPoolStats: layerProcessorRef.current?.getStats() || null
   };
 }

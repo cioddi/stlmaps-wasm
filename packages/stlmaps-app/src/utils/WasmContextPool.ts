@@ -5,6 +5,7 @@
  */
 
 import { getWasmModule } from "@threegis/core";
+import { sharedResourceManager } from './SharedResourceManager';
 
 // ================================================================================
 // Types and Interfaces
@@ -46,99 +47,8 @@ export interface ContextPoolStats {
   averageTaskTime: number;
 }
 
-// ================================================================================
-// WASM Context Worker
-// ================================================================================
-
-const WASM_WORKER_SCRIPT = `
-// WASM Context Worker - runs in separate thread
-let wasmModule = null;
-let isInitialized = false;
-let currentTask = null;
-
-// Initialize WASM module in this worker context
-async function initializeWasm() {
-  try {
-    // Import WASM module (this will be different based on bundler)
-    const wasmInit = self.wasmInit || importScripts('path-to-wasm-module');
-
-    await wasmInit();
-    wasmModule = self.wasmModule;
-    isInitialized = true;
-
-    self.postMessage({
-      type: 'initialized',
-      success: true
-    });
-  } catch (error) {
-    self.postMessage({
-      type: 'initialized',
-      success: false,
-      error: error.message
-    });
-  }
-}
-
-// Handle messages from main thread
-self.onmessage = async (event) => {
-  const { type, taskId, functionName, input, timeout } = event.data;
-
-  try {
-    if (type === 'init') {
-      await initializeWasm();
-      return;
-    }
-
-    if (type === 'execute') {
-      if (!isInitialized || !wasmModule) {
-        throw new Error('WASM module not initialized in worker context');
-      }
-
-      if (!wasmModule[functionName]) {
-        throw new Error(\`WASM function not found: \${functionName}\`);
-      }
-
-      currentTask = taskId;
-
-      // Set up timeout
-      const timeoutId = setTimeout(() => {
-        self.postMessage({
-          type: 'error',
-          taskId,
-          error: 'Task timeout'
-        });
-      }, timeout || 30000);
-
-      try {
-        const result = await wasmModule[functionName](input);
-        clearTimeout(timeoutId);
-
-        self.postMessage({
-          type: 'result',
-          taskId,
-          result
-        });
-      } catch (error) {
-        clearTimeout(timeoutId);
-        throw error;
-      } finally {
-        currentTask = null;
-      }
-    }
-
-    if (type === 'terminate') {
-      self.close();
-    }
-
-  } catch (error) {
-    self.postMessage({
-      type: 'error',
-      taskId: event.data.taskId,
-      error: error.message
-    });
-  }
-};
-`;
+// Import the WASM worker for proper module loading
+import WasmLayerWorker from '../workers/wasmLayerWorker?worker';
 
 // ================================================================================
 // Context Pool Manager
@@ -178,10 +88,13 @@ export class WasmContextPool {
     const workerId = `worker-${contextId}`;
 
     try {
-      // Create worker with WASM context
-      const worker = new Worker(
-        URL.createObjectURL(new Blob([WASM_WORKER_SCRIPT], { type: 'application/javascript' }))
-      );
+      // Create worker with proper WASM module loading
+      const worker = new WasmLayerWorker();
+
+      // Set up error handling
+      worker.onerror = (error) => {
+        console.error(`Worker ${workerId} error:`, error);
+      };
 
       // Initialize WASM in the worker
       await this.initializeWorker(worker);
@@ -218,7 +131,7 @@ export class WasmContextPool {
           clearTimeout(timeout);
           worker.removeEventListener('message', messageHandler);
 
-          if (event.data.success) {
+          if (event.data.data?.success) {
             resolve();
           } else {
             reject(new Error(event.data.error || 'Worker initialization failed'));
@@ -227,7 +140,13 @@ export class WasmContextPool {
       };
 
       worker.addEventListener('message', messageHandler);
-      worker.postMessage({ type: 'init' });
+
+      // Send initialization request with unique ID
+      const initId = `init-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      worker.postMessage({
+        id: initId,
+        type: 'init'
+      });
     });
   }
 
@@ -260,6 +179,122 @@ export class WasmContextPool {
   // ================================================================================
   // Task Execution
   // ================================================================================
+
+  /**
+   * Process a layer using a dedicated WASM context
+   */
+  async processLayerInContext(
+    layerConfig: any,
+    bboxCoords: [number, number, number, number],
+    processId: string,
+    terrainData: any,
+    terrainSettings: any,
+    debugMode: boolean = false,
+    options: {
+      priority?: number;
+      timeout?: number;
+      contextId?: string;
+      onProgress?: (progress: number, message: string) => void;
+    } = {}
+  ): Promise<any> {
+    const taskId = `layer-${layerConfig.sourceLayer}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    return new Promise<any>((resolve, reject) => {
+      const timeout = options.timeout || this.config.timeoutMs;
+
+      // Find or create context
+      const contextId = options.contextId || this.findIdleContext();
+      if (!contextId) {
+        reject(new Error('No available WASM context'));
+        return;
+      }
+
+      const context = this.contexts.get(contextId);
+      const worker = this.workers.get(context!.workerId);
+
+      if (!context || !worker) {
+        reject(new Error(`Context or worker not found: ${contextId}`));
+        return;
+      }
+
+      context.isActive = true;
+      context.currentTask = taskId;
+      context.lastUsedAt = Date.now();
+
+      const startTime = Date.now();
+
+      // Set up timeout
+      const timeoutId = setTimeout(() => {
+        worker.removeEventListener('message', messageHandler);
+        context.isActive = false;
+        context.currentTask = null;
+        reject(new Error(`Layer processing timeout after ${timeout}ms`));
+      }, timeout);
+
+      // Handle worker messages
+      const messageHandler = (event: MessageEvent) => {
+        if (event.data.id === taskId) {
+          const { type, data, progress, error } = event.data;
+
+          if (type === 'progress') {
+            if (options.onProgress && data?.message) {
+              options.onProgress(progress || 0, data.message);
+            }
+          } else if (type === 'result') {
+            clearTimeout(timeoutId);
+            worker.removeEventListener('message', messageHandler);
+
+            const executionTime = Date.now() - startTime;
+            this.updateStats(executionTime, true);
+
+            context.isActive = false;
+            context.currentTask = null;
+
+            this.log(`Layer processing completed in ${executionTime}ms: ${layerConfig.sourceLayer}`);
+            resolve(data);
+
+            // Process next queued task
+            this.processNextTask();
+
+          } else if (type === 'error') {
+            clearTimeout(timeoutId);
+            worker.removeEventListener('message', messageHandler);
+
+            const executionTime = Date.now() - startTime;
+            this.updateStats(executionTime, false);
+
+            context.isActive = false;
+            context.currentTask = null;
+
+            this.log(`Layer processing failed after ${executionTime}ms: ${error}`);
+            reject(new Error(error || 'Layer processing failed'));
+
+            // Process next queued task
+            this.processNextTask();
+          }
+        }
+      };
+
+      worker.addEventListener('message', messageHandler);
+
+      // Send layer processing task to worker directly
+      // Workers will handle their own vector tile fetching
+      worker.postMessage({
+        id: taskId,
+        type: 'process-layer',
+        data: {
+          layerConfig,
+          bboxCoords,
+          processId,
+          terrainData,
+          terrainSettings,
+          debugMode
+        }
+      });
+
+      this.log(`Started layer processing in context ${contextId}: ${layerConfig.sourceLayer}`);
+    });
+  }
 
   async executeInContext<TInput, TOutput>(
     functionName: string,
