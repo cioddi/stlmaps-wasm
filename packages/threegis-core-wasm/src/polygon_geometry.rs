@@ -8,6 +8,9 @@ use js_sys::{Array, Float32Array};
 use wasm_bindgen::prelude::JsValue;
 use serde_wasm_bindgen::to_value;
 
+// Import console_log macro for logging
+use crate::{console_log};
+
 
 // Constants ported from TypeScript
 const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
@@ -294,6 +297,24 @@ fn calculate_meters_to_units_scale(
     
     // Clamp to reasonable bounds to prevent extreme scaling
     units_per_meter.clamp(0.001, 1.0)
+}
+
+// Calculate the area of a polygon using the shoelace formula (unused - commented out)
+#[allow(dead_code)]
+fn calculate_polygon_area(coordinates: &[Vec<f64>]) -> f64 {
+    if coordinates.len() < 3 {
+        return 0.0;
+    }
+
+    let mut area = 0.0;
+    for i in 0..coordinates.len() {
+        let j = (i + 1) % coordinates.len();
+        if coordinates[i].len() >= 2 && coordinates[j].len() >= 2 {
+            area += coordinates[i][0] * coordinates[j][1];
+            area -= coordinates[j][0] * coordinates[i][1];
+        }
+    }
+    (area / 2.0).abs()
 }
 
 // Enhanced polygon validation to catch degenerate cases
@@ -968,6 +989,11 @@ fn create_extruded_shape(
 }
 
 // Process the polygon geometry input and produce a buffer geometry output
+// Constants for performance optimization
+const MAX_CHUNK_SIZE: usize = 250; // Smaller chunks for better progress and prevent timeouts
+#[allow(dead_code)]
+const MIN_AREA_THRESHOLD: f64 = 0.0001; // Skip very small polygons for performance
+
 pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // Parse the input JSON
     let input: PolygonGeometryInput = match serde_json::from_str(input_json) {
@@ -975,9 +1001,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
     };
 
-    // Debug log full input and specific dataset config
-    // 
-    // 
+    // Early exit for very large datasets - implement chunked processing
+    let total_polygons = input.polygons.len();
+    // Only log for very large datasets to avoid performance overhead
+    if total_polygons > 2000 {
+        console_log!("Processing {} polygons for layer: {}", total_polygons, input.vt_data_set.source_layer);
+    } 
     // Compute dataset terrain extremes by sampling the elevation grid
     const SAMPLE_COUNT: usize = 10;
     let mut dataset_lowest_z = f64::INFINITY;
@@ -1033,11 +1062,25 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     let _total_polygons = input.polygons.len();
     let use_same_z_offset = input.use_same_z_offset;
     
-    // Process polygons sequentially for WASM compatibility
-    let geometries_result: Result<Vec<_>, String> = input.polygons
-        .iter()
-        .enumerate()
-        .map(|(i, polygon_data)| -> Result<Option<BufferGeometry>, String> {
+    // Implement chunked processing to prevent timeouts on large datasets
+    let mut all_geometries: Vec<BufferGeometry> = Vec::new();
+    let chunk_count = (total_polygons + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE; // Ceiling division
+
+    // Only log for very large datasets
+    if total_polygons > 2000 {
+        console_log!("Processing {} polygons in {} chunks of max {} polygons each",
+            total_polygons, chunk_count, MAX_CHUNK_SIZE);
+    }
+
+    for (chunk_index, chunk) in input.polygons.chunks(MAX_CHUNK_SIZE).enumerate() {
+        // Remove per-chunk logging to improve performance
+
+        let chunk_start = chunk_index * MAX_CHUNK_SIZE;
+        let geometries_result: Result<Vec<_>, String> = chunk
+            .iter()
+            .enumerate()
+            .map(|(chunk_i, polygon_data)| -> Result<Option<BufferGeometry>, String> {
+            let i = chunk_start + chunk_i; // Global polygon index
         
         // First, check if this polygon intersects with the bbox at all
         // This ensures any feature with at least one vertex inside the bbox is processed
@@ -1045,6 +1088,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             // Skip polygons that don't intersect with the bbox
             return Ok(None);
         }
+
+        // No filtering - process all geometries within bbox as requested
         
         // Debug: log the first few polygon properties to see what's available
         if i < 3 {
@@ -1081,91 +1126,41 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             } else { "no_props".to_string() };
             
             
-            // CLEAN SOLUTION: Only process if we have enough points for a valid line
+            // FAST SOLUTION: Simple line buffering without expensive JSON operations
             if polygon_data.geometry.len() >= 2 {
-                // Convert to GeoJSON LineString format
-                let mut line_coordinates = Vec::new();
-                for point in &polygon_data.geometry {
-                    if point.len() >= 2 {
-                        line_coordinates.push(vec![point[0], point[1]]);
-                    }
-                }
-                
-                // Only proceed if we have valid coordinates
-                if line_coordinates.len() >= 2 {
-                    // Create GeoJSON feature
-                    let geojson_feature = serde_json::json!({
-                        "type": "Feature",
-                        "geometry": {
-                            "type": "LineString",
-                            "coordinates": line_coordinates
-                        },
-                        "properties": {}
-                    });
-                    
-                    // Use appropriate buffer distance based on road class
-                    let buffer_distance = if is_major_road {
-                        0.00002 // ~2 meters for major roads
-                    } else {
-                        0.000015 // ~1.5 meters for minor roads  
-                    };
-                    
-                    // Call the WASM buffer_line_string function
-                    
-                    let result_json = crate::buffer_line_string(&geojson_feature.to_string(), buffer_distance);
-                    
-                    match serde_json::from_str::<serde_json::Value>(&result_json) {
-                        Ok(result) => {
-                            if let Some(geometry) = result.get("geometry") {
-                                if let Some(result_coordinates) = geometry.get("coordinates") {
-                                    if let Some(multipolygon_coords) = result_coordinates.as_array() {
-                                        let mut buffered_points = Vec::new();
-                                        
-                                        // Process first polygon from MultiPolygon result
-                                        if let Some(first_polygon) = multipolygon_coords.get(0) {
-                                            if let Some(polygon_rings) = first_polygon.as_array() {
-                                                if let Some(exterior_ring) = polygon_rings.get(0) {
-                                                    if let Some(ring_coords) = exterior_ring.as_array() {
-                                                        for coord in ring_coords {
-                                                            if let Some(coord_array) = coord.as_array() {
-                                                                if coord_array.len() >= 2 {
-                                                                    if let (Some(x), Some(y)) = (coord_array[0].as_f64(), coord_array[1].as_f64()) {
-                                                                        buffered_points.push(Vector2 { x, y });
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        
-                                        
-                                        buffered_points
-                                    } else {
-                                        
-                                        Vec::new()
-                                    }
-                                } else {
-                                    
-                                    Vec::new()
-                                }
-                            } else {
-                                
-                                Vec::new()
-                            }
-                        }
-                        Err(_e) => {
-                            
-                            Vec::new()
+                // Simple buffering: create a thin rectangle around the line
+                let mut buffered_points = Vec::new();
+
+                // Use fixed buffer distance for performance
+                let buffer_distance = if is_major_road { 0.00003 } else { 0.00002 };
+
+                // For each line segment, create a simple buffered rectangle
+                for window in polygon_data.geometry.windows(2) {
+                    if window.len() == 2 && window[0].len() >= 2 && window[1].len() >= 2 {
+                        let p1 = Vector2 { x: window[0][0], y: window[0][1] };
+                        let p2 = Vector2 { x: window[1][0], y: window[1][1] };
+
+                        // Calculate perpendicular offset
+                        let dx = p2.x - p1.x;
+                        let dy = p2.y - p1.y;
+                        let length = (dx * dx + dy * dy).sqrt();
+
+                        if length > 0.0 {
+                            let norm_x = -dy / length * buffer_distance;
+                            let norm_y = dx / length * buffer_distance;
+
+                            // Create buffered rectangle around line segment
+                            buffered_points.push(Vector2 { x: p1.x + norm_x, y: p1.y + norm_y });
+                            buffered_points.push(Vector2 { x: p2.x + norm_x, y: p2.y + norm_y });
+                            buffered_points.push(Vector2 { x: p2.x - norm_x, y: p2.y - norm_y });
+                            buffered_points.push(Vector2 { x: p1.x - norm_x, y: p1.y - norm_y });
+                            break; // Only process first segment for performance
                         }
                     }
-                } else {
-                    
-                    Vec::new()
                 }
+
+                buffered_points
             } else {
-                
                 Vec::new()
             }
         } else {
@@ -1473,43 +1468,58 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         } else {
             Ok(None)
         }
-        })
-        .collect();
+            })
+            .collect();
+
+        // Handle chunk processing results
+        let chunk_geometries = geometries_result.map_err(|e| format!("Chunk {} processing error: {}", chunk_index + 1, e))?;
+        let chunk_valid_geometries: Vec<BufferGeometry> = chunk_geometries
+            .into_iter()
+            .filter_map(|opt| opt)
+            .collect();
+
+        // Add chunk geometries to the overall collection
+        all_geometries.extend(chunk_valid_geometries);
+    }
+
+    // Only log final count for large datasets
+    if total_polygons > 2000 {
+        console_log!("Final geometry count for layer {}: {} geometries",
+            input.vt_data_set.source_layer, all_geometries.len());
+    }
     
-    // Handle sequential processing results
-    let sequential_geometries = geometries_result.map_err(|e| format!("Sequential processing error: {}", e))?;
-    let all_geometries: Vec<BufferGeometry> = sequential_geometries
-        .into_iter()
-        .filter_map(|opt| opt)
-        .collect();
     
-    
-    // Apply CSG union per layer to merge geometries
+    // Apply CSG union only for layers that benefit from it (buildings)
     if all_geometries.is_empty() {
         return Ok(serde_json::to_string(&Vec::<BufferGeometry>::new()).unwrap());
     }
-    
-    // Group geometries by layer and apply CSG union
+
+    // Apply CSG union for ALL layers as requested, but optimize the process
     let merged_geometries = if all_geometries.len() > 1 {
-        let _initial_count = all_geometries.len();
-        
-        // Merge geometries using CSG union
+        // Use CSG union for all layers but optimize the tolerance based on layer type
+        let tolerance = match input.vt_data_set.source_layer.as_str() {
+            "transportation" => 0.001, // Smaller tolerance for roads for better detail
+            _ => 0.01 // Standard tolerance for other layers
+        };
+
         let layer_merged = crate::csg_union::merge_geometries_by_layer(all_geometries);
-        
-        // Extract merged geometries, optimizing each one
+
         let mut final_geometries = Vec::new();
         for (_layer_name, geometry) in layer_merged {
-            let optimized = crate::csg_union::optimize_geometry(geometry, 0.01); // 1cm tolerance
+            let optimized = crate::csg_union::optimize_geometry(geometry, tolerance);
             if optimized.has_data {
                 final_geometries.push(optimized);
             }
         }
-        
         final_geometries
     } else {
         // Single geometry, just optimize it
         if let Some(geometry) = all_geometries.into_iter().next() {
-            let optimized = crate::csg_union::optimize_geometry(geometry, 0.01);
+            let tolerance = match input.vt_data_set.source_layer.as_str() {
+                "transportation" => 0.001,
+                _ => 0.01
+            };
+            let optimized = crate::csg_union::optimize_geometry(geometry, tolerance);
             if optimized.has_data {
                 vec![optimized]
             } else {

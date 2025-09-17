@@ -12,7 +12,7 @@ interface WorkerRequest {
 }
 
 // Configuration for worker timeouts
-const WORKER_TIMEOUT = 60000; // 60 seconds timeout for worker operations
+const WORKER_TIMEOUT = 300000; // 300 seconds (5 minutes) timeout for worker operations to handle large bboxes
 
 export class WorkerService {
   private static workers: Map<string, Worker> = new Map();

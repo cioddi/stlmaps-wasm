@@ -81,7 +81,7 @@ export interface ProcessingProgress {
 class ParallelLayerProcessor {
   private contextPool = getWasmContextPool({
     maxContexts: Math.min(navigator.hardwareConcurrency || 4, 8),
-    timeoutMs: 60000,
+    timeoutMs: 300000, // 5 minutes for large bbox processing
     enableDebugLogging: false
   });
 
@@ -209,7 +209,7 @@ class ParallelLayerProcessor {
           terrainSettings,
           useDebugMode,
           {
-            timeout: 60000,
+            timeout: 300000, // 5 minutes for large datasets
             onProgress: (progress, message) => {
               // Update progress for this specific layer
               this.layerProgressTracking.set(layer.label, progress);
@@ -374,7 +374,7 @@ class ParallelLayerProcessor {
           terrainSettings,
           useDebugMode,
           {
-            timeout: 60000,
+            timeout: 300000, // 5 minutes for large datasets
             onProgress: (progress, message) => {
               const baseProgress = 20 + (i * 60) / layers.length;
               const layerProgress = (progress * 60) / (layers.length * 100);
