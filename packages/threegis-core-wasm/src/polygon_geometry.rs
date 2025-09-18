@@ -230,6 +230,45 @@ fn sample_terrain_elevation_at_point(
     base_box_height + elevation_variation
 }
 
+// Densify polygon edges for better terrain alignment
+fn densify_polygon_for_terrain_alignment(points: &[Vector2], max_edge_length: f64) -> Vec<Vector2> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+
+    let mut densified_points = Vec::new();
+
+    for i in 0..points.len() {
+        let current = points[i];
+        let next = points[(i + 1) % points.len()];
+
+        // Add current point
+        densified_points.push(current);
+
+        // Calculate edge length
+        let dx = next.x - current.x;
+        let dy = next.y - current.y;
+        let edge_length = (dx * dx + dy * dy).sqrt();
+
+        // If edge is longer than max_edge_length, subdivide it
+        if edge_length > max_edge_length {
+            let segments = (edge_length / max_edge_length).ceil() as usize;
+
+            // Add intermediate points
+            for j in 1..segments {
+                let t = j as f64 / segments as f64;
+                let interpolated = Vector2 {
+                    x: current.x + dx * t,
+                    y: current.y + dy * t,
+                };
+                densified_points.push(interpolated);
+            }
+        }
+    }
+
+    densified_points
+}
+
 // Transform geographic coordinates to mesh coordinates
 fn transform_to_mesh_coordinates(lng: f64, lat: f64, bbox: &[f64]) -> [f64; 2] {
     let min_lng = bbox[0];
@@ -1373,6 +1412,28 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             }
         } else {
             clipped_points
+        };
+
+        // Apply vertex densification for terrain alignment if enabled
+        let final_points = if input.vt_data_set.align_vertices_to_terrain.unwrap_or(false) {
+            // Calculate appropriate edge length based on terrain resolution
+            // Use a moderate densification to balance performance vs. terrain following
+            let max_edge_length = TERRAIN_SIZE / 40.0; // About 5 units for 200x200 terrain
+            let original_vertex_count = final_points.len();
+            let densified = densify_polygon_for_terrain_alignment(&final_points, max_edge_length);
+
+            // Log densification when significant vertices are added
+            if densified.len() > (original_vertex_count as f64 * 1.5) as usize {
+                console_log!(
+                    "🔺 Terrain alignment: densified polygon from {} to {} vertices",
+                    original_vertex_count,
+                    densified.len()
+                );
+            }
+
+            densified
+        } else {
+            final_points
         };
 
         // SUCCESS: This geometry made it through all filters
