@@ -191,8 +191,6 @@ class ParallelLayerProcessor {
           bufferSize: layer.bufferSize,
           extrusionDepth: layer.extrusionDepth ?? null,
           minExtrusionDepth: layer.minExtrusionDepth ?? null,
-          heightScaleFactor: layer.heightScaleFactor ?? null,
-          useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor ?? null,
           zOffset: layer.zOffset ?? null,
           alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
           applyMedianHeight: layer.applyMedianHeight ?? null,
@@ -358,8 +356,6 @@ class ParallelLayerProcessor {
           bufferSize: layer.bufferSize,
           extrusionDepth: layer.extrusionDepth ?? null,
           minExtrusionDepth: layer.minExtrusionDepth ?? null,
-          heightScaleFactor: layer.heightScaleFactor ?? null,
-          useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor ?? null,
           zOffset: layer.zOffset ?? null,
           alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
           applyMedianHeight: layer.applyMedianHeight ?? null,
@@ -698,8 +694,6 @@ export function useGenerateMesh() {
           color: layer.color,
           extrusionDepth: layer.extrusionDepth,
           minExtrusionDepth: layer.minExtrusionDepth,
-          heightScaleFactor: layer.heightScaleFactor,
-          useAdaptiveScaleFactor: layer.useAdaptiveScaleFactor,
           zOffset: layer.zOffset,
           alignVerticesToTerrain: layer.alignVerticesToTerrain,
           applyMedianHeight: layer.applyMedianHeight,
@@ -850,9 +844,20 @@ export function useGenerateMesh() {
         error: error instanceof Error ? error : new Error(String(error))
       };
     } finally {
+      // Ensure processing state is always properly reset
       setIsProcessingMesh(false);
+      setProcessingProgress({
+        stage: 'initializing',
+        percentage: 0,
+        message: 'Ready'
+      });
       abortControllerRef.current = null;
       currentProcessIdRef.current = null;
+
+      // Clean up layer processor reference
+      if (layerProcessorRef.current) {
+        layerProcessorRef.current = null;
+      }
     }
   }, [
     bbox,
@@ -871,8 +876,10 @@ export function useGenerateMesh() {
 
   const startMeshGeneration = useCallback(async () => {
     if (isProcessingMesh) {
-      console.warn('Mesh generation already in progress');
-      return;
+      console.warn('Mesh generation already in progress, cancelling and restarting');
+      await cancelMeshGeneration();
+      // Small additional delay after cancellation
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
 
     // Cancel any existing operations
@@ -938,17 +945,27 @@ export function useGenerateMesh() {
     if (abortControllerRef.current) {
       console.log('🛑 Cancelling optimized mesh generation...');
       abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
 
     if (currentProcessIdRef.current) {
       processManager.cancelProcess(currentProcessIdRef.current);
+      currentProcessIdRef.current = null;
     }
 
     // Clean up layer processor with proper async handling
     if (layerProcessorRef.current) {
       await layerProcessorRef.current.cleanup();
+      layerProcessorRef.current = null;
     }
 
+    // Clear any pending debounce timers
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      setDebounceTimer(null);
+    }
+
+    // Ensure processing state is properly reset
     setIsProcessingMesh(false);
     setProcessingProgress({
       stage: 'initializing',
@@ -957,8 +974,8 @@ export function useGenerateMesh() {
     });
 
     // Small delay to ensure WASM cleanup completes before next operation
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }, []);
+    await new Promise(resolve => setTimeout(resolve, 100)); // Increased delay
+  }, [debounceTimer]);
 
   // ================================================================================
   // Auto-generation Logic
@@ -988,10 +1005,9 @@ export function useGenerateMesh() {
 
     // Handle async cancellation
     const handleBboxChange = async () => {
-      // Cancel any existing operation
+      // Cancel any existing operation and clear timers
       await cancelMeshGeneration();
 
-      if (debounceTimer) clearTimeout(debounceTimer);
       if (!bbox) {
         console.warn("No bbox available, skipping optimized mesh generation");
         immediateProcessingRef.current = false;
@@ -1000,16 +1016,21 @@ export function useGenerateMesh() {
 
       // If there was an active process, use immediate processing for responsive UX
       // Otherwise use normal debouncing for initial changes
-      const delay = hadActiveProcess ? 150 : 1000; // Slightly longer for WASM cleanup
+      const delay = hadActiveProcess ? 200 : 1000; // Increased immediate delay for better reliability
 
       // Set flag for next iteration (only if we had an active process)
       immediateProcessingRef.current = hadActiveProcess;
 
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         console.log(`${hadActiveProcess ? 'Immediate' : 'Debounce'} timer expired, starting optimized mesh generation`);
-        startMeshGeneration();
-        // Reset immediate processing flag after starting
-        immediateProcessingRef.current = false;
+        try {
+          await startMeshGeneration();
+        } catch (error) {
+          console.error('Error during mesh generation:', error);
+        } finally {
+          // Reset immediate processing flag after starting
+          immediateProcessingRef.current = false;
+        }
       }, delay);
 
       setDebounceTimer(timer);

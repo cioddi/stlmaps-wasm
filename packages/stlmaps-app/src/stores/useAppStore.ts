@@ -34,8 +34,6 @@ export interface VtDataSet {
   filter?: any; // MapLibre filter expression
   extrusionDepth?: number;
   minExtrusionDepth?: number;
-  heightScaleFactor: number;
-  useAdaptiveScaleFactor: boolean;
   zOffset: number;
   alignVerticesToTerrain: boolean;
   applyMedianHeight: boolean;
@@ -201,8 +199,6 @@ const defaultLayers: VtDataSet[] = [
     bufferSize: 2,
     extrusionDepth: 0.8,
     zOffset: -0.4,
-    heightScaleFactor: 1,
-    useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 1,
@@ -216,8 +212,6 @@ const defaultLayers: VtDataSet[] = [
     bufferSize: 2,
     extrusionDepth: 1.0,
     zOffset: -0.8,
-    heightScaleFactor: 1,
-    useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 2
@@ -230,8 +224,6 @@ const defaultLayers: VtDataSet[] = [
     bufferSize: 2,
     extrusionDepth: 0.8,
     zOffset: -0.4,
-    heightScaleFactor: 1,
-    useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 3
@@ -244,8 +236,6 @@ const defaultLayers: VtDataSet[] = [
     bufferSize: 1.5,
     extrusionDepth: 1.1,
     zOffset: -0.2,
-    heightScaleFactor: 1,
-    useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 4,
@@ -263,8 +253,6 @@ const defaultLayers: VtDataSet[] = [
     bufferSize: 2,
     extrusionDepth: 1.0,
     zOffset: -0.2,
-    heightScaleFactor: 1,
-    useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 4,
@@ -290,8 +278,6 @@ const defaultLayers: VtDataSet[] = [
     bufferSize: 0,
     extrusionDepth: 1.5,
     zOffset: -0.2,
-    heightScaleFactor: 1,
-    useAdaptiveScaleFactor: false,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 5
@@ -303,8 +289,6 @@ const defaultLayers: VtDataSet[] = [
     color: "#a5d5e5",
     bufferSize: 0,
     zOffset: -0.1,
-    heightScaleFactor: 1, // 50% taller than default to make buildings more visible
-    useAdaptiveScaleFactor: true,
     alignVerticesToTerrain: false,
     applyMedianHeight: false,
     useCsgClipping: false,

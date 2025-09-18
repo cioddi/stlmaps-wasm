@@ -798,12 +798,12 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                 .and_then(|v| v.as_f64())
                 .filter(|&h| h > 0.0) // Only use positive heights
                 .or_else(|| {
-                    // Check render_height but ignore the default value of 5
+                    // Check render_height - all positive values are valid
                     feature
                         .properties
                         .get("render_height")
                         .and_then(|v| v.as_f64())
-                        .filter(|&h| h > 0.0 && h != 5.0) // Exclude render_height=5 (default value)
+                        .filter(|&h| h > 0.0) // Accept all positive heights including 5.0
                 })
                 .or_else(|| {
                     feature.properties.get("ele")
@@ -1729,13 +1729,13 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
 
 /// Apply median height fallback for buildings without height data
 /// Uses the median of the upper 50% of buildings with defined heights
-/// Excludes render_height=5 (default value) from median calculation
+/// Includes all positive height values including render_height=5
 fn apply_median_height_fallback(geometry_list: &mut Vec<GeometryData>) {
-    // First pass: collect all valid heights (> 0.0, excluding render_height=5 defaults)
+    // First pass: collect all valid heights (> 0.0, including all render_height values)
     let mut valid_heights: Vec<f64> = geometry_list
         .iter()
         .filter_map(|geom| geom.height)
-        .filter(|&h| h > 0.0) // This now properly excludes render_height=5 cases since we filtered them earlier
+        .filter(|&h| h > 0.0) // Accept all positive heights including render_height=5
         .collect();
 
     if valid_heights.is_empty() {
@@ -1775,7 +1775,7 @@ fn apply_median_height_fallback(geometry_list: &mut Vec<GeometryData>) {
     };
 
     console_log!(
-        "🏢 Calculated median height from upper 50%: {:.1} meters (from {} taller buildings out of {} total with valid heights, excluding render_height=5 defaults)",
+        "🏢 Calculated median height from upper 50%: {:.1} meters (from {} taller buildings out of {} total with valid heights)",
         median_height,
         upper_half.len(),
         valid_heights.len()

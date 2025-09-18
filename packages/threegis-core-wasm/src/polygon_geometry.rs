@@ -94,10 +94,6 @@ pub struct VtDataSet {
     pub extrusion_depth: Option<f64>,
     #[serde(rename = "minExtrusionDepth")]
     pub min_extrusion_depth: Option<f64>,
-    #[serde(rename = "heightScaleFactor")]
-    pub height_scale_factor: Option<f64>,
-    #[serde(rename = "useAdaptiveScaleFactor")]
-    pub use_adaptive_scale_factor: Option<bool>,
     #[serde(rename = "zOffset")]
     pub z_offset: Option<f64>,
     #[serde(rename = "alignVerticesToTerrain")]
@@ -121,11 +117,6 @@ impl VtDataSet {
         if let Some(depth) = self.extrusion_depth {
             if depth < 0.0 {
                 return Err("extrusion_depth cannot be negative".to_string());
-            }
-        }
-        if let Some(scale) = self.height_scale_factor {
-            if scale <= 0.0 {
-                return Err("height_scale_factor must be positive".to_string());
             }
         }
         Ok(())
@@ -245,17 +236,39 @@ fn transform_to_mesh_coordinates(lng: f64, lat: f64, bbox: &[f64]) -> [f64; 2] {
     let min_lat = bbox[1];
     let max_lng = bbox[2];
     let max_lat = bbox[3];
-    
+
     // Convert from geographic coords to normalized 0-1 space
     let normalized_x = (lng - min_lng) / (max_lng - min_lng);
     let normalized_y = (lat - min_lat) / (max_lat - min_lat);
-    
-    // Convert to mesh coordinates (assuming mesh is 200x200 units centered at origin)
-    let mesh_size = 200.0;
-    let mesh_x = (normalized_x * mesh_size) - (mesh_size / 2.0);
-    let mesh_y = (normalized_y * mesh_size) - (mesh_size / 2.0);
-    
+
+    // Convert to mesh coordinates (terrain is 200x200 units centered at origin)
+    let mesh_x = (normalized_x * TERRAIN_SIZE) - (TERRAIN_SIZE / 2.0);
+    let mesh_y = (normalized_y * TERRAIN_SIZE) - (TERRAIN_SIZE / 2.0);
+
     [mesh_x, mesh_y]
+}
+
+// Calculate scaling factor to convert real-world meters to terrain units
+fn calculate_meters_to_terrain_units(bbox: &[f64]) -> f64 {
+    // Calculate the real-world dimensions of the bbox in meters
+    let lat_center = (bbox[1] + bbox[3]) / 2.0;
+    let lat_rad = lat_center.to_radians();
+
+    // Earth's radius in meters
+    const EARTH_RADIUS_M: f64 = 6_371_000.0;
+
+    // Calculate width and height in meters
+    let lng_diff = bbox[2] - bbox[0];
+    let lat_diff = bbox[3] - bbox[1];
+
+    let width_m = lng_diff.to_radians() * EARTH_RADIUS_M * lat_rad.cos();
+    let height_m = lat_diff.to_radians() * EARTH_RADIUS_M;
+
+    // Use average dimension for consistent scaling
+    let avg_dimension_m = (width_m + height_m) / 2.0;
+
+    // Return terrain units per meter
+    TERRAIN_SIZE / avg_dimension_m
 }
 
 // Check if points are ordered clockwise
@@ -269,39 +282,6 @@ fn is_clockwise(points: &[Vector2]) -> bool {
     sum > 0.0
 }
 
-// Calculate conversion factor from meters to visualization units
-fn calculate_meters_to_units_scale(
-    min_lng: f64,
-    min_lat: f64,
-    max_lng: f64,
-    max_lat: f64,
-) -> f64 {
-    // Geographic extent calculation
-    let r = 6371.0; // Earth radius in km
-    let lat_extent_rad = (max_lat - min_lat) * std::f64::consts::PI / 180.0;
-    let lat_center_rad = ((min_lat + max_lat) / 2.0) * std::f64::consts::PI / 180.0;
-    let lng_extent_rad = (max_lng - min_lng) * std::f64::consts::PI / 180.0;
-    
-    let width_km = r * lng_extent_rad * lat_center_rad.cos();
-    let height_km = r * lat_extent_rad;
-    
-    // Calculate real-world dimensions in meters
-    let width_m = width_km * 1000.0;
-    let height_m = height_km * 1000.0;
-    
-    // Average real-world size in meters
-    let avg_size_m = (width_m + height_m) / 2.0;
-    
-    // Mesh size is 200 visualization units
-    const TERRAIN_SIZE: f64 = 200.0;
-    
-    // Calculate how many visualization units per meter
-    // This should decrease for larger areas (larger meter/unit ratio)
-    let units_per_meter = TERRAIN_SIZE / avg_size_m;
-    
-    // Clamp to reasonable bounds to prevent extreme scaling
-    units_per_meter.clamp(0.001, 1.0)
-}
 
 // Calculate the area of a polygon using the shoelace formula (unused - commented out)
 #[allow(dead_code)]
@@ -943,12 +923,11 @@ fn create_extruded_shape(
                 let current_z = vertices[i + 2] as f64;
 
                 // Convert mesh coordinates (-100 to +100) to geographic coordinates
-                let mesh_size = 200.0;
-                let half_size = mesh_size / 2.0;
+                let half_size = TERRAIN_SIZE / 2.0;
 
                 // Normalize to 0-1 range
-                let norm_x = (mesh_x + half_size) / mesh_size;
-                let norm_y = (mesh_y + half_size) / mesh_size;
+                let norm_x = (mesh_x + half_size) / TERRAIN_SIZE;
+                let norm_y = (mesh_y + half_size) / TERRAIN_SIZE;
 
                 // Convert to geographic coordinates
                 let lng = bbox_arr[0] + (bbox_arr[2] - bbox_arr[0]) * norm_x;
@@ -1274,39 +1253,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 height = min_d;
             }
         }
-        // Clamp to reasonable bounds
-        height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
-        // Apply meter-based scaling to convert from meters to visualization units
-        if input.vt_data_set.use_adaptive_scale_factor.unwrap_or(false) {
-            // Get the meters-to-units conversion factor
-            let meters_to_units = calculate_meters_to_units_scale(
-                input.bbox[0], input.bbox[1], input.bbox[2], input.bbox[3]
-            );
-            
-            // Get geometry class for logging
-            let _geometry_class = if let Some(ref props) = polygon_data.properties {
-                if let serde_json::Value::Object(obj) = props {
-                    obj.get("class")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                } else {
-                    "unknown"
-                }
-            } else {
-                "unknown"
-            };
-            
-            // Apply the conversion - height is assumed to be in meters
-            let _original_height = height;
-            height *= meters_to_units;
-            
-            // Debug logging for height scaling
-        }
-        
-        // Apply heightScaleFactor as a multiplier (if provided)
-        if let Some(scale_factor) = input.vt_data_set.height_scale_factor {
-            height *= scale_factor;
-        }
+        // Clamp to reasonable bounds first (in meters)
+        height = height.clamp(MIN_HEIGHT / 10.0, MAX_HEIGHT / 10.0);
         if height <= 0.0 {
             let _transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
@@ -1454,8 +1402,10 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             lowest_terrain_z = dataset_lowest_z;
             _highest_terrain_z = dataset_highest_z;
         }
-        // Base z offset: position bottom face at terrain surface minus submerge
-        let z_offset = lowest_terrain_z + input.vt_data_set.z_offset.unwrap_or(0.0) - BUILDING_SUBMERGE_OFFSET;
+        // Base z offset: position bottom face at terrain surface
+        // Negative z_offset values (like -0.1) will raise buildings above terrain
+        let user_z_offset = input.vt_data_set.z_offset.unwrap_or(0.0);
+        let z_offset = lowest_terrain_z - user_z_offset - BUILDING_SUBMERGE_OFFSET;
         
         // Extract properties from polygon_data for attaching to geometry
         let properties = if let Some(ref props) = polygon_data.properties {
@@ -1473,10 +1423,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             None
         };
         
+        // Calculate scaling factor from meters to terrain units
+        let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
+
+        // Scale height and terrain parameters consistently
+        height *= meters_to_units;
+        let scaled_vertical_exaggeration = input.vertical_exaggeration * meters_to_units;
+        let scaled_terrain_base_height = input.terrain_base_height * meters_to_units;
+
+        // Final clamp in terrain units
+        height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
+
         let geometry = create_extruded_shape(
-            &final_points, 
-            height, 
-            z_offset, 
+            &final_points,
+            height,
+            z_offset,
             properties.clone(),
             input.vt_data_set.align_vertices_to_terrain.unwrap_or(false),
             Some(&input.elevation_grid),
@@ -1484,8 +1445,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             Some(&input.bbox),
             Some(input.min_elevation),
             Some(input.max_elevation),
-            Some(input.vertical_exaggeration),
-            Some(input.terrain_base_height),
+            Some(scaled_vertical_exaggeration),
+            Some(scaled_terrain_base_height),
             Some(&input.vt_data_set.source_layer)
         );
         

@@ -13,8 +13,6 @@ export interface VtDataSet {
   filter?: FilterExpression; // MapLibre filter expression with proper types
   extrusionDepth?: number;
   minExtrusionDepth?: number;
-  heightScaleFactor: number; // Multiplier for building heights
-  useAdaptiveScaleFactor: boolean;
   zOffset: number;
   alignVerticesToTerrain: boolean;
   applyMedianHeight: boolean;
