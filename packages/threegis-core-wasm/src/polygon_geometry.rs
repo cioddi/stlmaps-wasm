@@ -1129,42 +1129,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 // Convert buffer size to appropriate coordinate scale (assuming meter-like units)
                 let buffer_distance = config_buffer_size * 0.00001; // Scale factor for coordinate space
 
-                // Create offset points for the entire LineString
-                let mut left_side = Vec::new();
-                let mut right_side = Vec::new();
-
-                // Process all segments to create complete road geometry
-                for window in polygon_data.geometry.windows(2) {
-                    if window.len() == 2 && window[0].len() >= 2 && window[1].len() >= 2 {
-                        let p1 = Vector2 { x: window[0][0], y: window[0][1] };
-                        let p2 = Vector2 { x: window[1][0], y: window[1][1] };
-
-                        // Calculate perpendicular offset
-                        let dx = p2.x - p1.x;
-                        let dy = p2.y - p1.y;
-                        let length = (dx * dx + dy * dy).sqrt();
-
-                        if length > 0.0 {
-                            let norm_x = -dy / length * buffer_distance;
-                            let norm_y = dx / length * buffer_distance;
-
-                            // Add offset points for this segment
-                            if left_side.is_empty() {
-                                left_side.push(Vector2 { x: p1.x + norm_x, y: p1.y + norm_y });
-                            }
-                            left_side.push(Vector2 { x: p2.x + norm_x, y: p2.y + norm_y });
-
-                            if right_side.is_empty() {
-                                right_side.push(Vector2 { x: p1.x - norm_x, y: p1.y - norm_y });
-                            }
-                            right_side.push(Vector2 { x: p2.x - norm_x, y: p2.y - norm_y });
-                        }
-                    }
-                }
-
-                // Combine left and right sides to form complete polygon
-                buffered_points.extend(left_side);
-                buffered_points.extend(right_side.into_iter().rev()); // Reverse right side for proper winding
+                // Use robust linestring buffering algorithm
+                buffered_points = create_linestring_buffer(&polygon_data.geometry, buffer_distance);
 
                 buffered_points
             } else {
@@ -1484,13 +1450,17 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         return Ok(serde_json::to_string(&Vec::<BufferGeometry>::new()).unwrap());
     }
 
-    // Apply CSG union for ALL layers as requested, but optimize the process
-    let merged_geometries = if all_geometries.len() > 1 {
-        // Use CSG union for all layers but optimize the tolerance based on layer type
-        let tolerance = match input.vt_data_set.source_layer.as_str() {
-            "transportation" => 0.001, // Smaller tolerance for roads for better detail
-            _ => 0.01 // Standard tolerance for other layers
-        };
+    // Apply CSG union only for layers that benefit from it (NOT transportation layers)
+    let merged_geometries = if input.vt_data_set.source_layer == "transportation" {
+        // For transportation layers, keep each road segment separate - no merging
+        let tolerance = 0.001; // Small tolerance for road detail preservation
+        all_geometries.into_iter()
+            .map(|geometry| crate::csg_union::optimize_geometry(geometry, tolerance))
+            .filter(|geometry| geometry.has_data)
+            .collect()
+    } else if all_geometries.len() > 1 {
+        // For non-transportation layers (buildings, water, etc.), use CSG union
+        let tolerance = 0.01; // Standard tolerance for other layers
 
         let layer_merged = crate::csg_union::merge_geometries_by_layer(all_geometries);
 
@@ -1505,10 +1475,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     } else {
         // Single geometry, just optimize it
         if let Some(geometry) = all_geometries.into_iter().next() {
-            let tolerance = match input.vt_data_set.source_layer.as_str() {
-                "transportation" => 0.001,
-                _ => 0.01
-            };
+            let tolerance = 0.01;
             let optimized = crate::csg_union::optimize_geometry(geometry, tolerance);
             if optimized.has_data {
                 vec![optimized]
@@ -1526,3 +1493,168 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         Err(e) => Err(format!("Failed to serialize output: {}", e)),
     }
 }
+
+// Create a proper buffered polygon from a linestring with even width throughout
+fn create_linestring_buffer(linestring: &[Vec<f64>], buffer_distance: f64) -> Vec<Vector2> {
+    if linestring.len() < 2 {
+        return Vec::new();
+    }
+
+    // Convert to Vector2 points
+    let points: Vec<Vector2> = linestring.iter()
+        .filter_map(|p| {
+            if p.len() >= 2 {
+                Some(Vector2 { x: p[0], y: p[1] })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if points.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut polygon_points = Vec::new();
+
+    // Generate parallel offset lines for left and right sides
+    let left_offsets = create_offset_line(&points, buffer_distance);
+    let right_offsets = create_offset_line(&points, -buffer_distance);
+
+    if left_offsets.is_empty() || right_offsets.is_empty() {
+        return Vec::new();
+    }
+
+    // Simple polygon construction: left side + right side (reversed) - no end caps
+    // Add left side
+    polygon_points.extend(left_offsets);
+
+    // Add right side (reversed) - this creates a simple closed polygon
+    polygon_points.extend(right_offsets.into_iter().rev());
+
+    polygon_points
+}
+
+// Create offset line with consistent perpendicular distance
+fn create_offset_line(points: &[Vector2], offset_distance: f64) -> Vec<Vector2> {
+    if points.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut offsets = Vec::new();
+
+    for i in 0..points.len() {
+        let offset_point = if i == 0 {
+            // First point - offset perpendicular to first segment
+            let dx = points[1].x - points[0].x;
+            let dy = points[1].y - points[0].y;
+            let length = (dx * dx + dy * dy).sqrt();
+
+            if length < EPSILON {
+                points[0]
+            } else {
+                let perp_x = -dy / length * offset_distance;
+                let perp_y = dx / length * offset_distance;
+                Vector2 {
+                    x: points[0].x + perp_x,
+                    y: points[0].y + perp_y
+                }
+            }
+        } else if i == points.len() - 1 {
+            // Last point - offset perpendicular to last segment
+            let dx = points[i].x - points[i-1].x;
+            let dy = points[i].y - points[i-1].y;
+            let length = (dx * dx + dy * dy).sqrt();
+
+            if length < EPSILON {
+                points[i]
+            } else {
+                let perp_x = -dy / length * offset_distance;
+                let perp_y = dx / length * offset_distance;
+                Vector2 {
+                    x: points[i].x + perp_x,
+                    y: points[i].y + perp_y
+                }
+            }
+        } else {
+            // Middle point - use bisector but maintain exact distance
+            let prev_dx = points[i].x - points[i-1].x;
+            let prev_dy = points[i].y - points[i-1].y;
+            let prev_len = (prev_dx * prev_dx + prev_dy * prev_dy).sqrt();
+
+            let next_dx = points[i+1].x - points[i].x;
+            let next_dy = points[i+1].y - points[i].y;
+            let next_len = (next_dx * next_dx + next_dy * next_dy).sqrt();
+
+            if prev_len < EPSILON || next_len < EPSILON {
+                points[i]
+            } else {
+                // Normalize directions
+                let prev_norm_x = prev_dx / prev_len;
+                let prev_norm_y = prev_dy / prev_len;
+                let next_norm_x = next_dx / next_len;
+                let next_norm_y = next_dy / next_len;
+
+                // Calculate perpendiculars
+                let prev_perp_x = -prev_norm_y;
+                let prev_perp_y = prev_norm_x;
+                let next_perp_x = -next_norm_y;
+                let next_perp_y = next_norm_x;
+
+                // Bisector direction
+                let bisector_x = prev_perp_x + next_perp_x;
+                let bisector_y = prev_perp_y + next_perp_y;
+                let bisector_len = (bisector_x * bisector_x + bisector_y * bisector_y).sqrt();
+
+                if bisector_len < EPSILON {
+                    // 180 degree turn, use previous segment perpendicular
+                    Vector2 {
+                        x: points[i].x + prev_perp_x * offset_distance,
+                        y: points[i].y + prev_perp_y * offset_distance
+                    }
+                } else {
+                    // Calculate angle to maintain exact offset distance
+                    let dot = prev_norm_x * next_norm_x + prev_norm_y * next_norm_y;
+                    let angle_factor = if dot < -0.99 {
+                        // Nearly 180 degrees, avoid extreme scaling
+                        1.0
+                    } else {
+                        // Scale to maintain exact perpendicular distance
+                        1.0 / ((1.0 + dot) * 0.5).sqrt()
+                    };
+
+                    let scale = offset_distance * angle_factor;
+                    Vector2 {
+                        x: points[i].x + (bisector_x / bisector_len) * scale,
+                        y: points[i].y + (bisector_y / bisector_len) * scale
+                    }
+                }
+            }
+        };
+
+        offsets.push(offset_point);
+    }
+
+    offsets
+}
+
+// Calculate simple perpendicular offset
+fn calculate_simple_offset(p1: Vector2, p2: Vector2, offset_distance: f64) -> Vector2 {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    let length = (dx * dx + dy * dy).sqrt();
+
+    if length < EPSILON {
+        return p2;
+    }
+
+    // Calculate perpendicular vector (90 degrees counterclockwise)
+    let perp_x = -dy / length;
+    let perp_y = dx / length;
+
+    Vector2 {
+        x: p2.x + perp_x * offset_distance,
+        y: p2.y + perp_y * offset_distance
+    }
+}
+
