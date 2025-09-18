@@ -36,7 +36,7 @@ export interface VtDataSet {
   minExtrusionDepth?: number;
   zOffset: number;
   alignVerticesToTerrain: boolean;
-  applyMedianHeight: boolean;
+  applyMedianHeight?: boolean;
   useCsgClipping: boolean;
   order?: number; // Layer rendering/processing order
   geometryDebugMode?: boolean;
@@ -198,7 +198,7 @@ const defaultLayers: VtDataSet[] = [
     color: "#4caf50",
     bufferSize: 2,
     extrusionDepth: 0.8,
-    zOffset: -0.4,
+    zOffset: -0.1,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 1,
@@ -211,7 +211,7 @@ const defaultLayers: VtDataSet[] = [
     color: "#74e010",
     bufferSize: 2,
     extrusionDepth: 1.0,
-    zOffset: -0.8,
+    zOffset: -0.1,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 2
@@ -222,8 +222,8 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#26CB00",
     bufferSize: 2,
-    extrusionDepth: 0.8,
-    zOffset: -0.4,
+    extrusionDepth: 1.4,
+    zOffset: -0.1,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 3
@@ -234,7 +234,7 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#8a8a8a",
     bufferSize: 1.5,
-    extrusionDepth: 1.1,
+    extrusionDepth: 1.7,
     zOffset: -0.2,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
@@ -251,7 +251,7 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#808080",
     bufferSize: 2,
-    extrusionDepth: 1.0,
+    extrusionDepth: 1.5,
     zOffset: -0.2,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
@@ -276,7 +276,7 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#188dfb",
     bufferSize: 0,
-    extrusionDepth: 1.5,
+    extrusionDepth: 1.7,
     zOffset: -0.2,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
