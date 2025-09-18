@@ -234,7 +234,7 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#8a8a8a",
     bufferSize: 2.3,
-    extrusionDepth: 2.2,
+    extrusionDepth: 2.5,
     zOffset: -0.2,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
