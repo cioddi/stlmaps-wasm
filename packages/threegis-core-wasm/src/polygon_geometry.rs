@@ -1221,8 +1221,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                 height = min_d;
             }
         }
-        // Clamp to reasonable bounds first (in meters)
-        height = height.clamp(MIN_HEIGHT / 10.0, MAX_HEIGHT / 10.0);
+        // Ensure positive height values
         if height <= 0.0 {
             let _transportation_class = if let Some(ref props) = polygon_data.properties {
                 if let serde_json::Value::Object(obj) = props {
