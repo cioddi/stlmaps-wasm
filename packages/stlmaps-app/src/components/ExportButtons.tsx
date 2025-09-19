@@ -153,18 +153,8 @@ const ExportButtons: React.FC = () => {
     return validatedGeometry;
   };
 
-  // Create a scene with all meshes for export, skipping invalid geometries
+  // Create a scene using the same positioning logic as ModelPreview
   const createExportScene = (validateGeometries = false): THREE.Scene => {
-    const currentScene = getCurrentScene();
-    
-    if (currentScene) {
-      // Clone the current scene to preserve all real-time adjustments (positions, scales, colors)
-      console.log("Using current ModelPreview scene with real-time adjustments");
-      return currentScene.clone();
-    }
-    
-    // Fallback to creating scene from geometry data
-    console.warn("No current scene available, creating scene from geometry data");
     const scene = new THREE.Scene();
 
     // Helper to check if geometry is valid for export
@@ -178,81 +168,170 @@ const ExportButtons: React.FC = () => {
       );
     };
 
-    // Add terrain if enabled
+    console.log("Creating export scene with ModelPreview positioning logic");
+    console.log("Export context values:", {
+      terrainBaseHeight: terrainSettings.baseHeight,
+      terrainEnabled: terrainSettings.enabled,
+      vtLayers: vtLayers.map(layer => ({
+        sourceLayer: layer.sourceLayer,
+        label: layer.label,
+        zOffset: layer.zOffset,
+        heightScaleFactor: layer.heightScaleFactor,
+        enabled: layer.enabled,
+        color: layer.color
+      }))
+    });
+
+    // Add terrain if enabled (exactly like ModelPreview)
     if (geometryDataSets.terrainGeometry && terrainSettings.enabled) {
-      const geomToUse = validateGeometries ? validateGeometry(geometryDataSets.terrainGeometry) : geometryDataSets.terrainGeometry;
-      if (isValidGeometry(geomToUse)) {
-        const terrainMaterial = new THREE.MeshStandardMaterial({
-          vertexColors: true,
-          flatShading: true
-        });
-        const terrainMesh = new THREE.Mesh(geomToUse, terrainMaterial);
-        terrainMesh.name = "Terrain";
-        scene.add(terrainMesh);
+      const terrainMaterial = new THREE.MeshLambertMaterial({
+        vertexColors: terrainSettings.color ? false : true,
+        flatShading: true,
+        side: THREE.DoubleSide
+      });
+
+      if (terrainSettings.color) {
+        const terrainColor = new THREE.Color(terrainSettings.color);
+        terrainMaterial.color = terrainColor.clone();
       }
+
+      const geometryMesh = new THREE.Mesh(
+        validateGeometries ? validateGeometry(geometryDataSets.terrainGeometry) : geometryDataSets.terrainGeometry,
+        terrainMaterial
+      );
+      geometryMesh.name = 'terrain';
+      geometryMesh.position.z = 0; // Terrain always at Z=0
+      scene.add(geometryMesh);
     }
 
-    // Add all enabled vector tile geometries (buildings, water, roads, landuse, etc.)
+    // Add polygon geometries (exactly like ModelPreview positioning)
     if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
-      geometryDataSets.polygonGeometries.forEach((vtDataset, index) => {
-        if (!vtDataset?.geometry) {
-          return;
-        }
-        // Check current enabled state from layer store instead of stored state
-        const currentLayer = vtLayers.find(layer => layer.label === vtDataset.label);
-        const isCurrentlyEnabled = currentLayer?.enabled !== false;
-        
-        if (!isCurrentlyEnabled) {
-          return;
-        }
-        const geomToUse = validateGeometries ? validateGeometry(vtDataset.geometry) : vtDataset.geometry;
+      geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
+        if (!geometry) return;
 
-        // Type for geometry with individualGeometries in userData (matching actual data structure)
-        type GeometryWithUserData = THREE.BufferGeometry & {
-          userData?: {
-            isContainer?: boolean;
-            individualGeometries?: THREE.BufferGeometry[];
-            geometryCount?: number;
-          };
-        };
+        // Look up current layer configuration
+        const currentLayerConfig = vtLayers.find(layer => layer.label === vtDataset.label);
+        const isCurrentlyEnabled = currentLayerConfig?.enabled !== false;
 
-        // Handle geometries with individualGeometries in userData (where the actual data is stored)
-        if (geomToUse && (geomToUse as GeometryWithUserData).userData?.isContainer && Array.isArray((geomToUse as GeometryWithUserData).userData?.individualGeometries)) {
-          // Process each individual geometry from userData
-          (geomToUse as GeometryWithUserData).userData!.individualGeometries!.forEach((indGeom: THREE.BufferGeometry, indIdx: number) => {
-            if (isValidGeometry(indGeom)) {
-              const color = vtDataset.color instanceof THREE.Color ? vtDataset.color : new THREE.Color(0x87ceeb);
-              const material = new THREE.MeshStandardMaterial({
-                color,
-                flatShading: true
-              });
-              const mesh = new THREE.Mesh(validateGeometries ? validateGeometry(indGeom) : indGeom, material);
-              mesh.name = vtDataset.sourceLayer ? `${vtDataset.sourceLayer}_${index}_part${indIdx}` : `Polygon_${index}_part${indIdx}`;
-              scene.add(mesh);
+        if (!isCurrentlyEnabled) return; // Skip disabled layers
+
+        // Handle container geometries with individual parts
+        if (geometry.userData?.isContainer && geometry.userData?.individualGeometries) {
+          const individualGeometries = geometry.userData.individualGeometries as THREE.BufferGeometry[];
+
+          individualGeometries.forEach((individualGeometry, index) => {
+            if (!individualGeometry.attributes.position || individualGeometry.attributes.position.count === 0) {
+              return;
             }
+
+            const layerColor = currentLayerConfig?.color || "#81ecec";
+            const baseColor = new THREE.Color(layerColor);
+
+            const polygonMaterial = new THREE.MeshLambertMaterial({
+              flatShading: true,
+              side: THREE.DoubleSide
+            });
+            polygonMaterial.color = baseColor.clone();
+
+            // Clone geometry to avoid modifying original
+            const clonedGeometry = validateGeometries ? validateGeometry(individualGeometry.clone()) : individualGeometry.clone();
+
+            // Adjust geometry origin to bottom (like ModelPreview)
+            if (!clonedGeometry.boundingBox) {
+              clonedGeometry.computeBoundingBox();
+            }
+            if (clonedGeometry.boundingBox) {
+              const originalBottomZ = clonedGeometry.boundingBox.min.z;
+              clonedGeometry.translate(0, 0, -originalBottomZ);
+            }
+
+            const polygonMesh = new THREE.Mesh(clonedGeometry, polygonMaterial);
+
+            // Apply transforms directly to geometry vertices for export compatibility
+            const layerZOffset = currentLayerConfig?.zOffset || 0;
+            const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
+
+            // Apply height scaling to geometry
+            clonedGeometry.scale(1, 1, layerHeightScaleFactor);
+
+            // Apply z-positioning to geometry
+            const finalZPosition = terrainSettings.baseHeight + layerZOffset;
+            clonedGeometry.translate(0, 0, finalZPosition);
+
+            console.log(`🏗️ EXPORT Individual mesh positioning (applied to geometry):`, {
+              sourceLayer: vtDataset.sourceLayer,
+              terrainBaseHeight: terrainSettings.baseHeight,
+              layerZOffset: layerZOffset,
+              layerHeightScaleFactor: layerHeightScaleFactor,
+              finalZPosition: finalZPosition,
+              calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${finalZPosition}`
+            });
+
+            polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
+            polygonMesh.userData = {
+              sourceLayer: vtDataset.sourceLayer,
+              label: vtDataset.label || vtDataset.sourceLayer
+            };
+
+            scene.add(polygonMesh);
           });
-        } else if (isValidGeometry(geomToUse)) {
-          // Use the color from the dataset if available, otherwise fallback
-          const color = vtDataset.color instanceof THREE.Color ? vtDataset.color : new THREE.Color(0x87ceeb);
-          const material = new THREE.MeshStandardMaterial({
-            color,
-            flatShading: true
+        } else if (isValidGeometry(geometry)) {
+          // Single geometry processing (like ModelPreview)
+          const layerColor = currentLayerConfig?.color || "#81ecec";
+          const baseColor = new THREE.Color(layerColor);
+
+          const polygonMaterial = new THREE.MeshLambertMaterial({
+            flatShading: true,
+            side: THREE.DoubleSide
           });
-          const mesh = new THREE.Mesh(geomToUse, material);
-          mesh.name = vtDataset.sourceLayer ? `${vtDataset.sourceLayer}_${index}` : `Polygon_${index}`;
-          scene.add(mesh);
+          polygonMaterial.color = baseColor.clone();
+
+          // Clone geometry to avoid modifying original
+          const clonedGeometry = validateGeometries ? validateGeometry(geometry.clone()) : geometry.clone();
+
+          // Adjust geometry origin to bottom (like ModelPreview)
+          if (!clonedGeometry.boundingBox) {
+            clonedGeometry.computeBoundingBox();
+          }
+          if (clonedGeometry.boundingBox) {
+            const originalBottomZ = clonedGeometry.boundingBox.min.z;
+            clonedGeometry.translate(0, 0, -originalBottomZ);
+          }
+
+          const polygonMesh = new THREE.Mesh(clonedGeometry, polygonMaterial);
+
+          // Apply transforms directly to geometry vertices for export compatibility
+          const layerZOffset = currentLayerConfig?.zOffset || 0;
+          const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
+
+          // Apply height scaling to geometry
+          clonedGeometry.scale(1, 1, layerHeightScaleFactor);
+
+          // Apply z-positioning to geometry
+          const finalZPosition = terrainSettings.baseHeight + layerZOffset;
+          clonedGeometry.translate(0, 0, finalZPosition);
+
+          console.log(`🏗️ EXPORT Single mesh positioning (applied to geometry):`, {
+            sourceLayer: vtDataset.sourceLayer,
+            terrainBaseHeight: terrainSettings.baseHeight,
+            layerZOffset: layerZOffset,
+            layerHeightScaleFactor: layerHeightScaleFactor,
+            finalZPosition: finalZPosition,
+            calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${finalZPosition}`
+          });
+
+          polygonMesh.name = vtDataset.sourceLayer;
+          polygonMesh.userData = {
+            sourceLayer: vtDataset.sourceLayer,
+            label: vtDataset.label || vtDataset.sourceLayer
+          };
+
+          scene.add(polygonMesh);
         }
       });
     }
 
-    // Add lights for better visualization in viewers
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(1, 1, 1);
-    scene.add(directionalLight);
-
+    console.log(`Export scene created with ${scene.children.length} meshes using ModelPreview positioning`);
     return scene;
   };
 
