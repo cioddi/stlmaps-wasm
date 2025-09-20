@@ -27,11 +27,12 @@ lazy_static = "1.4.0"
 mvt = "0.8.0"
 geozero = { version = "0.10.0", features = ["geo-types", "with-mvt"], default-features = false }
 uuid = { version = "1.16.0", features = ["js"] }
-nalgebra = "0.32.3"
+nalgebra = "0.33"
 earcutr = "0.4.2"
 rayon = "1.8"
 num_cpus = "1.16"
 parking_lot = "0.12"
+csgrs = { version = "0.17.3", default-features = false, features = ["f64", "earcut"] }
 
 # Use the latest geo crate from main branch for unreleased buffer features
 geo = { version = "0.31.0", features = ["use-serde"] }

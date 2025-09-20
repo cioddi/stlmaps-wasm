@@ -1,0 +1,143 @@
+[package]
+name = "csgrs"
+version = "0.17.3"
+edition = "2024"
+description = "Constructive solid geometry (CSG) on meshes using BSP trees in Rust"
+authors = ["Timothy Schmidt <timschmidt@gmail.com>"]
+# msrv
+rust-version = "1.85.1"
+
+license = "MIT"
+repository = "https://github.com/timschmidt/csgrs"
+readme = "readme.md"
+
+keywords = ["geometry", "physics", "csg", "slicing", "offsetting"]
+categories = ["game-development", "graphics", "mathematics", "simulation", "wasm"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+debug = false
+debug-assertions = false
+overflow-checks = false
+
+[profile.embedded]
+inherits = "release"
+opt-level = "z"
+
+[dependencies]
+nalgebra = "0.33"
+#curvo = "0.1.52"
+robust = { version = "1.1.0", default-features = false, features = ["no_std"] }
+geo = { version = "0.29.3", default-features = false }
+geo-buf = { version = "0.1.0", optional = true } # straight-skeleton offsetting iOverlay can handle this in v2
+#geo-booleanop = "0.3.2" # alternative boolean implementation has fewer dependencies
+chull = { version = "0.2.4", optional = true }
+
+rapier3d-f64 = { version = "0.24.0", optional = true }
+rapier3d = { version = "0.24.0", optional = true }
+parry3d-f64  = { version = "0.19.0", optional = true }
+parry3d  = { version = "0.19.0", optional = true }
+
+bevy = { version = "0.16.0", optional = true }
+
+# utils
+rayon = { version = "1.10", optional = true }
+thiserror = "2.0"
+hashbrown = { version = "0.15", optional = true }
+small_str = "0.1"
+fast-surface-nets = { version = "0.2.1", optional = true }
+contour_tracing = { version = "1.0.12", features = ["array"], optional = true }
+either = "1.15"
+# doc
+#doc-image-embed = "0.2" # fork of https://crates.io/crates/embed-doc-image - should be upstreamed.
+
+# io/load
+# core2 = { version = "0.4.0", default_features = false, features = ["alloc"] } # no-std, still throws errors
+core2 = { version = "0.4", features = ["alloc"] }
+dxf = { version = "0.6", optional = true }
+stl_io = { version = "0.8", optional = true }
+image = { version = "0.25", optional = true }
+svg = { version = "0.18", optional = true }
+nom = { version = "7.1", optional = true }
+
+# font
+ttf-utils = { version = "0.1", optional = true, package = "ttf-parser-utils"}
+ttf-parser = { version = "0.25", optional = true }
+hershey = { version = "0.1.2", optional = true }
+
+# wasm
+[target.'cfg(any(target_arch = "wasm32", target_arch = "wasm64"))'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+default = ["f64", "stl-io", "dxf-io", "chull-io", "metaballs", "hashmap", "sdf", "offset", "delaunay", "truetype-text"]
+parallel = [
+  "rayon",
+  "geo/multithreading",
+  "hashbrown?/rayon",
+  "parry3d?/parallel",
+  "parry3d-f64?/parallel",
+  "rapier3d?/parallel",
+  "rapier3d-f64?/parallel"
+]
+f64 = [
+  "rapier3d-f64",
+  "parry3d-f64",
+]
+f32 = [
+  "rapier3d",
+  "parry3d",
+]
+# convex hull and minkowski sum
+chull-io = [
+  "chull",
+]
+stl-io = [
+  "stl_io",
+]
+svg-io = [
+  "svg",
+  "nom", # Parsing of things not covered by the `svg` crate
+]
+dxf-io = [
+  "dxf",
+]
+truetype-text = [
+  "ttf-parser",
+  "ttf-utils",
+]
+hershey-text = [
+  "hershey",
+]
+image-io = [
+  "image",
+  "contour_tracing",
+]
+metaballs = [
+  "fast-surface-nets",
+  "hashmap",
+]
+# slice and related helper functions, is_manifold(), metaball_2d
+hashmap = [
+  "dep:hashbrown",
+]
+sdf = [
+  "fast-surface-nets",
+]
+offset = [
+  "dep:geo-buf",
+]
+delaunay = [
+  "geo/spade",
+]
+earcut = [
+  "geo/earcutr",
+]
+bevymesh = [
+  "bevy",
+]

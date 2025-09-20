@@ -4,6 +4,10 @@ members = [
     "packages/threegis-core-wasm"
 ]
 
+[patch.crates-io]
+csgrs = { path = "vendor/csgrs" }
+geo-buf = { path = "vendor/geo-buf" }
+
 [profile.release]
 opt-level = 3
 lto = true
