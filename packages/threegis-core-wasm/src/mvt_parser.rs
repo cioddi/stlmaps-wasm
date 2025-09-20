@@ -163,20 +163,16 @@ pub fn parse_mvt_data(
     }
     
     // Store parsed MVT in module state
-    let state_mutex = ModuleState::global();
-    let mut state = state_mutex.lock().unwrap();
-    
-    // Check if we need to clear space in the cache
-    if state.mvt_cache.len() >= CACHE_SIZE_LIMIT {
-        // Remove oldest entry
-        if let Some(oldest_key) = state.mvt_cache_keys.pop_front() {
-            state.mvt_cache.remove(&oldest_key);
+    ModuleState::with_mut(|state| {
+        if state.mvt_cache.len() >= CACHE_SIZE_LIMIT {
+            if let Some(oldest_key) = state.mvt_cache_keys.pop_front() {
+                state.mvt_cache.remove(&oldest_key);
+            }
         }
-    }
-    
-    // Add new entry to cache
-    state.mvt_cache.insert(key.to_string(), parsed_mvt);
-    state.mvt_cache_keys.push_back(key.to_string());
+
+        state.mvt_cache.insert(key.to_string(), parsed_mvt);
+        state.mvt_cache_keys.push_back(key.to_string());
+    });
     
     Ok(())
 }
@@ -302,11 +298,7 @@ pub fn extract_features_from_vector_tiles(
     layer_name: &str
 ) -> Result<JsValue, JsValue> {
     // Get module state and lock it
-    let state_mutex = ModuleState::global(); 
-    let state = state_mutex.lock().unwrap();
-    
-    // Check if we have parsed data for this tile using the locked state
-    if let Some(parsed_mvt) = state.mvt_cache.get(tile_key) {
+    if let Some(parsed_mvt) = ModuleState::with(|state| state.mvt_cache.get(tile_key).cloned()) {
         // Find the requested layer
         if let Some(layer) = parsed_mvt.layers.iter().find(|l| l.name == layer_name) {
             // Create a GeoJSON FeatureCollection

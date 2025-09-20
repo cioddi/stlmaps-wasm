@@ -1,6 +1,6 @@
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use wasm_bindgen::prelude::*;
 
 pub struct CancellationToken {
@@ -16,17 +16,17 @@ impl CancellationToken {
             is_cancelled: Arc::new(Mutex::new(false)),
         }
     }
-    
+
     pub fn cancel(&self) {
         if let Ok(mut cancelled) = self.is_cancelled.lock() {
             *cancelled = true;
         }
     }
-    
+
     pub fn is_cancelled(&self) -> bool {
         self.is_cancelled.lock().map(|guard| *guard).unwrap_or(true)
     }
-    
+
     pub fn throw_if_cancelled(&self) -> Result<(), String> {
         if self.is_cancelled() {
             Err(format!("Operation {} was cancelled", self.id))
@@ -47,35 +47,35 @@ impl CancellationManager {
             tokens: HashMap::new(),
         }
     }
-    
+
     pub fn create_token(&mut self, id: String) -> CancellationToken {
         // Cancel any existing token with the same ID
         if let Some(existing) = self.tokens.get(&id) {
             existing.cancel();
         }
-        
+
         let token = CancellationToken::new(id.clone());
         self.tokens.insert(id.clone(), token);
         self.tokens.get(&id).unwrap().clone()
     }
-    
+
     pub fn cancel_token(&mut self, id: &str) {
         if let Some(token) = self.tokens.get(id) {
             token.cancel();
         }
     }
-    
+
     pub fn get_token(&self, id: &str) -> Option<&CancellationToken> {
         self.tokens.get(id)
     }
-    
+
     pub fn cleanup_token(&mut self, id: &str) {
         self.tokens.remove(id);
     }
 }
 
 lazy_static! {
-    static ref GLOBAL_CANCELLATION_MANAGER: Arc<Mutex<CancellationManager>> = 
+    static ref GLOBAL_CANCELLATION_MANAGER: Arc<Mutex<CancellationManager>> =
         Arc::new(Mutex::new(CancellationManager::new()));
 }
 

@@ -1,5 +1,5 @@
-use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Mesh3MFData {
@@ -21,7 +21,7 @@ pub fn generate_3mf_model_xml(input_json: &str) -> Result<String, JsValue> {
     // Parse input data
     let model_data: Model3MFData = serde_json::from_str(input_json)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse input: {}", e)))?;
-    
+
     create_model_xml(&model_data)
         .map_err(|e| JsValue::from_str(&format!("Failed to create model XML: {}", e)))
 }
@@ -55,66 +55,88 @@ fn create_rels_xml() -> String {
 
 fn create_model_xml(model_data: &Model3MFData) -> Result<String, String> {
     let mut xml = String::new();
-    
+
     // XML declaration and root element
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
 "#);
-    
+
     // Metadata
     let title = model_data.title.as_deref().unwrap_or("STLMaps 3D Model");
-    xml.push_str(&format!(r#"  <metadata name="Title">{}</metadata>
-"#, escape_xml(title)));
-    
+    xml.push_str(&format!(
+        r#"  <metadata name="Title">{}</metadata>
+"#,
+        escape_xml(title)
+    ));
+
     if let Some(ref description) = model_data.description {
-        xml.push_str(&format!(r#"  <metadata name="Description">{}</metadata>
-"#, escape_xml(description)));
+        xml.push_str(&format!(
+            r#"  <metadata name="Description">{}</metadata>
+"#,
+            escape_xml(description)
+        ));
     }
-    
+
     // Resources
     xml.push_str("  <resources>\n");
-    
+
     // Process each mesh
     for (mesh_id, mesh) in model_data.meshes.iter().enumerate() {
         let object_id = mesh_id + 1;
-        
-        xml.push_str(&format!(r#"    <object id="{}" type="model">
+
+        xml.push_str(&format!(
+            r#"    <object id="{}" type="model">
       <mesh>
         <vertices>
-"#, object_id));
-        
+"#,
+            object_id
+        ));
+
         // Vertices
         for i in (0..mesh.vertices.len()).step_by(3) {
             if i + 2 < mesh.vertices.len() {
-                xml.push_str(&format!(r#"          <vertex x="{}" y="{}" z="{}"/>
-"#, mesh.vertices[i], mesh.vertices[i + 1], mesh.vertices[i + 2]));
+                xml.push_str(&format!(
+                    r#"          <vertex x="{}" y="{}" z="{}"/>
+"#,
+                    mesh.vertices[i],
+                    mesh.vertices[i + 1],
+                    mesh.vertices[i + 2]
+                ));
             }
         }
-        
+
         xml.push_str("        </vertices>\n        <triangles>\n");
-        
+
         // Triangles
         for i in (0..mesh.indices.len()).step_by(3) {
             if i + 2 < mesh.indices.len() {
-                xml.push_str(&format!(r#"          <triangle v1="{}" v2="{}" v3="{}"/>
-"#, mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]));
+                xml.push_str(&format!(
+                    r#"          <triangle v1="{}" v2="{}" v3="{}"/>
+"#,
+                    mesh.indices[i],
+                    mesh.indices[i + 1],
+                    mesh.indices[i + 2]
+                ));
             }
         }
-        
+
         xml.push_str("        </triangles>\n      </mesh>\n    </object>\n");
     }
-    
+
     xml.push_str("  </resources>\n");
-    
+
     // Build section (references all objects)
     xml.push_str("  <build>\n");
     for mesh_id in 0..model_data.meshes.len() {
         let object_id = mesh_id + 1;
-        xml.push_str(&format!(r#"    <item objectid="{}"/>
-"#, object_id));
+        xml.push_str(&format!(
+            r#"    <item objectid="{}"/>
+"#,
+            object_id
+        ));
     }
     xml.push_str("  </build>\n</model>");
-    
+
     Ok(xml)
 }
 

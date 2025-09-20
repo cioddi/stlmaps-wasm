@@ -155,7 +155,127 @@ const ExportButtons: React.FC = () => {
 
   // Create a scene using the same positioning logic as ModelPreview
   const createExportScene = (validateGeometries = false): THREE.Scene => {
-    const scene = new THREE.Scene();
+    const exportScene = new THREE.Scene();
+
+    const currentScene = typeof getCurrentScene === 'function' ? getCurrentScene() : null;
+    if (currentScene) {
+      currentScene.updateMatrixWorld(true);
+
+      const meshesToExport: THREE.Mesh[] = [];
+      currentScene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          const geometry = object.geometry;
+          const positionAttribute = geometry?.attributes?.position as THREE.BufferAttribute | undefined;
+          if (!object.visible || !geometry || !positionAttribute || positionAttribute.count === 0) {
+            return;
+          }
+          if (object.name === 'terrain' && !terrainSettings.enabled) {
+            return;
+          }
+          meshesToExport.push(object);
+        }
+      });
+
+      if (meshesToExport.length > 0) {
+        const extractMaterialColor = (material: THREE.Material | THREE.Material[] | undefined): THREE.Color => {
+          if (!material) {
+            return new THREE.Color('#ffffff');
+          }
+          if (Array.isArray(material)) {
+            for (const mat of material) {
+              if (mat && 'color' in mat) {
+                const typed = mat as THREE.Material & { color?: THREE.Color };
+                if (typed.color instanceof THREE.Color) {
+                  return typed.color.clone();
+                }
+              }
+            }
+            return new THREE.Color('#ffffff');
+          }
+          const typed = material as THREE.Material & { color?: THREE.Color };
+          if (typed.color instanceof THREE.Color) {
+            return typed.color.clone();
+          }
+          return new THREE.Color('#ffffff');
+        };
+
+        const analyzeWatertightness = (geometry: THREE.BufferGeometry) => {
+          const index = geometry.getIndex();
+          const hasPositionAttribute = !!geometry.getAttribute('position');
+          if (!index || !hasPositionAttribute) {
+            return null;
+          }
+
+          const indexArray = Array.from(index.array as ArrayLike<number>);
+          if (indexArray.length % 3 !== 0) {
+            return {
+              triangles: Math.floor(indexArray.length / 3),
+              boundaryEdges: -1,
+              reason: 'index length not divisible by 3'
+            };
+          }
+
+          const edgeCounts = new Map<string, number>();
+          for (let i = 0; i < indexArray.length; i += 3) {
+            const tri = [indexArray[i], indexArray[i + 1], indexArray[i + 2]];
+            for (let e = 0; e < 3; e++) {
+              const a = tri[e];
+              const b = tri[(e + 1) % 3];
+              const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+              edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+            }
+          }
+
+          let boundaryEdgeCount = 0;
+          edgeCounts.forEach((count) => {
+            if (count !== 2) boundaryEdgeCount++;
+          });
+
+          return {
+            triangles: indexArray.length / 3,
+            boundaryEdges: boundaryEdgeCount,
+            reason: boundaryEdgeCount === 0 ? undefined : 'non-manifold edge usage'
+          };
+        };
+
+        meshesToExport.forEach((originalMesh) => {
+          const watertightInfo = analyzeWatertightness(originalMesh.geometry);
+          if (watertightInfo && watertightInfo.boundaryEdges > 0) {
+            console.warn('🚧 Non-watertight geometry detected before export', {
+              meshName: originalMesh.name,
+              boundaryEdges: watertightInfo.boundaryEdges,
+              triangles: watertightInfo.triangles,
+              reason: watertightInfo.reason,
+            });
+          }
+
+          const clonedGeometry = originalMesh.geometry.clone();
+          clonedGeometry.applyMatrix4(originalMesh.matrixWorld);
+          const preparedGeometry = validateGeometries
+            ? validateGeometry(clonedGeometry)
+            : clonedGeometry;
+
+          const usesVertexColors = !!preparedGeometry.getAttribute('color');
+          const baseColor = extractMaterialColor(originalMesh.material);
+
+          const exportMaterial = new THREE.MeshLambertMaterial({
+            color: baseColor,
+            vertexColors: usesVertexColors,
+            flatShading: true,
+            side: THREE.DoubleSide
+          });
+
+          const exportMesh = new THREE.Mesh(preparedGeometry, exportMaterial);
+          exportMesh.name = originalMesh.name;
+          exportScene.add(exportMesh);
+        });
+
+        console.log(`Export scene cloned from current preview scene with ${meshesToExport.length} meshes`);
+        return exportScene;
+      }
+
+      console.warn('Export scene fallback: no meshes found in current preview scene, reconstructing manually');
+    }
 
     // Helper to check if geometry is valid for export
     const isValidGeometry = (geometry: THREE.BufferGeometry) => {
@@ -201,7 +321,7 @@ const ExportButtons: React.FC = () => {
       );
       geometryMesh.name = 'terrain';
       geometryMesh.position.z = 0; // Terrain always at Z=0
-      scene.add(geometryMesh);
+      exportScene.add(geometryMesh);
     }
 
     // Add polygon geometries (exactly like ModelPreview positioning)
@@ -273,7 +393,7 @@ const ExportButtons: React.FC = () => {
               label: vtDataset.label || vtDataset.sourceLayer
             };
 
-            scene.add(polygonMesh);
+            exportScene.add(polygonMesh);
           });
         } else if (isValidGeometry(geometry)) {
           // Single geometry processing (like ModelPreview)
@@ -326,13 +446,13 @@ const ExportButtons: React.FC = () => {
             label: vtDataset.label || vtDataset.sourceLayer
           };
 
-          scene.add(polygonMesh);
+          exportScene.add(polygonMesh);
         }
       });
     }
 
-    console.log(`Export scene created with ${scene.children.length} meshes using ModelPreview positioning`);
-    return scene;
+    console.log(`Export scene created with ${exportScene.children.length} meshes using ModelPreview positioning`);
+    return exportScene;
   };
 
   
@@ -341,7 +461,7 @@ const ExportButtons: React.FC = () => {
     
     try {
       // Create scene with standard (non-validated) geometries for OBJ
-      const scene = createExportScene(false);
+      const scene = createExportScene(true);
       
       // Create OBJ exporter and export the scene
       const exporter = new OBJExporter();
@@ -365,7 +485,7 @@ const ExportButtons: React.FC = () => {
     
     try {
       // Create scene with standard (non-validated) geometries for STL
-      const scene = createExportScene(false);
+      const scene = createExportScene(true);
       
       // Create STL exporter and export the scene (binary format for smaller file size)
       const exporter = new STLExporter();

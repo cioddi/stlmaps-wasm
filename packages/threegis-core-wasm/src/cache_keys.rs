@@ -34,7 +34,10 @@ pub fn make_inner_key_with_label(label: &str, filter_str: &str) -> String {
 
 /// Generate an inner cache key from a source layer and optional filter JSON value.
 /// Handles null values and empty filters consistently by treating them as empty strings.
-pub fn make_inner_key_from_filter(source_layer: &str, filter: Option<&serde_json::Value>) -> String {
+pub fn make_inner_key_from_filter(
+    source_layer: &str,
+    filter: Option<&serde_json::Value>,
+) -> String {
     let filter_str = filter
         .filter(|f| !f.is_null())
         .map(|f| f.to_string())
@@ -45,7 +48,8 @@ pub fn make_inner_key_from_filter(source_layer: &str, filter: Option<&serde_json
 /// Generate an inner cache key from a VtDataSet using its label.
 #[allow(dead_code)]
 pub fn make_inner_key_from_vtdataset(vt_dataset: &crate::polygon_geometry::VtDataSet) -> String {
-    let filter_str = vt_dataset.filter
+    let filter_str = vt_dataset
+        .filter
         .as_ref()
         .filter(|f| !f.is_null())
         .map(|f| f.to_string())
@@ -54,8 +58,12 @@ pub fn make_inner_key_from_vtdataset(vt_dataset: &crate::polygon_geometry::VtDat
 }
 
 /// Generate a process-specific data key for a VtDataSet.
-pub fn make_process_vtdataset_key(process_id: &str, vt_dataset: &crate::polygon_geometry::VtDataSet) -> String {
-    let filter_str = vt_dataset.filter
+pub fn make_process_vtdataset_key(
+    process_id: &str,
+    vt_dataset: &crate::polygon_geometry::VtDataSet,
+) -> String {
+    let filter_str = vt_dataset
+        .filter
         .as_ref()
         .filter(|f| !f.is_null())
         .map(|f| f.to_string())

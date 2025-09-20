@@ -31,9 +31,10 @@ nalgebra = "0.32.3"
 earcutr = "0.4.2"
 rayon = "1.8"
 num_cpus = "1.16"
+parking_lot = "0.12"
 
 # Use the latest geo crate from main branch for unreleased buffer features
-geo = { git = "https://github.com/georust/geo", features = ["use-serde"] }
+geo = { version = "0.31.0", features = ["use-serde"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.37"

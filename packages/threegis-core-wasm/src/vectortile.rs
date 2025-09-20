@@ -11,7 +11,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::module_state::{ModuleState, TileData};
 use crate::polygon_geometry::VtDataSet;
-use crate::{console_log, fetch, cache_keys};
+use crate::{cache_keys, console_log, fetch};
 
 // Reuse the TileRequest struct from elevation.rs
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -57,11 +57,11 @@ pub struct GeometryData {
 // Input for extracting features from vector tiles
 #[derive(Serialize, Deserialize)]
 pub struct ExtractFeaturesInput {
-    pub bbox: Vec<f64>,                   // [minLng, minLat, maxLng, maxLat]
+    pub bbox: Vec<f64>, // [minLng, minLat, maxLng, maxLat]
     #[serde(rename = "vtDataSet")]
-    pub vt_data_set: VtDataSet,             // Configuration for the layer
+    pub vt_data_set: VtDataSet, // Configuration for the layer
     #[serde(rename = "processId")]
-    pub process_id: String,                 // Process reference for resource management
+    pub process_id: String, // Process reference for resource management
     #[serde(rename = "elevationProcessId")]
     pub elevation_process_id: Option<String>, // Process ID to find cached elevation data
 }
@@ -201,23 +201,22 @@ fn calculate_base_elevation(
 
 // Evaluate if a feature matches a filter expression
 fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
-    
     // If no filter, always pass
     if filter.is_null() {
         return true;
     }
-    
+
     // Filters should be arrays where the first element is the operator
     let filter_array = match filter.as_array() {
         Some(arr) if !arr.is_empty() => arr,
         _ => return true, // Invalid filter format, default to pass
     };
-    
+
     let operator = match filter_array[0].as_str() {
         Some(op) => op,
         None => return true, // Invalid operator, default to pass
     };
-    
+
     match operator {
         // Logical operators
         "all" => {
@@ -247,7 +246,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
             }
             true
         }
-        
+
         // Equality operators
         "==" => {
             if filter_array.len() < 3 {
@@ -258,19 +257,21 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 None => return true,
             };
             let expected_value = &filter_array[2];
-            
+
             if key == "$type" {
                 // Compare geometry type
                 let geometry_type = match feature.geometry.r#type.as_str() {
                     "Point" => "Point",
-                    "LineString" => "LineString", 
+                    "LineString" => "LineString",
                     "Polygon" => "Polygon",
                     "MultiPoint" => "MultiPoint",
                     "MultiLineString" => "MultiLineString",
                     "MultiPolygon" => "MultiPolygon",
                     _ => "Unknown",
                 };
-                expected_value.as_str().map_or(false, |v| v == geometry_type)
+                expected_value
+                    .as_str()
+                    .map_or(false, |v| v == geometry_type)
             } else {
                 // Compare property value
                 match feature.properties.as_object().and_then(|obj| obj.get(key)) {
@@ -288,13 +289,13 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 None => return true,
             };
             let expected_value = &filter_array[2];
-            
+
             if key == "$type" {
                 // Compare geometry type
                 let geometry_type = match feature.geometry.r#type.as_str() {
                     "Point" => "Point",
                     "LineString" => "LineString",
-                    "Polygon" => "Polygon", 
+                    "Polygon" => "Polygon",
                     "MultiPoint" => "MultiPoint",
                     "MultiLineString" => "MultiLineString",
                     "MultiPolygon" => "MultiPolygon",
@@ -309,7 +310,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 }
             }
         }
-        
+
         // Membership operators
         "in" => {
             if filter_array.len() < 3 {
@@ -319,20 +320,23 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 Some(k) => k,
                 None => return true,
             };
-            
+
             if key == "$type" {
                 // Check if geometry type is in the list
                 let geometry_type = match feature.geometry.r#type.as_str() {
                     "Point" => "Point",
                     "LineString" => "LineString",
                     "Polygon" => "Polygon",
-                    "MultiPoint" => "MultiPoint", 
+                    "MultiPoint" => "MultiPoint",
                     "MultiLineString" => "MultiLineString",
                     "MultiPolygon" => "MultiPolygon",
                     _ => "Unknown",
                 };
                 for i in 2..filter_array.len() {
-                    if filter_array[i].as_str().map_or(false, |v| v == geometry_type) {
+                    if filter_array[i]
+                        .as_str()
+                        .map_or(false, |v| v == geometry_type)
+                    {
                         return true;
                     }
                 }
@@ -368,7 +372,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 Some(k) => k,
                 None => return true,
             };
-            
+
             if key == "$type" {
                 // Check if geometry type is NOT in the list
                 let geometry_type = match feature.geometry.r#type.as_str() {
@@ -376,12 +380,15 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                     "LineString" => "LineString",
                     "Polygon" => "Polygon",
                     "MultiPoint" => "MultiPoint",
-                    "MultiLineString" => "MultiLineString", 
+                    "MultiLineString" => "MultiLineString",
                     "MultiPolygon" => "MultiPolygon",
                     _ => "Unknown",
                 };
                 for i in 2..filter_array.len() {
-                    if filter_array[i].as_str().map_or(false, |v| v == geometry_type) {
+                    if filter_array[i]
+                        .as_str()
+                        .map_or(false, |v| v == geometry_type)
+                    {
                         return false;
                     }
                 }
@@ -409,7 +416,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 }
             }
         }
-        
+
         // Existence operators
         "has" => {
             if filter_array.len() < 2 {
@@ -419,7 +426,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 Some(k) => k,
                 None => return true,
             };
-            
+
             if key == "$type" {
                 true // Geometry type always exists
             } else if key == "$id" {
@@ -427,7 +434,10 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 true // For now, assume features always have some form of id
             } else {
                 // Check if property exists
-                feature.properties.as_object().map_or(false, |obj| obj.contains_key(key))
+                feature
+                    .properties
+                    .as_object()
+                    .map_or(false, |obj| obj.contains_key(key))
             }
         }
         "!has" => {
@@ -438,17 +448,20 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 Some(k) => k,
                 None => return true,
             };
-            
+
             if key == "$type" {
                 false // Geometry type always exists
             } else if key == "$id" {
                 false // For now, assume features always have some form of id
             } else {
                 // Check if property does NOT exist
-                feature.properties.as_object().map_or(true, |obj| !obj.contains_key(key))
+                feature
+                    .properties
+                    .as_object()
+                    .map_or(true, |obj| !obj.contains_key(key))
             }
         }
-        
+
         // Comparison operators
         "<" | ">" | "<=" | ">=" => {
             if filter_array.len() < 3 {
@@ -459,17 +472,18 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 None => return true,
             };
             let expected_value = &filter_array[2];
-            
+
             // Only compare properties (not $type or $id for ordering)
             if key.starts_with('$') {
                 return true; // Skip comparison for special keys
             }
-            
+
             match feature.properties.as_object().and_then(|obj| obj.get(key)) {
                 Some(actual_value) => {
                     // Try to compare as numbers first, then as strings
-                    if let (Some(actual_num), Some(expected_num)) = 
-                        (actual_value.as_f64(), expected_value.as_f64()) {
+                    if let (Some(actual_num), Some(expected_num)) =
+                        (actual_value.as_f64(), expected_value.as_f64())
+                    {
                         match operator {
                             "<" => actual_num < expected_num,
                             ">" => actual_num > expected_num,
@@ -477,8 +491,9 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                             ">=" => actual_num >= expected_num,
                             _ => true,
                         }
-                    } else if let (Some(actual_str), Some(expected_str)) = 
-                        (actual_value.as_str(), expected_value.as_str()) {
+                    } else if let (Some(actual_str), Some(expected_str)) =
+                        (actual_value.as_str(), expected_value.as_str())
+                    {
                         match operator {
                             "<" => actual_str < expected_str,
                             ">" => actual_str > expected_str,
@@ -493,7 +508,7 @@ fn evaluate_filter(filter: &serde_json::Value, feature: &Feature) -> bool {
                 None => false, // Property doesn't exist
             }
         }
-        
+
         // Default case for unsupported operators
         _ => {
             // Silently pass unsupported operators (could log in debug mode)
@@ -546,12 +561,12 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         input.process_id
     );
 
-    // Retrieve module state (mutable for parsed tile cache)
-    let module_state_mutex = ModuleState::get_instance();
-    let mut module_state = module_state_mutex.lock().unwrap();
-
     // Try to access cached vector tile data using the provided process_id
-    let vector_tiles_data = match module_state.get_process_vector_tiles(&input.process_id) {
+    let vector_tiles_data = match ModuleState::with(|state| {
+        state
+            .get_process_vector_tiles(&input.process_id)
+            .cloned()
+    }) {
         Some(tiles) => tiles,
         None => {
             console_log!(
@@ -565,7 +580,9 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     // Get cached elevation data if available
     // Use the specific elevation_process_id provided in the input
-    let elevation_data: Option<crate::module_state::ElevationData> = match &input.elevation_process_id {
+    let elevation_data: Option<crate::module_state::ElevationData> = match &input
+        .elevation_process_id
+    {
         Some(_process_id) => {
             // TODO: Implement elevation data retrieval from process-specific cache
             None
@@ -631,7 +648,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let raw_mvt_data = match vt_tile_data.rust_parsed_mvt {
             Some(ref data) => data,
             None => {
-                
                 &vt_tile_data.buffer // Fallback to buffer if rust_parsed_mvt is missing
             }
         };
@@ -648,7 +664,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
         // Use cached parsed MVT tile if available, otherwise parse and cache it
         let cache_key = format!("{}/{}/{}", tile_z, tile_x, tile_y);
-        let parsed_tile = if let Some(cached) = module_state.get_parsed_mvt_tile(&cache_key) {
+        let parsed_tile = if let Some(cached) = ModuleState::with(|state| state.get_parsed_mvt_tile(&cache_key)) {
             cached
         } else {
             match enhanced_parse_mvt_data(
@@ -688,28 +704,32 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     tile_x,
                     tile_y
                 );
-                
+
                 // Count features by class for this tile
-                let mut class_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                let mut class_counts: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for feature in &layer_data.features {
-                    let class_value = feature.properties.get("class")
+                    let class_value = feature
+                        .properties
+                        .get("class")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
                     *class_counts.entry(class_value.to_string()).or_insert(0) += 1;
                 }
-                
+
                 // Format the class counts for logging
-                let mut class_stats: Vec<String> = class_counts.iter()
+                let mut class_stats: Vec<String> = class_counts
+                    .iter()
                     .map(|(class, count)| format!("{} ({})", class, count))
                     .collect();
                 class_stats.sort(); // Sort alphabetically for consistent output
-                
+
                 console_log!(
                     "📊 received Layer '{}' classes: {}",
                     vt_dataset.source_layer,
                     class_stats.join(", ")
                 );
-                
+
                 layer_data
             }
             None => {
@@ -725,30 +745,29 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let extent = 4096; // Standard MVT extent
 
         // Statistics tracking for features per class
-        let mut class_stats: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-        
+        let mut class_stats: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+
         // First pass: collect statistics
         for feature in &layer.features {
-            let class_value = feature.properties.get("class")
+            let class_value = feature
+                .properties
+                .get("class")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             *class_stats.entry(class_value.to_string()).or_insert(0) += 1;
         }
-        
+
         // Log statistics for this layer
-        
-        
-        for (_class, _count) in &class_stats {
-            
-        }
-        
+
+        for (_class, _count) in &class_stats {}
 
         // Process each feature in the layer
         let mut filtered_by_expression = 0;
         let mut processed_features = 0;
         let mut geometry_created = 0;
         let mut geometry_filtered_by_bbox = 0;
-        
+
         for feature in &layer.features {
             feature_count += 1;
 
@@ -758,29 +777,31 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                 let filterable_feature = Feature {
                     geometry: FeatureGeometry {
                         r#type: feature.geometry_type.clone(),
-                        coordinates: serde_json::to_value(&feature.geometry).unwrap_or(serde_json::Value::Null),
+                        coordinates: serde_json::to_value(&feature.geometry)
+                            .unwrap_or(serde_json::Value::Null),
                     },
-                    properties: serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+                    properties: serde_json::to_value(&feature.properties)
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
                 };
-                
+
                 // Debug: specifically track primary and secondary features (removed individual logging)
                 // if let Some(class_value) = feature.properties.get("class") {
                 //     if let Some(class_str) = class_value.as_str() {
                 //         if class_str == "primary" || class_str == "secondary" {
                 //             let filter_result = evaluate_filter(filter, &filterable_feature);
                 //             if !filter_result {
-                //                 
+                //
                 //             }
                 //         }
                 //     }
                 // }
-                
+
                 if !evaluate_filter(filter, &filterable_feature) {
                     filtered_by_expression += 1;
                     continue; // Skip features that don't pass the filter
                 }
             }
-            
+
             processed_features += 1;
 
             // --- Height Extraction ---
@@ -806,7 +827,9 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         .filter(|&h| h > 0.0) // Accept all positive heights including 5.0
                 })
                 .or_else(|| {
-                    feature.properties.get("ele")
+                    feature
+                        .properties
+                        .get("ele")
                         .and_then(|v| v.as_f64())
                         .filter(|&h| h > 0.0)
                 });
@@ -814,7 +837,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             // Convert Option<f64> to the expected format for further processing
             let height_value = height.unwrap_or(0.0);
             // Debug: log extracted height for each feature
-            // 
+            //
 
             // --- Geometry Processing & Transformation ---
             let geometry_type_str = feature.geometry_type.as_str();
@@ -843,7 +866,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         }
 
                         if !transformed_ring.is_empty() {
-                            // 
+                            //
                             let _base_elevation = calculate_base_elevation(
                                 &transformed_ring,
                                 &elevation_grid,
@@ -854,7 +877,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 elev_max_lng,
                                 elev_max_lat, // Use elevation bbox
                             );
-                            // 
+                            //
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_ring,
@@ -863,7 +886,10 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 layer: Some(vt_dataset.source_layer.clone()),
                                 label: vt_dataset.label.clone(),
                                 tags: None,
-                                properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
+                                properties: Some(
+                                    serde_json::to_value(&feature.properties)
+                                        .unwrap_or(serde_json::Value::Null),
+                                ),
                             });
                         }
                     }
@@ -873,15 +899,17 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     // feature.geometry structure: Vec<Vec<Vec<f64>>> where each Vec<Vec<f64>> represents a line
                     // For LineString: contains 1 line
                     // For MultiLineString: contains multiple lines
-                    
-                    let _class_value = feature.properties.get("class")
+
+                    let _class_value = feature
+                        .properties
+                        .get("class")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
-                    
-                    
+
                     for (_line_index, line_tile_coords) in feature.geometry.iter().enumerate() {
-                        let mut transformed_line: Vec<Vec<f64>> = Vec::with_capacity(line_tile_coords.len());
-                        
+                        let mut transformed_line: Vec<Vec<f64>> =
+                            Vec::with_capacity(line_tile_coords.len());
+
                         // Transform each point in the line from tile coordinates to lat/lng
                         for point_tile_coords in line_tile_coords {
                             if point_tile_coords.len() >= 2 {
@@ -896,7 +924,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 transformed_line.push(vec![lng, lat]);
                             }
                         }
-                        
+
                         // Only create geometry if we have a valid line with at least 2 points
                         if transformed_line.len() >= 2 {
                             let _base_elevation = calculate_base_elevation(
@@ -909,7 +937,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 elev_max_lng,
                                 elev_max_lat,
                             );
-                            
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_line,
@@ -918,7 +945,10 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 layer: Some(vt_dataset.source_layer.clone()),
                                 label: vt_dataset.label.clone(),
                                 tags: None,
-                                properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
+                                properties: Some(
+                                    serde_json::to_value(&feature.properties)
+                                        .unwrap_or(serde_json::Value::Null),
+                                ),
                             });
                         } else {
                         }
@@ -939,7 +969,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                     tile_z,
                                 );
                                 let transformed_point = vec![lng, lat];
-                                // 
+                                //
 
                                 let _base_elevation = calculate_base_elevation(
                                     &vec![transformed_point.clone()], // Pass as vec of points
@@ -951,7 +981,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                     elev_max_lng,
                                     elev_max_lat,
                                 );
-                                // 
+                                //
 
                                 transformed_geometry_parts.push(GeometryData {
                                     geometry: vec![transformed_point],
@@ -960,7 +990,10 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                     layer: Some(vt_dataset.source_layer.clone()),
                                     label: vt_dataset.label.clone(),
                                     tags: None,
-                                    properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
+                                    properties: Some(
+                                        serde_json::to_value(&feature.properties)
+                                            .unwrap_or(serde_json::Value::Null),
+                                    ),
                                 });
                             }
                         }
@@ -971,7 +1004,8 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer Vec contains multiple polygon rings
                     // Note: This is a simplified approach - proper MultiPolygon handling would need to group rings by polygon
                     for ring_tile_coords in &feature.geometry {
-                        let mut transformed_ring: Vec<Vec<f64>> = Vec::with_capacity(ring_tile_coords.len());
+                        let mut transformed_ring: Vec<Vec<f64>> =
+                            Vec::with_capacity(ring_tile_coords.len());
                         for point_tile_coords in ring_tile_coords {
                             if point_tile_coords.len() >= 2 {
                                 let (lng, lat) = convert_tile_coords_to_lnglat(
@@ -1005,52 +1039,69 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 layer: Some(vt_dataset.source_layer.clone()),
                                 label: vt_dataset.label.clone(),
                                 tags: None,
-                                properties: Some(serde_json::to_value(&feature.properties).unwrap_or(serde_json::Value::Null)),
+                                properties: Some(
+                                    serde_json::to_value(&feature.properties)
+                                        .unwrap_or(serde_json::Value::Null),
+                                ),
                             });
                         }
                     }
                 }
                 _ => {
                     // LOG ALL UNHANDLED GEOMETRY TYPES - THIS IS CRITICAL FOR DEBUGGING
-                    let class_value = feature.properties.get("class")
+                    let class_value = feature
+                        .properties
+                        .get("class")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
                     console_log!("❌ SKIPPING UNHANDLED geometry type '{}' for feature class '{}' - THIS IS WHY FEATURES ARE MISSING!", 
                         geometry_type_str, class_value);
                 }
             }
-            
+
             let pre_bbox_count = transformed_geometry_parts.len();
             geometry_created += pre_bbox_count;
-            
+
             // Apply smart bbox filtering with buffers for LineStrings
             let bbox_buffer = 0.001; // ~100m buffer for roads that cross boundaries
             let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
                 .into_iter()
                 .filter(|geom| {
-                    let (effective_min_lng, effective_max_lng, effective_min_lat, effective_max_lat) = 
-                        if geom.r#type.as_ref().map_or(false, |t| t == "LineString") {
-                            // Use buffered bbox for LineStrings (roads)
-                            (min_lng - bbox_buffer, max_lng + bbox_buffer, min_lat - bbox_buffer, max_lat + bbox_buffer)
-                        } else {
-                            // Use strict bbox for Polygons (buildings)
-                            (min_lng, max_lng, min_lat, max_lat)
-                        };
-                    
+                    let (
+                        effective_min_lng,
+                        effective_max_lng,
+                        effective_min_lat,
+                        effective_max_lat,
+                    ) = if geom.r#type.as_ref().map_or(false, |t| t == "LineString") {
+                        // Use buffered bbox for LineStrings (roads)
+                        (
+                            min_lng - bbox_buffer,
+                            max_lng + bbox_buffer,
+                            min_lat - bbox_buffer,
+                            max_lat + bbox_buffer,
+                        )
+                    } else {
+                        // Use strict bbox for Polygons (buildings)
+                        (min_lng, max_lng, min_lat, max_lat)
+                    };
+
                     geom.geometry.iter().any(|coord| {
                         let lon = coord[0];
                         let lat = coord[1];
-                        lon >= effective_min_lng && lon <= effective_max_lng && lat >= effective_min_lat && lat <= effective_max_lat
+                        lon >= effective_min_lng
+                            && lon <= effective_max_lng
+                            && lat >= effective_min_lat
+                            && lat <= effective_max_lat
                     })
                 })
                 .collect();
-            
+
             let post_bbox_count = filtered_parts.len();
             geometry_filtered_by_bbox += pre_bbox_count - post_bbox_count;
-            
+
             geometry_data_list.extend(filtered_parts);
         }
-        
+
         // Log the filtering statistics for this tile
         console_log!(
             "📊received  Tile {}/{}/{} stats: {} total, {} filtered by expression, {} processed, {} geometries created, {} filtered by bbox",
@@ -1079,8 +1130,15 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     {
         // Build process cache key using the VtDataSet configuration
         let data_key = cache_keys::make_process_vtdataset_key(&input.process_id, &vt_dataset);
-        let cached_value_str = serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
-        module_state.add_process_feature_data(&input.process_id, &data_key, cached_value_str.clone());
+        let cached_value_str =
+            serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
+        ModuleState::with_mut(|state| {
+            state.add_process_feature_data(
+                &input.process_id,
+                &data_key,
+                cached_value_str.clone(),
+            );
+        });
     }
     // Return undefined since data is cached at process level
     Ok(JsValue::undefined())
@@ -1092,10 +1150,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse input
     let input: VectortileProcessingInput = from_value(input_js)?;
 
-    console_log!(
-        "Fetching vector tiles for process ID: {}",
-        input.process_id
-    );
+    console_log!("Fetching vector tiles for process ID: {}", input.process_id);
 
     // Calculate tiles for the requested bounding box
     let tiles = get_tiles_for_bbox(
@@ -1111,10 +1166,6 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         tiles.len(),
         input.zoom
     );
-
-    // Fetch tiles in parallel and store them
-    let module_state = ModuleState::get_instance();
-    let mut module_state_lock = module_state.lock().unwrap();
 
     // Store the fetch results for later processing
     let mut tile_results = Vec::new();
@@ -1146,14 +1197,10 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             // Extract the raw data array - we need to access the "rawData" property
             // since our JS helper function returns a TileFetchResponse object
             let raw_data_value = js_sys::Reflect::get(&fetch_result, &JsValue::from_str("rawData"))
-                .map_err(|_e| {
-                    
-                    JsValue::from_str("Failed to extract rawData from fetch result")
-                })?;
+                .map_err(|_e| JsValue::from_str("Failed to extract rawData from fetch result"))?;
 
             // Verify we actually got a valid Uint8Array from the rawData property
             if raw_data_value.is_undefined() || raw_data_value.is_null() {
-                
                 return Err(JsValue::from_str("rawData property is undefined or null"));
             }
 
@@ -1170,13 +1217,12 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             // Check if the data is gzipped and decompress if necessary
             if data_vec.starts_with(&[0x1f, 0x8b]) {
                 // Gzip magic number
-                
+
                 let mut decoder = GzDecoder::new(&data_vec[..]);
                 let mut decompressed_data = Vec::new();
-                decoder.read_to_end(&mut decompressed_data).map_err(|_e| {
-                    
-                    JsValue::from_str("Decompression error")
-                })?;
+                decoder
+                    .read_to_end(&mut decompressed_data)
+                    .map_err(|_e| JsValue::from_str("Decompression error"))?;
                 data_vec = decompressed_data;
             }
 
@@ -1190,13 +1236,14 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 "🔍 DEBUG: First bytes of tile data (hex): {:02X?}",
                 debug_bytes
             );
-            
 
             // Parse the MVT data using our enhanced Rust MVT parser
             let parsed_mvt = match enhanced_parse_mvt_data(&data_vec, &tile) {
                 Ok(parsed) => {
                     // Cache the parsed MVTTile for later feature extraction
-                    module_state_lock.set_parsed_mvt_tile(&tile_key, parsed.clone());
+                    ModuleState::with_mut(|state| {
+                        state.set_parsed_mvt_tile(&tile_key, parsed.clone());
+                    });
                     console_log!(
                         "Successfully parsed MVT data with Rust parser for tile {}/{}/{}",
                         tile.z,
@@ -1206,7 +1253,6 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                     // Log the number of layers found
                     let _layer_count = parsed.layers.len();
                     let _layer_names: Vec<String> = parsed.layers.keys().cloned().collect();
-                    
 
                     // Convert Rust-parsed features to the legacy format for compatibility
                     let mut legacy_layers = HashMap::new();
@@ -1253,10 +1299,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
 
                     Some((parsed, legacy_layers))
                 }
-                Err(_e) => {
-                    
-                    None
-                }
+                Err(_e) => None,
             };
 
             // Debug: Print detailed info about the data being stored
@@ -1271,7 +1314,6 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             } else {
                 format!("{:02X?}", &data_vec)
             };
-            
 
             // Create new tile data entry
             let tile_data = TileData {
@@ -1306,19 +1348,28 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         tile_results.len(),
         input.process_id
     );
-    module_state_lock.store_process_vector_tiles(&input.process_id, tile_results.clone().into_iter().map(|vtr| TileData {
-        width: 256,
-        height: 256,
-        x: vtr.tile.x,
-        y: vtr.tile.y,
-        z: vtr.tile.z,
-        data: vtr.data.clone(),
-        timestamp: Date::now(),
-        key: format!("{}/{}/{}", vtr.tile.z, vtr.tile.x, vtr.tile.y),
-        buffer: vtr.data.clone(),
-        parsed_layers: None,
-        rust_parsed_mvt: Some(vtr.data),
-    }).collect());
+    ModuleState::with_mut(|state| {
+        state.store_process_vector_tiles(
+            &input.process_id,
+            tile_results
+                .clone()
+                .into_iter()
+                .map(|vtr| TileData {
+                    width: 256,
+                    height: 256,
+                    x: vtr.tile.x,
+                    y: vtr.tile.y,
+                    z: vtr.tile.z,
+                    data: vtr.data.clone(),
+                    timestamp: Date::now(),
+                    key: format!("{}/{}/{}", vtr.tile.z, vtr.tile.x, vtr.tile.y),
+                    buffer: vtr.data.clone(),
+                    parsed_layers: None,
+                    rust_parsed_mvt: Some(vtr.data.clone()),
+                })
+                .collect(),
+        );
+    });
 
     // Return tile data that has been processed by Rust
     // We're still returning the VectorTileResult format for compatibility,
@@ -1389,7 +1440,6 @@ fn enhanced_parse_mvt_data(
     } else {
         format!("{:02X?}", &tile_data)
     };
-    
 
     // Check for common MVT/PBF patterns in the raw data
     if tile_data.len() >= 4 {
@@ -1404,7 +1454,7 @@ fn enhanced_parse_mvt_data(
 
     // Try to detect protobuf structure directly
     if tile_data.len() > 10 {
-        // 
+        //
         for i in 0..10.min(tile_data.len()) {
             let byte = tile_data[i];
             let field_num = byte >> 3;
@@ -1426,8 +1476,8 @@ fn enhanced_parse_mvt_data(
 
     // Log if decompression changed the data size
     if data.len() != tile_data.len() {
-       //  console_log!("🔍 DECOMPRESSION: Data was compressed. Original size: {} bytes, Decompressed size: {} bytes", 
-       //      tile_data.len(), data.len());
+        //  console_log!("🔍 DECOMPRESSION: Data was compressed. Original size: {} bytes, Decompressed size: {} bytes",
+        //      tile_data.len(), data.len());
     }
 
     // Debug: Log raw data details
@@ -1452,31 +1502,22 @@ fn enhanced_parse_mvt_data(
     } else {
         format!("{:02X?}", &data)
     };
-    
 
     // Try to decode the MVT data using the Message trait implementation
     match Tile::decode(&*data) {
         Ok(mvt_tile) => {
-            
-            
-
             // If no layers found, this could indicate a potential issue with the data format
             if mvt_tile.layers.is_empty() {
                 console_log!(
                     "⚠️ WARNING: No layers found in the decoded MVT data. This might indicate:"
                 );
-                
-                
-                
 
                 // Let's try an alternate approach: attempt to detect the protobuf structure manually
                 // This is a basic check to see if the data at least looks like a protobuf message
                 if data.len() > 2 {
-                    
                     let mut offset = 0;
                     while offset < data.len() - 1 {
                         if offset >= 100 {
-                            
                             break;
                         }
 
@@ -1576,7 +1617,7 @@ fn enhanced_parse_mvt_data(
                     if decoded_geometry_tile_coords.is_empty()
                         || decoded_geometry_tile_coords[0].is_empty()
                     {
-                        // 
+                        //
                         continue;
                     }
 
@@ -1652,7 +1693,7 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
 
                         current_part.push(vec![cursor_x as f64, cursor_y as f64]);
                     } else {
-                        // 
+                        //
                         break; // Exit inner loop if data is short
                     }
                 }
@@ -1683,12 +1724,12 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
                             // MVT spec v2: "A LineTo command must be preceded by a MoveTo command."
                             // If we encounter LineTo without a preceding MoveTo, it's likely an error or
                             // implies starting from (0,0), but safer to log/ignore.
-                            // 
+                            //
                         } else {
                             current_part.push(vec![cursor_x as f64, cursor_y as f64]);
                         }
                     } else {
-                        // 
+                        //
                         break; // Exit inner loop
                     }
                 }
@@ -1702,14 +1743,14 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
                     }
                     // ClosePath command has no parameters, so just continue
                 } else {
-                    // 
+                    //
                 }
                 // MVT Spec: A ClosePath command is followed by a MoveTo command
                 // We don't need to push `current_part` here; the next MoveTo will handle it
             }
             _ => {
                 // Unknown command, skip parameters
-                // 
+                //
                 i += 2 * cmd_count;
             }
         }

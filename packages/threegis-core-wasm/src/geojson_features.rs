@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 // Structure for the GeometryData that we extract from geojson features
 #[derive(Serialize, Deserialize, Clone)]

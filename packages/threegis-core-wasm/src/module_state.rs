@@ -1,8 +1,9 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
-use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
+use parking_lot::ReentrantMutex;
+use lazy_static::lazy_static;
 // Removed JsValue import: storing JSON strings instead
 
 // We need JsValue for caching objects
@@ -25,8 +26,8 @@ pub struct TileData {
     pub y: u32,
     pub z: u32,
     pub data: Vec<u8>,
-    pub timestamp: f64, // For cache invalidation
-    pub key: String,    // For identification
+    pub timestamp: f64,  // For cache invalidation
+    pub key: String,     // For identification
     pub buffer: Vec<u8>, // Raw tile data
     pub parsed_layers: Option<HashMap<String, Vec<crate::vectortile::Feature>>>, // Legacy parsed vector tile layers
     pub rust_parsed_mvt: Option<Vec<u8>>, // Raw MVT data as parsed by Rust MVT parser
@@ -96,12 +97,12 @@ pub struct ModuleState {
     // Stats
     pub cache_hits: usize,
     pub cache_misses: usize,
-
 }
 
 // Create a global static instance of the module state
 lazy_static! {
-    static ref MODULE_STATE: Mutex<ModuleState> = Mutex::new(ModuleState::new());
+    static ref MODULE_STATE: ReentrantMutex<RefCell<ModuleState>> =
+        ReentrantMutex::new(RefCell::new(ModuleState::new()));
 }
 
 impl ModuleState {
@@ -119,33 +120,44 @@ impl ModuleState {
             cache_misses: 0,
         }
     }
-    
-    // Get the singleton instance
-    pub fn get_instance() -> &'static Mutex<Self> {
-        &MODULE_STATE
+
+    pub fn with_mut<F, R>(f: F) -> R
+    where
+        F: FnOnce(&mut ModuleState) -> R,
+    {
+        let guard = MODULE_STATE.lock();
+        let mut borrow = guard.borrow_mut();
+        f(&mut borrow)
     }
 
-    // Get the global module state
-    pub fn global() -> &'static Mutex<ModuleState> {
-        &MODULE_STATE
+    pub fn with<F, R>(f: F) -> R
+    where
+        F: FnOnce(&ModuleState) -> R,
+    {
+        let guard = MODULE_STATE.lock();
+        let borrow = guard.borrow();
+        f(&borrow)
     }
-    
+
     // Add a raster tile to the cache
     pub fn add_raster_tile(&mut self, key: TileKey, data: TileData) {
         // If we're at capacity, remove the oldest tile
-        if self.raster_tiles.len() >= self.max_raster_tiles && !self.raster_tiles.contains_key(&key) {
-            let oldest_key = self.raster_tiles.iter()
+        if self.raster_tiles.len() >= self.max_raster_tiles && !self.raster_tiles.contains_key(&key)
+        {
+            let oldest_key = self
+                .raster_tiles
+                .iter()
                 .min_by(|a, b| a.1.timestamp.partial_cmp(&b.1.timestamp).unwrap())
                 .map(|(k, _)| k.clone());
-                
+
             if let Some(oldest) = oldest_key {
                 self.raster_tiles.remove(&oldest);
             }
         }
-        
+
         self.raster_tiles.insert(key, data);
     }
-    
+
     // Get a raster tile from the cache
     pub fn get_raster_tile(&mut self, key: &TileKey) -> Option<&TileData> {
         if self.raster_tiles.contains_key(key) {
@@ -156,20 +168,21 @@ impl ModuleState {
             None
         }
     }
-    
+
     // Add a vector tile to the cache
     #[allow(dead_code)] // Public API method for future use
     pub fn add_vector_tile(&mut self, key: TileKey, features: Vec<VectorTileData>) {
         // If we're at capacity, remove a random tile (simple strategy)
-        if self.vector_tiles.len() >= self.max_vector_tiles && !self.vector_tiles.contains_key(&key) {
+        if self.vector_tiles.len() >= self.max_vector_tiles && !self.vector_tiles.contains_key(&key)
+        {
             if let Some(first_key) = self.vector_tiles.keys().next().cloned() {
                 self.vector_tiles.remove(&first_key);
             }
         }
-        
+
         self.vector_tiles.insert(key, features);
     }
-    
+
     // Get a vector tile from the cache
     #[allow(dead_code)] // Public API method for future use
     pub fn get_vector_tile(&mut self, key: &TileKey) -> Option<&Vec<VectorTileData>> {
@@ -181,41 +194,38 @@ impl ModuleState {
             None
         }
     }
-    
+
     // Store a processed elevation grid
     pub fn store_elevation_grid(&mut self, key: String, grid: Vec<Vec<f64>>) {
         self.elevation_grids.insert(key, grid);
     }
-    
+
     // Get a processed elevation grid
     pub fn get_elevation_grid(&self, key: &str) -> Option<&Vec<Vec<f64>>> {
         self.elevation_grids.get(key)
     }
-    
-    
-    
+
     // Get a cached parsed vector tile by cache key
     pub fn get_parsed_mvt_tile(&self, key: &str) -> Option<ParsedMvtTile> {
-        
         if let Some(tile) = self.mvt_parsed_tiles.get(key) {
-            
             Some(tile.clone())
         } else {
-            
             None
         }
     }
 
     // Store a parsed vector tile in cache by cache key
     pub fn set_parsed_mvt_tile(&mut self, key: &str, tile: ParsedMvtTile) {
-        
         self.mvt_parsed_tiles.insert(key.to_string(), tile);
     }
 
     // Store fetched vector tiles under bbox_key
     #[allow(dead_code)]
-    pub fn store_vector_tiles(&mut self, bbox_key: &str, results: &[crate::vectortile::VectorTileResult]) {
-        
+    pub fn store_vector_tiles(
+        &mut self,
+        bbox_key: &str,
+        results: &[crate::vectortile::VectorTileResult],
+    ) {
         let mut tile_list = Vec::with_capacity(results.len());
         for r in results {
             let key = format!("{}/{}/{}", r.tile.z, r.tile.x, r.tile.y);
@@ -236,33 +246,33 @@ impl ModuleState {
             tile_list.push(tile_data);
         }
         // Legacy method - storing in process cache instead
-        self.process_vector_tiles.insert(bbox_key.to_string(), tile_list);
+        self.process_vector_tiles
+            .insert(bbox_key.to_string(), tile_list);
     }
 
     // Retrieve cached vector tiles by bbox_key
     pub fn get_vector_tiles(&self, bbox_key: &str) -> Option<&Vec<TileData>> {
-        
         if let Some(tiles) = self.process_vector_tiles.get(bbox_key) {
-            
             Some(tiles)
         } else {
-            
             None
         }
     }
-    
-    
+
     // Get cached geometry data for a specific layer and bbox key
     #[allow(dead_code)] // Public API method for future use
-    pub fn get_cached_geometry_data(&self, bbox_key: &str, source_layer: &str) -> Option<Vec<crate::polygon_geometry::GeometryData>> {
+    pub fn get_cached_geometry_data(
+        &self,
+        bbox_key: &str,
+        source_layer: &str,
+    ) -> Option<Vec<crate::polygon_geometry::GeometryData>> {
         // Get data using the proper bbox_key format used throughout the app
-        
-        
+
         // Try to get vector tiles for this bbox_key - using the same format as extract_features_from_vector_tiles
         if let Some(vector_tiles) = self.get_vector_tiles(bbox_key) {
             // Extract features from the vector tiles for the specified source layer
             let mut features = Vec::new();
-            
+
             for tile in vector_tiles {
                 // Check if this tile has parsed layers
                 if let Some(ref parsed_layers) = tile.parsed_layers {
@@ -271,14 +281,23 @@ impl ModuleState {
                         // Convert vectortile::Feature to polygon_geometry::GeometryData
                         for feature in layer_features {
                             // Extract height property
-                            let height = feature.properties.get("height")
+                            let height = feature
+                                .properties
+                                .get("height")
                                 .and_then(|v| v.as_f64())
-                                .or_else(|| feature.properties.get("render_height").and_then(|v| v.as_f64()))
+                                .or_else(|| {
+                                    feature
+                                        .properties
+                                        .get("render_height")
+                                        .and_then(|v| v.as_f64())
+                                })
                                 .unwrap_or(0.0);
-                            
+
                             // Process based on geometry type
-                            if let Ok(coords) = serde_json::from_value::<Vec<Vec<f64>>>(feature.geometry.coordinates.clone()) {
-                                // This is a simplified conversion - in a real implementation, 
+                            if let Ok(coords) = serde_json::from_value::<Vec<Vec<f64>>>(
+                                feature.geometry.coordinates.clone(),
+                            ) {
+                                // This is a simplified conversion - in a real implementation,
                                 // you'd handle different geometry types appropriately
                                 features.push(crate::polygon_geometry::GeometryData {
                                     geometry: coords,
@@ -294,23 +313,21 @@ impl ModuleState {
                     }
                 }
             }
-            
+
             if !features.is_empty() {
-                
                 return Some(features);
             }
         }
-        
+
         None
     }
-    
-    
-    
+
     // ========== Process-based cache methods ==========
 
     /// Store vector tiles for a specific process
     pub fn store_process_vector_tiles(&mut self, process_id: &str, tiles: Vec<TileData>) {
-        self.process_vector_tiles.insert(process_id.to_string(), tiles);
+        self.process_vector_tiles
+            .insert(process_id.to_string(), tiles);
     }
 
     /// Retrieve vector tiles for a specific process
@@ -320,7 +337,8 @@ impl ModuleState {
 
     /// Store extracted feature data for a specific process
     pub fn add_process_feature_data(&mut self, process_id: &str, data_key: &str, json: String) {
-        let entry = self.process_feature_data
+        let entry = self
+            .process_feature_data
             .entry(process_id.to_string())
             .or_insert_with(HashMap::new);
         entry.insert(data_key.to_string(), json);
@@ -358,21 +376,21 @@ impl ModuleState {
         // Redirect to process-based caching
         self.add_process_feature_data(bbox_key, inner_key, json);
     }
-    
+
     /// Retrieve stored feature data by bbox_key and inner_key
     #[allow(dead_code)]
     pub fn get_feature_data(&self, bbox_key: &str, inner_key: &str) -> Option<JsValue> {
         // Redirect to process-based caching
         self.get_process_feature_data(bbox_key, inner_key)
     }
-    
+
     /// Clear all feature data entries for a given bbox_key
     #[allow(dead_code)]
     pub fn clear_feature_data_for_bbox(&mut self, bbox_key: &str) {
         // Redirect to process-based clearing
         self.clear_process_data(bbox_key);
     }
-    
+
     // Get cache statistics
     pub fn get_stats(&self) -> (usize, usize, usize, usize, usize, usize) {
         (
@@ -381,10 +399,10 @@ impl ModuleState {
             self.elevation_grids.len(),
             self.max_raster_tiles,
             self.max_vector_tiles,
-            self.cache_hits + self.cache_misses
+            self.cache_hits + self.cache_misses,
         )
     }
-    
+
     // Clear all caches
     pub fn clear_all_caches(&mut self) {
         self.raster_tiles.clear();
@@ -403,9 +421,5 @@ impl ModuleState {
 
 // Create a tile key from x, y, z, and source
 pub fn create_tile_key(x: u32, y: u32, z: u32) -> TileKey {
-    TileKey {
-        x,
-        y,
-        z,
-    }
+    TileKey { x, y, z }
 }

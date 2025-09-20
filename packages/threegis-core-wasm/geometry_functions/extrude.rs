@@ -3,7 +3,6 @@ use js_sys::{Array, Float32Array, Object};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-
 const EPSILON: f64 = 1e-10;
 
 /// Simple 2D vector struct
@@ -162,7 +161,6 @@ impl UVGenerator {
             Vector2::new(c_x, c_y),
         ]
     }
-
 }
 
 /// Helper function to check if points are in clockwise order
@@ -223,11 +221,11 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
     // Deserialize input
     let raw_shapes: Vec<RawShape> = serde_wasm_bindgen::from_value(shapes.clone())
         .map_err(|e| JsValue::from_str(&format!("Invalid shapes: {}", e)))?;
-    
+
     // Parse options from JSON
     let options_json: ExtrudeOptionsJson = serde_wasm_bindgen::from_value(options.clone())
         .map_err(|e| JsValue::from_str(&format!("Invalid options: {}", e)))?;
-    
+
     // Convert to our native Rust struct
     let opts = ExtrudeOptions {
         curve_segments: options_json.curve_segments,
@@ -235,7 +233,7 @@ pub fn extrude_geometry(shapes: &JsValue, options: &JsValue) -> Result<JsValue, 
         depth: options_json.depth,
         extrude_path: options_json.extrude_path,
     };
-    
+
     // Call the native implementation
     extrude_geometry_native(raw_shapes, opts)
 }
@@ -254,10 +252,11 @@ pub fn extrude_geometry_native_with_options(
     opts: ExtrudeOptions,
     skip_bottom_face: bool,
 ) -> Result<JsValue, JsValue> {
-    let mut vertices_array: Vec<f32> = Vec::new();
-    let mut uv_array: Vec<f32> = Vec::new();
-    let mut indices_array: Vec<u32> = Vec::new();
-    let mut normals_array: Vec<f32> = Vec::new();
+    let mut final_vertices: Vec<f32> = Vec::new();
+    let mut final_uvs: Vec<f32> = Vec::new();
+    let mut final_indices: Vec<u32> = Vec::new();
+    let mut final_normals: Vec<f32> = Vec::new();
+    let mut vertex_offset: u32 = 0;
 
     // Determine if extrusion is along a path
     let mut extrude_by_path = false;
@@ -329,7 +328,6 @@ pub fn extrude_geometry_native_with_options(
         // Triangulate the shape (with holes)
         let faces: Vec<Vec<usize>>;
 
-
         // Triangulate contour and holes directly (no bevel)
         let mut data: Vec<f64> = Vec::new();
         for pt in &contour {
@@ -394,244 +392,71 @@ pub fn extrude_geometry_native_with_options(
             }
         }
 
-        // Add faces
-        let _vertex_count = vertices_array.len() / 3;
+        // Prepare vertex buffer from placeholder data
+        let vertex_count = placeholder.len() / 3;
+        let vertices_array = placeholder.clone();
+        let mut normals_array = vec![0.0f32; vertex_count * 3];
+        let mut uv_array = vec![0.0f32; vertex_count * 2];
+        let mut shape_indices: Vec<u32> = Vec::new();
 
-        // Define a function to add triangular faces
-        fn add_triangle(
-            indices_array: &mut Vec<u32>,
-            vertices_array: &mut Vec<f32>,
-            normals_array: &mut Vec<f32>,
-            uv_array: &mut Vec<f32>,
-            _vertex_count: usize,
-            placeholder: &[f32],
-            a: usize,
-            b: usize,
-            c: usize,
-        ) {
-            // Get the current vertex index before adding any vertices
-            let current_vertex = vertices_array.len() / 3;
-
-            // Add these indices (they'll point to the vertices we're about to add)
-            indices_array.push(current_vertex as u32);
-            indices_array.push(current_vertex as u32 + 1);
-            indices_array.push(current_vertex as u32 + 2);
-
-            // Safety check for array bounds
-            let placeholder_len = placeholder.len();
-            let has_out_of_bounds = (a * 3 + 2 >= placeholder_len)
-                || (b * 3 + 2 >= placeholder_len)
-                || (c * 3 + 2 >= placeholder_len);
-
-            if has_out_of_bounds {
-                // Use default values if any index is out of bounds
-                // Add default normal vector (pointing upward)
-                normals_array.push(0.0);
-                normals_array.push(0.0);
-                normals_array.push(1.0);
-                normals_array.push(0.0);
-                normals_array.push(0.0);
-                normals_array.push(1.0);
-                normals_array.push(0.0);
-                normals_array.push(0.0);
-                normals_array.push(1.0);
-
-                // Add default vertex positions - a small triangle at z=0
-                vertices_array.push(0.0);
-                vertices_array.push(0.0);
-                vertices_array.push(0.0);
-
-                vertices_array.push(0.1);
-                vertices_array.push(0.0);
-                vertices_array.push(0.0);
-
-                vertices_array.push(0.0);
-                vertices_array.push(0.1);
-                vertices_array.push(0.0);
-
-                // Add default UVs
-                uv_array.push(0.0);
-                uv_array.push(0.0);
-                uv_array.push(1.0);
-                uv_array.push(0.0);
-                uv_array.push(0.0);
-                uv_array.push(1.0);
-
-                return;
-            }
-
-            // Compute normal
-            let ax = placeholder[a * 3] as f64;
-            let ay = placeholder[a * 3 + 1] as f64;
-            let az = placeholder[a * 3 + 2] as f64;
-
-            let bx = placeholder[b * 3] as f64;
-            let by = placeholder[b * 3 + 1] as f64;
-            let bz = placeholder[b * 3 + 2] as f64;
-
-            let cx = placeholder[c * 3] as f64;
-            let cy = placeholder[c * 3 + 1] as f64;
-            let cz = placeholder[c * 3 + 2] as f64;
-
-            // Check for degenerate triangle - if any vertices are the same
-            if (ax == bx && ay == by && az == bz)
-                || (bx == cx && by == cy && bz == cz)
-                || (cx == ax && cy == ay && cz == az)
-            {
-                // Degenerate triangle - use Z-up normal
-                normals_array.push(0.0);
-                normals_array.push(0.0);
-                normals_array.push(1.0);
-            } else {
-                // Compute vectors for normal calculation
-                let v1x = bx - ax;
-                let v1y = by - ay;
-                let v1z = bz - az;
-
-                let v2x = cx - ax;
-                let v2y = cy - ay;
-                let v2z = cz - az;
-
-                // Cross product
-                let nx = v1y * v2z - v1z * v2y;
-                let ny = v1z * v2x - v1x * v2z;
-                let nz = v1x * v2y - v1y * v2x;
-
-                // Normalize
-                let len = (nx * nx + ny * ny + nz * nz).sqrt();
-
-                // Set the normal (will be used for all three vertices)
-                const EPSILON: f64 = 1e-10; // Small threshold to avoid division by zero
-                if len > EPSILON {
-                    let inv_len = 1.0 / len;
-                    normals_array.push((nx * inv_len) as f32);
-                    normals_array.push((ny * inv_len) as f32);
-                    normals_array.push((nz * inv_len) as f32);
-                } else {
-                    // Try to determine a reasonable fallback normal
-                    // First try to use edge directions
-                    if v1x.abs() > EPSILON || v1y.abs() > EPSILON || v1z.abs() > EPSILON {
-                        // Normalize v1 as fallback
-                        let v1_len = (v1x * v1x + v1y * v1y + v1z * v1z).sqrt();
-                        if v1_len > EPSILON {
-                            normals_array.push((v1x / v1_len) as f32);
-                            normals_array.push((v1y / v1_len) as f32);
-                            normals_array.push((v1z / v1_len) as f32);
-                        } else {
-                            // Last resort - use Z-up normal
-                            normals_array.push(0.0);
-                            normals_array.push(0.0);
-                            normals_array.push(1.0);
-                        }
-                    } else {
-                        // If all else fails, use Z-up normal since that's often visually correct for extrusions
-                        normals_array.push(0.0);
-                        normals_array.push(0.0);
-                        normals_array.push(1.0);
-                    }
-                }
-            }
-
-            // Duplicate the same normal for the other two vertices (b and c)
-            // Get the normal components we just added for vertex a
-            let nx_norm = normals_array[normals_array.len() - 3];
-            let ny_norm = normals_array[normals_array.len() - 2];
-            let nz_norm = normals_array[normals_array.len() - 1];
-
-            // Apply the same normal to vertex b
-            normals_array.push(nx_norm);
-            normals_array.push(ny_norm);
-            normals_array.push(nz_norm);
-
-            // Apply the same normal to vertex c
-            normals_array.push(nx_norm);
-            normals_array.push(ny_norm);
-            normals_array.push(nz_norm);
-
-            // Add vertex positions
-            for &idx in &[a, b, c] {
-                vertices_array.push(placeholder[idx * 3]);
-                vertices_array.push(placeholder[idx * 3 + 1]);
-                vertices_array.push(placeholder[idx * 3 + 2]);
-            }
-
-            // Generate UVs - make sure to use proper UV mapping
-            let uvs = UVGenerator::generate_top_uv(&placeholder, a, b, c);
-
-            // Add UVs
-            for uv in uvs {
-                uv_array.push(uv.x as f32);
-                uv_array.push(uv.y as f32);
-            }
+        // Helper to assign simple XY-based UVs
+        for i in 0..vertex_count {
+            let vx = vertices_array[i * 3];
+            let vy = vertices_array[i * 3 + 1];
+            uv_array[i * 2] = vx;
+            uv_array[i * 2 + 1] = vy;
         }
 
-        // Define a function for quadrilateral faces (two triangles)
-        fn add_quad(
-            indices_array: &mut Vec<u32>,
-            vertices_array: &mut Vec<f32>,
-            normals_array: &mut Vec<f32>,
-            uv_array: &mut Vec<f32>,
-            _vertex_count: usize,
-            placeholder: &[f32],
-            a: usize,
-            b: usize,
-            c: usize,
-            d: usize,
-        ) {
-            // Add first triangle
-            add_triangle(
-                indices_array,
-                vertices_array,
-                normals_array,
-                uv_array,
-                0,
-                placeholder,
-                a,
-                b,
-                d,
-            );
+        // Helper to accumulate normals per vertex
+        let mut accumulate_normal = |i0: usize, i1: usize, i2: usize| {
+            let ax = vertices_array[i0 * 3] as f64;
+            let ay = vertices_array[i0 * 3 + 1] as f64;
+            let az = vertices_array[i0 * 3 + 2] as f64;
+            let bx = vertices_array[i1 * 3] as f64;
+            let by = vertices_array[i1 * 3 + 1] as f64;
+            let bz = vertices_array[i1 * 3 + 2] as f64;
+            let cx = vertices_array[i2 * 3] as f64;
+            let cy = vertices_array[i2 * 3 + 1] as f64;
+            let cz = vertices_array[i2 * 3 + 2] as f64;
 
-            // Add second triangle
-            add_triangle(
-                indices_array,
-                vertices_array,
-                normals_array,
-                uv_array,
-                0,
-                placeholder,
-                b,
-                c,
-                d,
-            );
-        }
+            let v1x = bx - ax;
+            let v1y = by - ay;
+            let v1z = bz - az;
+            let v2x = cx - ax;
+            let v2y = cy - ay;
+            let v2z = cz - az;
+
+            let nx = v1y * v2z - v1z * v2y;
+            let ny = v1z * v2x - v1x * v2z;
+            let nz = v1x * v2y - v1y * v2x;
+
+            for idx in [i0, i1, i2] {
+                normals_array[idx * 3] += nx as f32;
+                normals_array[idx * 3 + 1] += ny as f32;
+                normals_array[idx * 3 + 2] += nz as f32;
+            }
+        };
+
+        // Triangles helper
+        let mut push_triangle = |indices_array: &mut Vec<u32>, i0: usize, i1: usize, i2: usize| {
+            indices_array.push(i0 as u32);
+            indices_array.push(i1 as u32);
+            indices_array.push(i2 as u32);
+            accumulate_normal(i0, i1, i2);
+        };
 
         // Bottom faces (skip for buildings to avoid duplicate geometry)
         if !skip_bottom_face {
             for face in &faces {
-                add_triangle(
-                    &mut indices_array,
-                    &mut vertices_array,
-                    &mut normals_array,
-                    &mut uv_array,
-                    0,
-                    &placeholder,
-                    face[2],
-                    face[1],
-                    face[0],
-                );
+                push_triangle(&mut shape_indices, face[2], face[1], face[0]);
             }
         }
 
         // Top faces
         let offset_top = vlen * opts.steps as usize;
         for face in &faces {
-            add_triangle(
-                &mut indices_array,
-                &mut vertices_array,
-                &mut normals_array,
-                &mut uv_array,
-                0,
-                &placeholder,
+            push_triangle(
+                &mut shape_indices,
                 face[0] + offset_top,
                 face[1] + offset_top,
                 face[2] + offset_top,
@@ -646,7 +471,7 @@ pub fn extrude_geometry_native_with_options(
             let j = i;
             let k = if i == 0 { contour.len() - 1 } else { i - 1 };
 
-            for s in 0..opts.steps as usize * 2 {
+            for s in 0..opts.steps as usize {
                 let slen1 = vlen * s;
                 let slen2 = vlen * (s + 1);
 
@@ -655,18 +480,8 @@ pub fn extrude_geometry_native_with_options(
                 let c = layer_offset + k + slen2;
                 let d = layer_offset + j + slen2;
 
-                add_quad(
-                    &mut indices_array,
-                    &mut vertices_array,
-                    &mut normals_array,
-                    &mut uv_array,
-                    0,
-                    &placeholder,
-                    a,
-                    b,
-                    c,
-                    d,
-                );
+                push_triangle(&mut shape_indices, a, b, d);
+                push_triangle(&mut shape_indices, b, c, d);
             }
         }
 
@@ -680,7 +495,7 @@ pub fn extrude_geometry_native_with_options(
                 let j = i;
                 let k = if i == 0 { ahole.len() - 1 } else { i - 1 };
 
-                for s in 0..opts.steps as usize * 2 {
+                for s in 0..opts.steps as usize {
                     let slen1 = vlen * s;
                     let slen2 = vlen * (s + 1);
 
@@ -689,34 +504,50 @@ pub fn extrude_geometry_native_with_options(
                     let c = layer_offset + k + slen2;
                     let d = layer_offset + j + slen2;
 
-                    add_quad(
-                        &mut indices_array,
-                        &mut vertices_array,
-                        &mut normals_array,
-                        &mut uv_array,
-                        0,
-                        &placeholder,
-                        a,
-                        b,
-                        c,
-                        d,
-                    );
+                    push_triangle(&mut shape_indices, a, b, d);
+                    push_triangle(&mut shape_indices, b, c, d);
                 }
             }
 
             layer_offset += ahole.len();
         }
+
+        // Normalize accumulated normals
+        for i in 0..vertex_count {
+            let nx = normals_array[i * 3];
+            let ny = normals_array[i * 3 + 1];
+            let nz = normals_array[i * 3 + 2];
+            let len = (nx * nx + ny * ny + nz * nz).sqrt();
+            if len > 1e-6 {
+                normals_array[i * 3] /= len;
+                normals_array[i * 3 + 1] /= len;
+                normals_array[i * 3 + 2] /= len;
+            } else {
+                normals_array[i * 3] = 0.0;
+                normals_array[i * 3 + 1] = 0.0;
+                normals_array[i * 3 + 2] = 1.0;
+            }
+        }
+
+        // Append shape data to final buffers
+        final_vertices.extend_from_slice(&vertices_array);
+        final_uvs.extend_from_slice(&uv_array);
+        final_normals.extend_from_slice(&normals_array);
+        for idx in shape_indices {
+            final_indices.push(idx + vertex_offset);
+        }
+        vertex_offset += vertex_count as u32;
     }
 
     // Prepare return object
     let result = Object::new();
-    let pos_arr = Float32Array::from(vertices_array.as_slice());
-    let normal_arr = Float32Array::from(normals_array.as_slice());
-    let uv_arr = Float32Array::from(uv_array.as_slice());
+    let pos_arr = Float32Array::from(final_vertices.as_slice());
+    let normal_arr = Float32Array::from(final_normals.as_slice());
+    let uv_arr = Float32Array::from(final_uvs.as_slice());
 
     // Create a JS array of indices
-    let indices_js_array = Array::new_with_length(indices_array.len() as u32);
-    for (i, &index) in indices_array.iter().enumerate() {
+    let indices_js_array = Array::new_with_length(final_indices.len() as u32);
+    for (i, &index) in final_indices.iter().enumerate() {
         indices_js_array.set(i as u32, JsValue::from_f64(index as f64));
     }
 
@@ -755,10 +586,8 @@ pub fn extrude_shape_with_options(
     skip_bottom_face: bool,
 ) -> Result<JsValue, JsValue> {
     // Convert the shapes to RawShapes
-    let raw_shapes: Vec<RawShape> = shapes.into_iter()
-        .map(|shape| RawShape(shape))
-        .collect();
-    
+    let raw_shapes: Vec<RawShape> = shapes.into_iter().map(|shape| RawShape(shape)).collect();
+
     // Create the extrusion options
     let opts = ExtrudeOptions {
         depth,
@@ -766,7 +595,7 @@ pub fn extrude_shape_with_options(
         curve_segments: 12, // Default
         extrude_path: None,
     };
-    
+
     // Call the native implementation
     extrude_geometry_native_with_options(raw_shapes, opts, skip_bottom_face)
 }
