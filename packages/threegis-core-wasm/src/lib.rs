@@ -118,12 +118,27 @@ pub fn has_raster_tile(x: u32, y: u32, z: u32, _source: &str) -> bool {
 // Function to get cache statistics
 #[wasm_bindgen]
 pub fn get_cache_stats() -> Result<JsValue, JsValue> {
-    let (raster_count, vector_count, elevation_count, max_raster, max_vector, total_requests, cache_hits) =
-        ModuleState::with(|state| {
-            let (raster_count, vector_count, elevation_count, max_raster, max_vector, total_requests) =
-                state.get_stats();
-            (raster_count, vector_count, elevation_count, max_raster, max_vector, total_requests, state.cache_hits)
-        });
+    let (
+        raster_count,
+        vector_count,
+        elevation_count,
+        max_raster,
+        max_vector,
+        total_requests,
+        cache_hits,
+    ) = ModuleState::with(|state| {
+        let (raster_count, vector_count, elevation_count, max_raster, max_vector, total_requests) =
+            state.get_stats();
+        (
+            raster_count,
+            vector_count,
+            elevation_count,
+            max_raster,
+            max_vector,
+            total_requests,
+            state.cache_hits,
+        )
+    });
 
     let hit_rate = if total_requests > 0 {
         cache_hits as f64 / total_requests as f64

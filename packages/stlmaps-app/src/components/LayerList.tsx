@@ -245,6 +245,19 @@ const LayerList: React.FC = () => {
                 { value: 100, label: "100" },
               ]}
             />
+
+            <FormControlLabel
+              sx={{ mt: 2 }}
+              control={
+                <Checkbox
+                  checked={terrainSettings.simpleMesh}
+                  onChange={(event) => setTerrainSettings({
+                    simpleMesh: event.target.checked
+                  })}
+                />
+              }
+              label="Disable Raster DEM (simple block)"
+            />
           </Box>
         </Collapse>
       </StyledPaper>

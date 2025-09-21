@@ -1591,7 +1591,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     let z_offset = lowest_terrain_z - user_z_offset + MIN_CLEARANCE;
 
                     // Extract properties from polygon_data for attaching to geometry
-                    let properties = if let Some(ref props) = polygon_data.properties {
+                    let mut properties = if let Some(ref props) = polygon_data.properties {
                         // Convert serde_json::Value to HashMap<String, serde_json::Value>
                         if let serde_json::Value::Object(obj) = props {
                             let mut hashmap = std::collections::HashMap::new();
@@ -1605,6 +1605,24 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     } else {
                         None
                     };
+
+                    // Ensure layer metadata is available for downstream grouping
+                    let layer_name = input.vt_data_set.source_layer.clone();
+                    match properties {
+                        Some(ref mut props) => {
+                            props
+                                .entry("__sourceLayer".to_string())
+                                .or_insert(serde_json::Value::String(layer_name.clone()));
+                        }
+                        None => {
+                            let mut map = std::collections::HashMap::new();
+                            map.insert(
+                                "__sourceLayer".to_string(),
+                                serde_json::Value::String(layer_name.clone()),
+                            );
+                            properties = Some(map);
+                        }
+                    }
 
                     // Calculate scaling factor from meters to terrain units
                     let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
@@ -1622,7 +1640,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         &final_points,
                         height,
                         z_offset,
-                        properties.clone(),
+                        properties,
                         input.vt_data_set.align_vertices_to_terrain.unwrap_or(false),
                         Some(&input.elevation_grid),
                         Some(&input.grid_size),

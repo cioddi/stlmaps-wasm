@@ -12,6 +12,7 @@ export interface TerrainSettings {
   verticalExaggeration: number;
   baseHeight: number;
   color: string;
+  simpleMesh: boolean;
 }
 
 // Building settings interface  
@@ -319,7 +320,8 @@ export const useAppStore = create<AppState>()(
       enabled: true,
       verticalExaggeration: 2,
       baseHeight: 5,
-      color: "#db7329"
+      color: "#db7329",
+      simpleMesh: false
     },
     buildingSettings: {
       enabled: true,

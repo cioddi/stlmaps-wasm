@@ -170,7 +170,8 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
     for tile_request in &input.tiles {
         let key = create_tile_key(tile_request.x, tile_request.y, tile_request.z);
 
-        if let Some(tile_data) = ModuleState::with_mut(|state| state.get_raster_tile(&key).cloned()) {
+        if let Some(tile_data) = ModuleState::with_mut(|state| state.get_raster_tile(&key).cloned())
+        {
             tile_data_array.push(tile_data);
             cache_hits += 1;
         } else {

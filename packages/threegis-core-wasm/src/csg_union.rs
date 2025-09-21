@@ -25,33 +25,28 @@ struct FootprintGroup {
     max_z: f64,
 }
 
-pub fn merge_geometries_by_layer(geometries: Vec<BufferGeometry>) -> HashMap<String, BufferGeometry> {
+pub fn merge_geometries_by_layer(
+    geometries: Vec<BufferGeometry>,
+) -> HashMap<String, BufferGeometry> {
     if geometries.is_empty() {
         return HashMap::new();
     }
 
-    if let Some(footprint_geometry) = union_via_footprints(&geometries) {
-        if footprint_geometry.has_data {
-            let mut map = HashMap::new();
-            map.insert("merged_layer".to_string(), footprint_geometry);
-            return map;
+    let mut grouped: HashMap<String, Vec<BufferGeometry>> = HashMap::new();
+    for geometry in geometries.into_iter() {
+        let key = geometry_layer_key(&geometry);
+        grouped.entry(key).or_default().push(geometry);
+    }
+
+    let mut results = HashMap::new();
+    for (layer_key, group) in grouped.into_iter() {
+        let merged = merge_geometry_group(group);
+        if merged.has_data {
+            results.insert(layer_key, merged);
         }
     }
 
-    if let Some(csgrs_geometry) = csgrs_union(&geometries) {
-        if csgrs_geometry.has_data {
-            let mut map = HashMap::new();
-            map.insert("merged_layer".to_string(), csgrs_geometry);
-            return map;
-        }
-    }
-
-    let mut map = HashMap::new();
-    let merged = fallback_layer_union(geometries);
-    if merged.has_data {
-        map.insert("merged_layer".to_string(), merged);
-    }
-    map
+    results
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -65,10 +60,7 @@ fn union_via_footprints(geometries: &[BufferGeometry]) -> Option<BufferGeometry>
                 continue;
             }
 
-            let key = (
-                quantize_value(min_z, 1e-3),
-                quantize_value(depth, 1e-3),
-            );
+            let key = (quantize_value(min_z, 1e-3), quantize_value(depth, 1e-3));
 
             groups
                 .entry(key)
@@ -127,7 +119,10 @@ pub fn merge_geometries_with_spatial_grouping(
                 .vertices
                 .par_chunks_exact(3)
                 .map(|chunk| (chunk[0], chunk[1]))
-                .reduce(|| (0.0, 0.0), |acc, point| (acc.0 + point.0, acc.1 + point.1));
+                .reduce(
+                    || (0.0, 0.0),
+                    |acc, point| (acc.0 + point.0, acc.1 + point.1),
+                );
 
             let center = (
                 center_x / vertex_count as f32,
@@ -148,7 +143,10 @@ pub fn merge_geometries_with_spatial_grouping(
                     .vertices
                     .par_chunks_exact(3)
                     .map(|chunk| (chunk[0], chunk[1]))
-                    .reduce(|| (0.0, 0.0), |acc, point| (acc.0 + point.0, acc.1 + point.1));
+                    .reduce(
+                        || (0.0, 0.0),
+                        |acc, point| (acc.0 + point.0, acc.1 + point.1),
+                    );
                 let group_center = (
                     group_center_x / group_vertex_count as f32,
                     group_center_y / group_vertex_count as f32,
@@ -271,9 +269,21 @@ pub fn optimize_geometry(geometry: BufferGeometry, tolerance: f32) -> BufferGeom
     let has_data = !merged_vertices.is_empty();
     BufferGeometry {
         vertices: merged_vertices,
-        normals: if merged_normals.is_empty() { None } else { Some(merged_normals) },
-        colors: if merged_colors.is_empty() { None } else { Some(merged_colors) },
-        indices: if new_indices.is_empty() { None } else { Some(new_indices) },
+        normals: if merged_normals.is_empty() {
+            None
+        } else {
+            Some(merged_normals)
+        },
+        colors: if merged_colors.is_empty() {
+            None
+        } else {
+            Some(merged_colors)
+        },
+        indices: if new_indices.is_empty() {
+            None
+        } else {
+            Some(new_indices)
+        },
         uvs: None,
         has_data,
         properties: geometry.properties,
@@ -292,6 +302,26 @@ fn csgrs_union(geometries: &[BufferGeometry]) -> Option<BufferGeometry> {
 
     let reduced = pairwise_union(solids)?;
     csg_to_buffer_geometry(&reduced)
+}
+
+fn merge_geometry_group(group: Vec<BufferGeometry>) -> BufferGeometry {
+    if group.is_empty() {
+        return fallback_layer_union(group);
+    }
+
+    if let Some(footprint) = union_via_footprints(&group) {
+        if footprint.has_data {
+            return footprint;
+        }
+    }
+
+    if let Some(csg) = csgrs_union(&group) {
+        if csg.has_data {
+            return csg;
+        }
+    }
+
+    fallback_layer_union(group)
 }
 
 fn pairwise_union(mut solids: Vec<CSG<()>>) -> Option<CSG<()>> {
@@ -315,6 +345,30 @@ fn pairwise_union(mut solids: Vec<CSG<()>>) -> Option<CSG<()>> {
     }
 
     queue.pop_front()
+}
+
+fn geometry_layer_key(geometry: &BufferGeometry) -> String {
+    if let Some(props) = &geometry.properties {
+        for key in [
+            "layer",
+            "Layer",
+            "sourceLayer",
+            "source_layer",
+            "__sourceLayer",
+        ] {
+            if let Some(value) = props.get(key) {
+                if let Some(s) = value.as_str() {
+                    if !s.is_empty() {
+                        return s.to_string();
+                    }
+                } else if let Some(n) = value.as_i64() {
+                    return n.to_string();
+                }
+            }
+        }
+    }
+
+    "merged_layer".to_string()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -375,7 +429,8 @@ fn extrude_polygon_to_geometry(
     }
 
     let normals = {
-        let normal_js = Reflect::get(&extruded_js, &JsValue::from_str("normal")).unwrap_or(JsValue::NULL);
+        let normal_js =
+            Reflect::get(&extruded_js, &JsValue::from_str("normal")).unwrap_or(JsValue::NULL);
         if normal_js.is_null() {
             None
         } else {
@@ -387,7 +442,8 @@ fn extrude_polygon_to_geometry(
     };
 
     let indices = {
-        let index_js = Reflect::get(&extruded_js, &JsValue::from_str("index")).unwrap_or(JsValue::NULL);
+        let index_js =
+            Reflect::get(&extruded_js, &JsValue::from_str("index")).unwrap_or(JsValue::NULL);
         if index_js.is_null() {
             None
         } else {
@@ -448,11 +504,7 @@ fn linestring_to_ring(ls: &LineString<f64>, hole: bool) -> Option<Vec<[f64; 2]>>
         return None;
     }
 
-    let mut points: Vec<[f64; 2]> = ls
-        .0
-        .iter()
-        .map(|coord| [coord.x, coord.y])
-        .collect();
+    let mut points: Vec<[f64; 2]> = ls.0.iter().map(|coord| [coord.x, coord.y]).collect();
 
     if points.first() == points.last() {
         points.pop();
@@ -649,7 +701,8 @@ fn geometry_footprint(geometry: &BufferGeometry) -> Option<(MultiPolygon<f64>, f
             v1[0] * v2[1] - v1[1] * v2[0],
         ];
 
-        let normal_len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+        let normal_len =
+            (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
         if normal_len <= 1e-9 {
             continue;
         }
@@ -684,20 +737,6 @@ fn geometry_footprint(geometry: &BufferGeometry) -> Option<(MultiPolygon<f64>, f
     Some((footprint, min_z, max_z))
 }
 
-fn polygon_to_triangles(polygon: &CsgPolygon<()>) -> Vec<[CsgVertex; 3]> {
-    let mut triangles = polygon.tessellate();
-    if triangles.is_empty() && polygon.vertices.len() >= 3 {
-        for i in 1..(polygon.vertices.len() - 1) {
-            triangles.push([
-                polygon.vertices[0].clone(),
-                polygon.vertices[i].clone(),
-                polygon.vertices[i + 1].clone(),
-            ]);
-        }
-    }
-    triangles
-}
-
 fn geometry_centroid(vertices: &[f32]) -> Point3<Real> {
     let mut sum = Vector3::zeros();
     let mut count = 0.0;
@@ -724,7 +763,7 @@ fn csg_to_buffer_geometry(csg: &CSG<()>) -> Option<BufferGeometry> {
     let mut indices = Vec::new();
 
     for polygon in &csg.polygons {
-        for tri in polygon_to_triangles(polygon) {
+        for tri in polygon.tessellate() {
             for vertex in tri.iter() {
                 vertices.push(vertex.pos.x as f32);
                 vertices.push(vertex.pos.y as f32);
@@ -752,9 +791,17 @@ fn csg_to_buffer_geometry(csg: &CSG<()>) -> Option<BufferGeometry> {
 
     Some(BufferGeometry {
         vertices,
-        normals: if normals.is_empty() { None } else { Some(normals) },
+        normals: if normals.is_empty() {
+            None
+        } else {
+            Some(normals)
+        },
         colors: None,
-        indices: if indices.is_empty() { None } else { Some(indices) },
+        indices: if indices.is_empty() {
+            None
+        } else {
+            Some(indices)
+        },
         uvs: None,
         has_data: true,
         properties: None,
@@ -915,7 +962,11 @@ fn fallback_layer_union(geometries: Vec<BufferGeometry>) -> BufferGeometry {
     BufferGeometry {
         vertices,
         normals: Some(normals),
-        colors: if has_global_colors { Some(colors) } else { None },
+        colors: if has_global_colors {
+            Some(colors)
+        } else {
+            None
+        },
         indices: Some(final_indices),
         uvs: None,
         has_data: true,
@@ -999,20 +1050,10 @@ mod tests {
     fn tetra_buffer(scale: f32) -> BufferGeometry {
         let s = scale;
         BufferGeometry {
-            vertices: vec![
-                s, s, s,
-                -s, -s, s,
-                -s, s, -s,
-                s, -s, -s,
-            ],
+            vertices: vec![s, s, s, -s, -s, s, -s, s, -s, s, -s, -s],
             normals: None,
             colors: None,
-            indices: Some(vec![
-                0, 1, 2,
-                0, 3, 1,
-                0, 2, 3,
-                1, 3, 2,
-            ]),
+            indices: Some(vec![0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2]),
             uvs: None,
             has_data: true,
             properties: None,
@@ -1023,23 +1064,35 @@ mod tests {
         let (cx, cy, cz) = center;
         let h = half;
         let vertices = vec![
-            cx - h, cy - h, cz - h,
-            cx + h, cy - h, cz - h,
-            cx + h, cy + h, cz - h,
-            cx - h, cy + h, cz - h,
-            cx - h, cy - h, cz + h,
-            cx + h, cy - h, cz + h,
-            cx + h, cy + h, cz + h,
-            cx - h, cy + h, cz + h,
+            cx - h,
+            cy - h,
+            cz - h,
+            cx + h,
+            cy - h,
+            cz - h,
+            cx + h,
+            cy + h,
+            cz - h,
+            cx - h,
+            cy + h,
+            cz - h,
+            cx - h,
+            cy - h,
+            cz + h,
+            cx + h,
+            cy - h,
+            cz + h,
+            cx + h,
+            cy + h,
+            cz + h,
+            cx - h,
+            cy + h,
+            cz + h,
         ];
 
         let indices = vec![
-            0, 2, 1, 0, 3, 2,
-            4, 5, 6, 4, 6, 7,
-            0, 1, 5, 0, 5, 4,
-            2, 7, 6, 2, 3, 7,
-            1, 2, 6, 1, 6, 5,
-            0, 4, 7, 0, 7, 3,
+            0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 7, 6, 2, 3, 7, 1, 2, 6, 1, 6,
+            5, 0, 4, 7, 0, 7, 3,
         ];
 
         BufferGeometry {

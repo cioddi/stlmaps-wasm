@@ -575,30 +575,38 @@ export function useGenerateMesh() {
     });
 
     try {
-      // Process elevation data
-      const elevationResult = await processElevationForBbox(bboxCoords, processId);
+      if (!terrainSettings.simpleMesh) {
+        // Process elevation data
+        const elevationResult = await processElevationForBbox(bboxCoords, processId);
 
-      onProgress({
-        stage: 'terrain',
-        percentage: 10,
-        message: 'Generating terrain mesh...'
-      });
+        onProgress({
+          stage: 'terrain',
+          percentage: 10,
+          message: 'Generating terrain mesh...'
+        });
 
-      // Store terrain data in app state
-      setProcessedTerrainData({
-        processedElevationGrid: elevationResult.elevationGrid,
-        processedMinElevation: elevationResult.minElevation,
-        processedMaxElevation: elevationResult.maxElevation,
-      });
+        // Store terrain data in app state
+        setProcessedTerrainData({
+          processedElevationGrid: elevationResult.elevationGrid,
+          processedMinElevation: elevationResult.minElevation,
+          processedMaxElevation: elevationResult.maxElevation,
+        });
 
-      // Re-register elevation data for terrain generation
-      await processElevationForBbox(bboxCoords, processId);
+        // Re-register elevation data for terrain generation
+        await processElevationForBbox(bboxCoords, processId);
 
-      onProgress({
-        stage: 'terrain',
-        percentage: 15,
-        message: 'Creating terrain geometry...'
-      });
+        onProgress({
+          stage: 'terrain',
+          percentage: 15,
+          message: 'Creating terrain geometry...'
+        });
+      } else {
+        onProgress({
+          stage: 'terrain',
+          percentage: 15,
+          message: 'Skipping Raster DEM processing (simple terrain)...'
+        });
+      }
 
       // Create terrain geometry using WASM (main thread)
       const wasmModule = getWasmModule();
@@ -610,6 +618,7 @@ export function useGenerateMesh() {
         vertical_exaggeration: terrainSettings.verticalExaggeration,
         terrain_base_height: terrainSettings.baseHeight,
         process_id: processId,
+        use_simple_mesh: terrainSettings.simpleMesh,
       };
 
       const wasmTerrainResult = await wasmModule.create_terrain_geometry(terrainParams);
@@ -627,6 +636,9 @@ export function useGenerateMesh() {
       geometry.setAttribute("color", new THREE.BufferAttribute(wasmTerrainResult.colors, 3));
       geometry.setIndex(new THREE.BufferAttribute(wasmTerrainResult.indices, 1));
 
+      const gridHeight = wasmTerrainResult.processedElevationGrid.length;
+      const gridWidth = gridHeight > 0 ? wasmTerrainResult.processedElevationGrid[0].length : 0;
+
       const result: TerrainProcessingResult = {
         terrainGeometry: geometry,
         processedElevationGrid: wasmTerrainResult.processedElevationGrid,
@@ -634,8 +646,17 @@ export function useGenerateMesh() {
         processedMaxElevation: wasmTerrainResult.processedMaxElevation,
         originalMinElevation: wasmTerrainResult.originalMinElevation,
         originalMaxElevation: wasmTerrainResult.originalMaxElevation,
-        gridSize: elevationResult.gridSize
+        gridSize: {
+          width: gridWidth,
+          height: gridHeight
+        }
       };
+
+      setProcessedTerrainData({
+        processedElevationGrid: wasmTerrainResult.processedElevationGrid,
+        processedMinElevation: wasmTerrainResult.processedMinElevation,
+        processedMaxElevation: wasmTerrainResult.processedMaxElevation
+      });
 
       console.log('🏔️ Terrain processing completed successfully', {
         vertexCount: wasmTerrainResult.positions.length / 3,

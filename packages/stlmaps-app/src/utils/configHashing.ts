@@ -11,6 +11,7 @@ export function hashTerrainConfig(config: TerrainSettings): string {
     verticalExaggeration: config.verticalExaggeration,
     // baseHeight excluded - can be updated in real-time
     // Color is excluded to prevent geometry regeneration on color changes
+    simpleMesh: config.simpleMesh,
   });
 }
 

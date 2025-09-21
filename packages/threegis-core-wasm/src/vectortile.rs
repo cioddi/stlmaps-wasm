@@ -563,9 +563,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     // Try to access cached vector tile data using the provided process_id
     let vector_tiles_data = match ModuleState::with(|state| {
-        state
-            .get_process_vector_tiles(&input.process_id)
-            .cloned()
+        state.get_process_vector_tiles(&input.process_id).cloned()
     }) {
         Some(tiles) => tiles,
         None => {
@@ -664,7 +662,9 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
         // Use cached parsed MVT tile if available, otherwise parse and cache it
         let cache_key = format!("{}/{}/{}", tile_z, tile_x, tile_y);
-        let parsed_tile = if let Some(cached) = ModuleState::with(|state| state.get_parsed_mvt_tile(&cache_key)) {
+        let parsed_tile = if let Some(cached) =
+            ModuleState::with(|state| state.get_parsed_mvt_tile(&cache_key))
+        {
             cached
         } else {
             match enhanced_parse_mvt_data(
@@ -1133,11 +1133,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let cached_value_str =
             serde_json::to_string(&geometry_data_list).map_err(|e| JsValue::from(e.to_string()))?;
         ModuleState::with_mut(|state| {
-            state.add_process_feature_data(
-                &input.process_id,
-                &data_key,
-                cached_value_str.clone(),
-            );
+            state.add_process_feature_data(&input.process_id, &data_key, cached_value_str.clone());
         });
     }
     // Return undefined since data is cached at process level
