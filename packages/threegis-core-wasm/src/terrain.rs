@@ -307,7 +307,13 @@ fn remove_outliers(
     (final_result, final_min, final_max)
 }
 
+// Check if GPU terrain acceleration is available
+pub async fn check_gpu_terrain_support() -> bool {
+    crate::gpu_terrain::init_gpu_terrain_processor().await.unwrap_or(false)
+}
+
 // Main function to create terrain geometry from elevation data with retry mechanism
+// Now with GPU acceleration support
 #[wasm_bindgen]
 pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse parameters
@@ -431,6 +437,26 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
         processed_max_elevation: clean_max,
         cache_hit_rate: 1.0, // Not important for this function
     };
+
+    // Try GPU terrain generation first, fall back to CPU if needed
+    let use_gpu_terrain = std::env::var("WASM_GPU_TERRAIN_DISABLE").is_err();
+
+    if use_gpu_terrain {
+        match crate::gpu_terrain::generate_terrain_mesh_gpu(&elevation_result, &params).await {
+            Ok(gpu_result) => {
+                crate::console_log!("GPU terrain generation completed successfully!");
+                let js_result = convert_terrain_geometry_to_js(gpu_result)?;
+                return Ok(js_result);
+            }
+            Err(e) => {
+                crate::console_log!("GPU terrain generation failed ({}), falling back to CPU",
+                    e.as_string().unwrap_or_else(|| "unknown error".to_string()));
+            }
+        }
+    }
+
+    // CPU fallback processing (original implementation)
+    crate::console_log!("Using CPU terrain generation");
 
     // Create terrain geometry
     let result = generate_terrain_mesh(

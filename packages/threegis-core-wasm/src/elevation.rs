@@ -142,7 +142,14 @@ pub async fn fetch_raster_tile(x: u32, y: u32, z: u32) -> Result<TileData, JsVal
     Ok(tile_data)
 }
 
+// Check if GPU acceleration is available
+#[wasm_bindgen]
+pub async fn check_gpu_support() -> bool {
+    crate::gpu_elevation::init_gpu_elevation_processor().await.unwrap_or(false)
+}
+
 // The main elevation processing function that uses cached tiles when available
+// Now with GPU acceleration support
 #[wasm_bindgen]
 pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, JsValue> {
     // Parse the input JSON
@@ -193,6 +200,27 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
             }
         }
     }
+
+    // Try GPU acceleration first, fall back to CPU if needed
+    let use_gpu = std::env::var("WASM_GPU_DISABLE").is_err(); // Allow disabling GPU via env var
+
+    if use_gpu && tile_data_array.len() > 0 {
+        match crate::gpu_elevation::process_elevation_gpu(&input, &tile_data_array).await {
+            Ok(gpu_result) => {
+                // GPU processing succeeded
+                crate::console_log!("GPU elevation processing completed successfully!");
+                return Ok(to_value(&gpu_result)?);
+            }
+            Err(e) => {
+                // GPU processing failed, fall back to CPU
+                crate::console_log!("GPU processing failed ({}), falling back to CPU",
+                    e.as_string().unwrap_or_else(|| "unknown error".to_string()));
+            }
+        }
+    }
+
+    // CPU fallback processing (original implementation)
+    crate::console_log!("Using CPU elevation processing");
 
     // Replace previous per-tile pixel loop with grid-based accumulation
 

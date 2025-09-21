@@ -1707,6 +1707,35 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     }
 }
 
+// GPU-accelerated linestring buffering with CPU fallback
+async fn create_linestring_buffer_gpu_fallback(linestring: &[Vec<f64>], buffer_distance: f64) -> Vec<Vector2> {
+    let use_gpu = std::env::var("WASM_GPU_POLYGON_DISABLE").is_err();
+
+    if use_gpu && linestring.len() >= 4 { // Only use GPU for reasonably large linestrings
+        // Convert to format expected by GPU function
+        let points: Vec<[f64; 2]> = linestring
+            .iter()
+            .filter_map(|p| if p.len() >= 2 { Some([p[0], p[1]]) } else { None })
+            .collect();
+
+        if points.len() >= 2 {
+            match crate::gpu_polygon::buffer_linestring_gpu(&points, buffer_distance).await {
+                Ok(gpu_result) => {
+                    crate::console_log!("GPU linestring buffering completed successfully for {} points", points.len());
+                    return gpu_result.into_iter().map(|p| Vector2 { x: p[0], y: p[1] }).collect();
+                }
+                Err(e) => {
+                    crate::console_log!("GPU linestring buffering failed ({}), falling back to CPU",
+                        e.as_string().unwrap_or_else(|| "unknown error".to_string()));
+                }
+            }
+        }
+    }
+
+    // CPU fallback
+    create_linestring_buffer(linestring, buffer_distance)
+}
+
 // Create a proper buffered polygon from a linestring with even width throughout
 fn create_linestring_buffer(linestring: &[Vec<f64>], buffer_distance: f64) -> Vec<Vector2> {
     if linestring.len() < 2 {

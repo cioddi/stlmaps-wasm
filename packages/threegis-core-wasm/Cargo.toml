@@ -33,6 +33,13 @@ rayon = "1.8"
 num_cpus = "1.16"
 parking_lot = "0.12"
 csgrs = { version = "0.17.3", default-features = false, features = ["f64", "earcut"] }
+# WebGPU dependencies for GPU acceleration
+wgpu = { version = "0.19", features = ["webgl"] }
+pollster = "0.3"
+bytemuck = { version = "1.14", features = ["derive"] }
+wgpu-core = "0.19"
+wgpu-hal = "0.19"
+futures = "0.3"
 
 # Use the latest geo crate from main branch for unreleased buffer features
 geo = { version = "0.31.0", features = ["use-serde"] }
