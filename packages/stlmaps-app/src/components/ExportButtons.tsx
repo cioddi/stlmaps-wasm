@@ -42,11 +42,7 @@ const ExportButtons: React.FC = () => {
   // State for dialog
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
   
-  // State for download URLs
-  const [objDownloadUrl, setObjDownloadUrl] = useState<string>("");
-  const [stlDownloadUrl, setStlDownloadUrl] = useState<string>("");
-  const [gltfDownloadUrl, setGltfDownloadUrl] = useState<string>("");
-  const [threemfDownloadUrl, setThreemfDownloadUrl] = useState<string>("");
+  // Downloads are now handled immediately in export functions
   
   // State for loading indicators
   const [loading, setLoading] = useState<{obj: boolean, stl: boolean, gltf: boolean, threemf: boolean}>({
@@ -88,15 +84,7 @@ const ExportButtons: React.FC = () => {
     },
   ];
 
-  // Cleanup function to revoke object URLs when component unmounts
-  useEffect(() => {
-    return () => {
-      if (objDownloadUrl) URL.revokeObjectURL(objDownloadUrl);
-      if (stlDownloadUrl) URL.revokeObjectURL(stlDownloadUrl);
-      if (gltfDownloadUrl) URL.revokeObjectURL(gltfDownloadUrl);
-      if (threemfDownloadUrl) URL.revokeObjectURL(threemfDownloadUrl);
-    };
-  }, [objDownloadUrl, stlDownloadUrl, gltfDownloadUrl, threemfDownloadUrl]);
+  // No cleanup needed - URLs are revoked immediately after downloads
 
   // Helper function to validate and fix geometry indices
   const validateGeometry = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => {
@@ -484,12 +472,22 @@ const ExportButtons: React.FC = () => {
       const blob = new Blob([objString], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       
-      // Set the download URL
-      setObjDownloadUrl(url);
-      
-      console.log("OBJ file generated successfully");
+      // Trigger immediate download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'model.obj';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Clean up URL
+      URL.revokeObjectURL(url);
+
+      console.log("OBJ file generated and downloaded successfully");
     } catch (error) {
       console.error("Error generating OBJ file:", error);
+    } finally {
+      setLoading(prev => ({ ...prev, obj: false }));
     }
   };
   
@@ -508,12 +506,22 @@ const ExportButtons: React.FC = () => {
       const blob = new Blob([stlString], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
       
-      // Set the download URL
-      setStlDownloadUrl(url);
-      
-      console.log("STL file generated successfully");
+      // Trigger immediate download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'model.stl';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Clean up URL
+      URL.revokeObjectURL(url);
+
+      console.log("STL file generated and downloaded successfully");
     } catch (error) {
       console.error("Error generating STL file:", error);
+    } finally {
+      setLoading(prev => ({ ...prev, stl: false }));
     }
   };
   
@@ -540,9 +548,20 @@ const ExportButtons: React.FC = () => {
           }
           
           const url = URL.createObjectURL(blob);
-          setGltfDownloadUrl(url);
-          console.log("GLTF/GLB file generated successfully");
-          
+
+          // Trigger immediate download
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'model.glb';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+
+          // Clean up URL
+          URL.revokeObjectURL(url);
+
+          console.log("GLTF/GLB file generated and downloaded successfully");
+
           // Update loading state when complete
           setLoading(prev => ({ ...prev, gltf: false }));
         },
@@ -717,11 +736,19 @@ const ExportButtons: React.FC = () => {
       
       const blob = zipBlob;
       const url = URL.createObjectURL(blob);
-      
-      // Set the download URL
-      setThreemfDownloadUrl(url);
-      
-      console.log("3MF file generated successfully");
+
+      // Trigger immediate download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'model.3mf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Clean up URL
+      URL.revokeObjectURL(url);
+
+      console.log("3MF file generated and downloaded successfully");
       setLoading(prev => ({ ...prev, threemf: false }));
     } catch (error) {
       console.error("Error generating 3MF file:", error);
@@ -768,35 +795,31 @@ const ExportButtons: React.FC = () => {
     setDialogOpen(false);
   };
 
-  // Get download URL and handler for a specific format
+  // Get handler and loading state for a specific format
   const getFormatData = (formatId: string) => {
     switch(formatId) {
       case 'obj':
         return {
-          url: objDownloadUrl,
           isLoading: loading.obj,
           handler: handleObjExport,
         };
       case 'stl':
         return {
-          url: stlDownloadUrl,
           isLoading: loading.stl,
           handler: handleStlExport,
         };
       case 'glb':
         return {
-          url: gltfDownloadUrl,
           isLoading: loading.gltf,
           handler: handleGltfExport,
         };
       case '3mf':
         return {
-          url: threemfDownloadUrl,
           isLoading: loading.threemf,
           handler: handle3MFExport,
         };
       default:
-        return { url: '', isLoading: false, handler: () => {} };
+        return { isLoading: false, handler: () => {} };
     }
   };
 
@@ -857,7 +880,7 @@ const ExportButtons: React.FC = () => {
           
           <Grid container spacing={isMobile ? 2 : 3}>
             {exportFormats.map((format) => {
-              const { url, isLoading, handler } = getFormatData(format.id);
+              const { isLoading, handler } = getFormatData(format.id);
               return (
                 <Grid size={{ xs: 12, sm: 6 }} key={format.id}>
                   <Paper 
@@ -893,33 +916,14 @@ const ExportButtons: React.FC = () => {
                         {format.description}
                       </Typography>
                       <Button
-                        variant={url ? "contained" : "outlined"}
-                        onClick={url ? () => {
-                          // Trigger download and reset to generate state
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `model.${format.fileExtension}`;
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-
-                          // Reset URL to return button to "Generate" state
-                          setTimeout(() => {
-                            switch(format.id) {
-                              case 'obj': setObjDownloadUrl(''); break;
-                              case 'stl': setStlDownloadUrl(''); break;
-                              case 'glb': setGltfDownloadUrl(''); break;
-                              case '3mf': setThreemfDownloadUrl(''); break;
-                            }
-                          }, 100);
-                        } : handler}
+                        variant="outlined"
+                        onClick={handler}
                         disabled={isDisabled || isLoading}
-                        startIcon={url ? <FileDownloadIcon /> : (isLoading ? null : <ModelTrainingIcon />)}
+                        startIcon={isLoading ? null : <ModelTrainingIcon />}
                         fullWidth={isMobile}
                         size={isMobile ? "small" : "medium"}
                       >
-                        {url ? `Download ${format.fileExtension.toUpperCase()}` :
-                         (isLoading ? "Generating..." : `Generate ${format.fileExtension.toUpperCase()}`)}
+                        {isLoading ? "Generating..." : `Generate ${format.fileExtension.toUpperCase()}`}
                       </Button>
                     </Box>
                   </Paper>
