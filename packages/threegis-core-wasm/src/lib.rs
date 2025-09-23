@@ -23,6 +23,8 @@ mod cache_keys;
 mod cache_manager;
 // Import our terrain geometry generation module
 mod terrain;
+// Import our new mesh-based terrain generation module
+mod terrain_mesh_gen;
 // Import our vector tile processing module
 mod vectortile;
 // Import our geojson features module

@@ -629,7 +629,7 @@ export function useGenerateMesh() {
         message: 'Terrain processing complete'
       });
 
-      // Convert WASM TypedArrays to THREE.js BufferGeometry directly
+      // Convert WASM TypedArrays to THREE.js BufferGeometry
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(wasmTerrainResult.positions, 3));
       geometry.setAttribute("normal", new THREE.BufferAttribute(wasmTerrainResult.normals, 3));
