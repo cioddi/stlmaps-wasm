@@ -131,13 +131,26 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
         cache_hit_rate: 1.0,
     };
 
-    // Try GPU terrain generation first, fall back to CPU if needed
-    let use_gpu_terrain = std::env::var("WASM_GPU_TERRAIN_DISABLE").is_err();
+    // IMPORTANT: Use manifold CPU terrain generation by default
+    //
+    // The GPU terrain generation (gpu_terrain.rs) creates non-manifold geometry due to:
+    // 1. Interleaved vertex structure (top/bottom pairs) instead of layered structure
+    // 2. Quad-by-quad index generation instead of systematic manifold triangulation
+    // 3. Different vertex ordering that doesn't guarantee shared edges between triangles
+    //
+    // The CPU implementation (terrain_mesh_gen.rs) produces guaranteed manifold geometry by:
+    // 1. Using layered vertex structure (all bottom vertices first, then all top vertices)
+    // 2. Following the same manifold triangulation pattern as building extrusion
+    // 3. Systematic edge sharing that ensures each edge appears exactly twice
+    //
+    // GPU terrain can still be forced with WASM_GPU_TERRAIN_FORCE environment variable
+    let use_gpu_terrain = std::env::var("WASM_GPU_TERRAIN_FORCE").is_ok();
 
     if use_gpu_terrain {
+        crate::console_log!("WARNING: Using GPU terrain generation which produces non-manifold geometry");
         match crate::gpu_terrain::generate_terrain_mesh_gpu(&elevation_result, &params).await {
             Ok(gpu_result) => {
-                crate::console_log!("GPU terrain generation completed successfully!");
+                crate::console_log!("GPU terrain generation completed successfully (non-manifold)!");
                 let js_result = convert_terrain_geometry_to_js(gpu_result)?;
                 return Ok(js_result);
             }
@@ -148,8 +161,8 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
         }
     }
 
-    // Use new mesh-based terrain generation (CPU fallback)
-    crate::console_log!("Using new mesh-cutting terrain generation");
+    // Use manifold mesh-based terrain generation (CPU - produces guaranteed manifold geometry)
+    crate::console_log!("Using manifold mesh-cutting terrain generation");
 
     match terrain_mesh_gen::generate_terrain_with_mesh_cutting(&elevation_result, &params) {
         Ok(result) => {

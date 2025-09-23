@@ -1,8 +1,8 @@
-// Terrain mesh generation with rectangular faces (no manual triangulation)
+// Terrain mesh generation with proper manifold triangulation
 use crate::elevation::ElevationProcessingResult;
 use crate::terrain::{TerrainGeometryParams, TerrainGeometryResult};
 
-const TARGET_TERRAIN_RESOLUTION: usize = 64;
+// Terrain resolution is now dynamically determined from elevation data
 const MIN_TERRAIN_THICKNESS: f32 = 0.3;
 const MESH_SIZE_METERS: f32 = 200.0;
 const LIGHT_BROWN: [f32; 3] = [0.82, 0.71, 0.55];
@@ -162,8 +162,8 @@ fn generate_triangle_normals(positions: &[f32], indices: &[u32]) -> Vec<f32> {
     normals
 }
 
-/// Create rectangular mesh with proper quad topology
-fn create_rectangular_terrain_mesh(
+/// Create a manifold terrain mesh with proper vertex sharing
+fn create_manifold_terrain_mesh(
     width_segments: usize,
     height_segments: usize,
     base_height: f32,
@@ -197,7 +197,7 @@ fn create_rectangular_terrain_mesh(
 
     // Create triangular indices using the same manifold method as buildings
     // Helper function to push triangle with proper winding
-    let mut push_triangle = |indices_array: &mut Vec<u32>, i0: u32, i1: u32, i2: u32| {
+    let push_triangle = |indices_array: &mut Vec<u32>, i0: u32, i1: u32, i2: u32| {
         indices_array.push(i0);
         indices_array.push(i1);
         indices_array.push(i2);
@@ -215,10 +215,10 @@ fn create_rectangular_terrain_mesh(
             let bottom_br = ((y + 1) * grid_width + x + 1) as u32;
 
             // Top layer vertex indices (like buildings top face)
-            let top_tl = (bottom_tl + total_vertices_per_layer as u32);
-            let top_tr = (bottom_tr + total_vertices_per_layer as u32);
-            let top_bl = (bottom_bl + total_vertices_per_layer as u32);
-            let top_br = (bottom_br + total_vertices_per_layer as u32);
+            let top_tl = bottom_tl + total_vertices_per_layer as u32;
+            let top_tr = bottom_tr + total_vertices_per_layer as u32;
+            let top_bl = bottom_bl + total_vertices_per_layer as u32;
+            let top_br = bottom_br + total_vertices_per_layer as u32;
 
             // Bottom surface triangles (reversed winding like buildings)
             push_triangle(&mut indices, bottom_tl, bottom_bl, bottom_tr);
@@ -275,15 +275,167 @@ fn create_rectangular_terrain_mesh(
     (positions, indices)
 }
 
-/// Main function to generate terrain using rectangular mesh approach
+/// Test function to verify terrain mesh is manifold using csgrs
+#[cfg(test)]
+pub fn test_manifold_terrain_mesh() -> Result<bool, String> {
+    use csgrs::{CSG, Vertex};
+    use nalgebra::Point3;
+    use csgrs::polygon::Polygon;
+
+    // Create a simple 3x3 terrain mesh for testing
+    let (positions, indices) = create_manifold_terrain_mesh(3, 3, 10.0);
+
+    // Convert to csgrs format - create triangular polygons
+    let mut polygons = Vec::new();
+
+    for triangle_chunk in indices.chunks_exact(3) {
+        let i0 = triangle_chunk[0] as usize;
+        let i1 = triangle_chunk[1] as usize;
+        let i2 = triangle_chunk[2] as usize;
+
+        let v0_pos = [positions[i0 * 3], positions[i0 * 3 + 1], positions[i0 * 3 + 2]];
+        let v1_pos = [positions[i1 * 3], positions[i1 * 3 + 1], positions[i1 * 3 + 2]];
+        let v2_pos = [positions[i2 * 3], positions[i2 * 3 + 1], positions[i2 * 3 + 2]];
+
+        let p0 = Point3::new(v0_pos[0] as f64, v0_pos[1] as f64, v0_pos[2] as f64);
+        let p1 = Point3::new(v1_pos[0] as f64, v1_pos[1] as f64, v1_pos[2] as f64);
+        let p2 = Point3::new(v2_pos[0] as f64, v2_pos[1] as f64, v2_pos[2] as f64);
+
+        // Calculate normal for the triangle
+        let edge1 = p1 - p0;
+        let edge2 = p2 - p0;
+        let normal = edge1.cross(&edge2).normalize();
+
+        let vertex0 = Vertex::new(p0, normal);
+        let vertex1 = Vertex::new(p1, normal);
+        let vertex2 = Vertex::new(p2, normal);
+
+        let polygon = Polygon::new(vec![vertex0, vertex1, vertex2], None);
+        polygons.push(polygon);
+    }
+
+    // Create CSG and check if manifold
+    let csg: CSG<()> = CSG::from_polygons(&polygons);
+    Ok(csg.is_manifold())
+}
+
+/// Test function to verify the full terrain generation pipeline produces manifold mesh
+#[cfg(test)]
+pub fn test_full_terrain_generation_manifold() -> Result<bool, String> {
+    use csgrs::{CSG, Vertex};
+    use nalgebra::Point3;
+    use csgrs::polygon::Polygon;
+
+    // Create fake DEM data - a simple 8x8 grid with realistic elevation values
+    let grid_size = 8;
+    let mut elevation_grid = Vec::new();
+
+    for y in 0..grid_size {
+        let mut row = Vec::new();
+        for x in 0..grid_size {
+            // Create a simple hill pattern - higher in the center
+            let center_x = grid_size as f64 / 2.0;
+            let center_y = grid_size as f64 / 2.0;
+            let dist_from_center = ((x as f64 - center_x).powi(2) + (y as f64 - center_y).powi(2)).sqrt();
+            let max_dist = (center_x.powi(2) + center_y.powi(2)).sqrt();
+            let normalized_dist = (dist_from_center / max_dist).min(1.0);
+            // Create a hill that goes from 20m at center to 5m at edges
+            let elevation = 20.0 - (normalized_dist * 15.0);
+            row.push(elevation);
+        }
+        elevation_grid.push(row);
+    }
+
+    // Create fake elevation processing result
+    let elevation_data = ElevationProcessingResult {
+        elevation_grid,
+        grid_size: crate::elevation::GridSize {
+            width: grid_size as u32,
+            height: grid_size as u32,
+        },
+        min_elevation: 5.0,
+        max_elevation: 20.0,
+        processed_min_elevation: 5.0,
+        processed_max_elevation: 20.0,
+        cache_hit_rate: 1.0,
+    };
+
+    // Create terrain parameters
+    let params = crate::terrain::TerrainGeometryParams {
+        min_lng: -122.5,
+        min_lat: 37.7,
+        max_lng: -122.4,
+        max_lat: 37.8,
+        vertical_exaggeration: 2.0,
+        terrain_base_height: 1.0,
+        process_id: "test".to_string(),
+    };
+
+    // Generate terrain using the full pipeline
+    let terrain_result = generate_terrain_with_mesh_cutting(&elevation_data, &params)
+        .map_err(|e| format!("Terrain generation failed: {}", e))?;
+
+    // Convert to csgrs format - create triangular polygons
+    let mut polygons = Vec::new();
+
+    for triangle_chunk in terrain_result.indices.chunks_exact(3) {
+        let i0 = triangle_chunk[0] as usize;
+        let i1 = triangle_chunk[1] as usize;
+        let i2 = triangle_chunk[2] as usize;
+
+        let v0_pos = [terrain_result.positions[i0 * 3], terrain_result.positions[i0 * 3 + 1], terrain_result.positions[i0 * 3 + 2]];
+        let v1_pos = [terrain_result.positions[i1 * 3], terrain_result.positions[i1 * 3 + 1], terrain_result.positions[i1 * 3 + 2]];
+        let v2_pos = [terrain_result.positions[i2 * 3], terrain_result.positions[i2 * 3 + 1], terrain_result.positions[i2 * 3 + 2]];
+
+        let p0 = Point3::new(v0_pos[0] as f64, v0_pos[1] as f64, v0_pos[2] as f64);
+        let p1 = Point3::new(v1_pos[0] as f64, v1_pos[1] as f64, v1_pos[2] as f64);
+        let p2 = Point3::new(v2_pos[0] as f64, v2_pos[1] as f64, v2_pos[2] as f64);
+
+        // Calculate normal for the triangle
+        let edge1 = p1 - p0;
+        let edge2 = p2 - p0;
+        let normal = edge1.cross(&edge2);
+
+        // Check for degenerate triangles (zero area)
+        if normal.norm() < 1e-12 {
+            continue; // Skip degenerate triangles
+        }
+
+        let normal = normal.normalize();
+
+        let vertex0 = Vertex::new(p0, normal);
+        let vertex1 = Vertex::new(p1, normal);
+        let vertex2 = Vertex::new(p2, normal);
+
+        let polygon = Polygon::new(vec![vertex0, vertex1, vertex2], None);
+        polygons.push(polygon);
+    }
+
+    println!("Generated {} triangular polygons from full terrain pipeline", polygons.len());
+    println!("Total positions: {}, indices: {}", terrain_result.positions.len() / 3, terrain_result.indices.len() / 3);
+
+    // Create CSG and check if manifold
+    let csg: CSG<()> = CSG::from_polygons(&polygons);
+    Ok(csg.is_manifold())
+}
+
+/// Main function to generate terrain using the new mesh-based approach
 pub fn generate_terrain_with_mesh_cutting(
     elevation_data: &ElevationProcessingResult,
     params: &TerrainGeometryParams,
 ) -> Result<TerrainGeometryResult, String> {
-    // Create base rectangular mesh with consistent quad topology
-    let (mut positions, indices) = create_rectangular_terrain_mesh(
-        TARGET_TERRAIN_RESOLUTION,
-        TARGET_TERRAIN_RESOLUTION,
+    // Use elevation data resolution directly to avoid interpolation issues
+    let mesh_width = (elevation_data.grid_size.width - 1) as usize;
+    let mesh_height = (elevation_data.grid_size.height - 1) as usize;
+
+    // Ensure minimum resolution
+    let mesh_width = mesh_width.max(3);
+    let mesh_height = mesh_height.max(3);
+
+    // Create base manifold mesh
+    let (mut positions, indices) = create_manifold_terrain_mesh(
+        mesh_width,
+        mesh_height,
         params.terrain_base_height as f32,
     );
 
@@ -292,8 +444,8 @@ pub fn generate_terrain_with_mesh_cutting(
         &mut positions,
         elevation_data,
         params,
-        TARGET_TERRAIN_RESOLUTION,
-        TARGET_TERRAIN_RESOLUTION,
+        mesh_width,
+        mesh_height,
     )?;
 
     // Generate colors based on final vertex positions
@@ -302,24 +454,8 @@ pub fn generate_terrain_with_mesh_cutting(
     // Generate normals for triangular faces (same method as buildings)
     let normals = generate_triangle_normals(&positions, &indices);
 
-    // Create processed elevation grid for output
-    let mut processed_elevation_grid = Vec::new();
-    let grid_size = TARGET_TERRAIN_RESOLUTION;
-    for y in 0..grid_size {
-        let mut row = Vec::new();
-        for x in 0..grid_size {
-            let normalized_x = x as f64 / (grid_size - 1) as f64;
-            let normalized_y = y as f64 / (grid_size - 1) as f64;
-
-            let src_x = (normalized_x * (elevation_data.grid_size.width - 1) as f64) as usize;
-            let src_y = (normalized_y * (elevation_data.grid_size.height - 1) as f64) as usize;
-            let src_x = src_x.min(elevation_data.elevation_grid[0].len() - 1);
-            let src_y = src_y.min(elevation_data.elevation_grid.len() - 1);
-
-            row.push(elevation_data.elevation_grid[src_y][src_x]);
-        }
-        processed_elevation_grid.push(row);
-    }
+    // Create processed elevation grid for output - use original data directly
+    let processed_elevation_grid = elevation_data.elevation_grid.clone();
 
     Ok(TerrainGeometryResult {
         positions,
@@ -332,4 +468,35 @@ pub fn generate_terrain_with_mesh_cutting(
         original_min_elevation: elevation_data.min_elevation,
         original_max_elevation: elevation_data.max_elevation,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_terrain_mesh_is_manifold() {
+        match test_manifold_terrain_mesh() {
+            Ok(is_manifold) => {
+                println!("Terrain mesh manifold test result: {}", is_manifold);
+                assert!(is_manifold, "Terrain mesh should be manifold!");
+            }
+            Err(e) => {
+                panic!("Failed to test manifold: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_full_terrain_generation_with_fake_dem_is_manifold() {
+        match test_full_terrain_generation_manifold() {
+            Ok(is_manifold) => {
+                println!("Full terrain generation with DEM manifold test result: {}", is_manifold);
+                assert!(is_manifold, "Full terrain generation should produce manifold mesh!");
+            }
+            Err(e) => {
+                panic!("Failed to test full terrain generation manifold: {}", e);
+            }
+        }
+    }
 }

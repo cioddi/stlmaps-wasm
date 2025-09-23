@@ -144,11 +144,9 @@ const ExportButtons: React.FC = () => {
       }
     }
     
-    // Create non-indexed geometry if needed (safer for exports)
-    if (validatedGeometry.index) {
-      const nonIndexed = validatedGeometry.toNonIndexed();
-      return nonIndexed;
-    }
+    // PRESERVE MANIFOLD: Keep indexed geometry to maintain manifold topology
+    // toNonIndexed() destroys manifold property by duplicating vertices
+    // Indexed geometry is actually better for manifold preservation
     
     return validatedGeometry;
   };
@@ -249,11 +247,19 @@ const ExportButtons: React.FC = () => {
             });
           }
 
-          const clonedGeometry = originalMesh.geometry.clone();
-          clonedGeometry.applyMatrix4(originalMesh.matrixWorld);
-          const preparedGeometry = validateGeometries
-            ? validateGeometry(clonedGeometry)
-            : clonedGeometry;
+          // MANIFOLD PRESERVATION: Avoid transformations that break topology
+          let preparedGeometry: THREE.BufferGeometry;
+
+          if (validateGeometries) {
+            // Only minimal validation when needed - avoid toNonIndexed()
+            const clonedGeometry = originalMesh.geometry.clone();
+            clonedGeometry.applyMatrix4(originalMesh.matrixWorld);
+            preparedGeometry = validateGeometry(clonedGeometry);
+          } else {
+            // PRESERVE MANIFOLD: Use original geometry directly without cloning/transforming
+            // Apply world matrix to mesh instead of geometry to preserve topology
+            preparedGeometry = originalMesh.geometry;
+          }
 
           const usesVertexColors = !!preparedGeometry.getAttribute('color');
           const baseColor = extractMaterialColor(originalMesh.material);
@@ -262,15 +268,22 @@ const ExportButtons: React.FC = () => {
             color: baseColor,
             vertexColors: usesVertexColors,
             flatShading: true,
-            side: THREE.DoubleSide
+            side: THREE.FrontSide // Use FrontSide instead of DoubleSide for proper manifold
           });
 
           const exportMesh = new THREE.Mesh(preparedGeometry, exportMaterial);
           exportMesh.name = originalMesh.name;
+
+          // Apply transformations to mesh instead of geometry to preserve topology
+          if (!validateGeometries) {
+            exportMesh.applyMatrix4(originalMesh.matrixWorld);
+          }
+
           exportScene.add(exportMesh);
         });
 
-        console.log(`Export scene cloned from current preview scene with ${meshesToExport.length} meshes`);
+        console.log(`🔧 Export scene created from preview scene with ${meshesToExport.length} meshes`);
+        console.log(`✅ Manifold preservation: ${validateGeometries ? 'VALIDATION ENABLED (may break manifold)' : 'DISABLED (preserves manifold)'}`);
         return exportScene;
       }
 
@@ -307,7 +320,7 @@ const ExportButtons: React.FC = () => {
       const terrainMaterial = new THREE.MeshLambertMaterial({
         vertexColors: terrainSettings.color ? false : true,
         flatShading: true,
-        side: THREE.DoubleSide
+        side: THREE.FrontSide // Use FrontSide to preserve manifold topology
       });
 
       if (terrainSettings.color) {
@@ -460,8 +473,8 @@ const ExportButtons: React.FC = () => {
     if (!geometryDataSets.terrainGeometry) return;
     
     try {
-      // Create scene with standard (non-validated) geometries for OBJ
-      const scene = createExportScene(true);
+      // Create scene without validation to preserve manifold geometry
+      const scene = createExportScene(false);
       
       // Create OBJ exporter and export the scene
       const exporter = new OBJExporter();
@@ -484,8 +497,8 @@ const ExportButtons: React.FC = () => {
     if (!geometryDataSets.terrainGeometry) return;
     
     try {
-      // Create scene with standard (non-validated) geometries for STL
-      const scene = createExportScene(true);
+      // Create scene without validation to preserve manifold geometry
+      const scene = createExportScene(false);
       
       // Create STL exporter and export the scene (binary format for smaller file size)
       const exporter = new STLExporter();
@@ -508,8 +521,8 @@ const ExportButtons: React.FC = () => {
     if (!geometryDataSets.terrainGeometry) return;
     
     try {
-      // Create scene with validated geometries for GLTF/GLB
-      const scene = createExportScene(true);
+      // Create scene without validation to preserve manifold geometry
+      const scene = createExportScene(false);
       
       // Create GLTF exporter with binary option for better compatibility
       const exporter = new GLTFExporter();
@@ -556,8 +569,8 @@ const ExportButtons: React.FC = () => {
     try {
       setLoading(prev => ({ ...prev, threemf: true }));
       
-      // Create scene with validated geometries for 3MF
-      const scene = createExportScene(true);
+      // Create scene without validation to preserve manifold geometry
+      const scene = createExportScene(false);
       
       // Extract mesh data for 3MF export
       const meshes: THREE.Mesh[] = [];

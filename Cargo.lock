@@ -337,6 +337,7 @@ dependencies = [
  "core2",
  "either",
  "geo",
+ "hashbrown 0.15.5",
  "nalgebra",
  "parry3d-f64",
  "rapier3d-f64",
