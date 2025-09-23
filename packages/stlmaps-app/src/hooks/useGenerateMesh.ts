@@ -20,7 +20,6 @@ import {
   calculateTileCount
 } from "@threegis/core";
 import { processManager } from "@threegis/core";
-import { exportTerrainMeshAsGLB, exportLayerGeometryAsGLB } from "../utils/meshExporter";
 
 // ================================================================================
 // Types and Interfaces
@@ -235,33 +234,6 @@ class ParallelLayerProcessor {
           throw new Error('Layer processing was cancelled');
         }
 
-        // Automatically export layer geometries as GLB right after WASM generation
-        try {
-          console.log(`🚀 Automatically exporting layer "${layer.label}" geometries as GLB...`);
-
-          // Export each geometry in the layer separately
-          for (let geomIndex = 0; geomIndex < workerResult.geometries.length; geomIndex++) {
-            const processedGeom = workerResult.geometries[geomIndex];
-
-            if (processedGeom.hasData && processedGeom.vertices && processedGeom.vertices.length > 0) {
-              const layerGeomData = {
-                positions: processedGeom.vertices,
-                indices: processedGeom.indices,
-                colors: processedGeom.colors,
-                normals: processedGeom.normals
-              };
-
-              const geomSuffix = workerResult.geometries.length > 1 ? `_geom${geomIndex}` : '';
-              await exportLayerGeometryAsGLB(layerGeomData, `${layer.label}${geomSuffix}`);
-            }
-          }
-
-          console.log(`✅ Layer "${layer.label}" GLB export completed successfully`);
-        } catch (exportError) {
-          console.warn(`⚠️ Layer "${layer.label}" GLB export failed (non-critical):`, exportError);
-          // Don't throw here - export failure shouldn't break the main workflow
-        }
-
         // Convert worker results to Three.js geometries (minimal main thread work)
         const geometries: THREE.BufferGeometry[] = [];
         const processedGeometries = workerResult.geometries;
@@ -415,33 +387,6 @@ class ParallelLayerProcessor {
             }
           }
         );
-
-        // Automatically export layer geometries as GLB right after WASM generation (sequential)
-        try {
-          console.log(`🚀 Automatically exporting layer "${layer.label}" geometries as GLB (sequential)...`);
-
-          // Export each geometry in the layer separately
-          for (let geomIndex = 0; geomIndex < workerResult.geometries.length; geomIndex++) {
-            const processedGeom = workerResult.geometries[geomIndex];
-
-            if (processedGeom.hasData && processedGeom.vertices && processedGeom.vertices.length > 0) {
-              const layerGeomData = {
-                positions: processedGeom.vertices,
-                indices: processedGeom.indices,
-                colors: processedGeom.colors,
-                normals: processedGeom.normals
-              };
-
-              const geomSuffix = workerResult.geometries.length > 1 ? `_geom${geomIndex}` : '';
-              await exportLayerGeometryAsGLB(layerGeomData, `${layer.label}${geomSuffix}`);
-            }
-          }
-
-          console.log(`✅ Layer "${layer.label}" GLB export completed successfully (sequential)`);
-        } catch (exportError) {
-          console.warn(`⚠️ Layer "${layer.label}" GLB export failed (non-critical):`, exportError);
-          // Don't throw here - export failure shouldn't break the main workflow
-        }
 
         // Convert to Three.js geometries (same as parallel version)
         const geometries: THREE.BufferGeometry[] = [];
@@ -678,16 +623,6 @@ export function useGenerateMesh() {
 
       const wasmTerrainResult = await wasmModule.create_terrain_geometry(terrainParams);
 
-      // Automatically export terrain mesh as GLB right after WASM generation
-      try {
-        console.log('🚀 Automatically exporting terrain mesh as GLB...');
-        await exportTerrainMeshAsGLB(wasmTerrainResult);
-        console.log('✅ Terrain GLB export completed successfully');
-      } catch (exportError) {
-        console.warn('⚠️ Terrain GLB export failed (non-critical):', exportError);
-        // Don't throw here - export failure shouldn't break the main workflow
-      }
-
       onProgress({
         stage: 'terrain',
         percentage: 20,
@@ -897,18 +832,7 @@ export function useGenerateMesh() {
         performanceMonitor.logPerformanceSummary(performanceSession);
       }
 
-      // Log summary of automatic GLB exports
-      const exportedFilesCount = (terrainResult ? 1 : 0) + layerResults.filter(r => r.success).length;
-      console.log(`🎯 Mesh generation completed! Automatically exported ${exportedFilesCount} GLB files:`);
-      if (terrainResult) {
-        console.log(`  ✅ Terrain mesh (${(terrainResult.terrainGeometry as any).attributes.position.count} vertices)`);
-      }
-      layerResults.forEach(result => {
-        if (result.success) {
-          console.log(`  ✅ ${result.layer.label} layer (${result.vertexCount} vertices)`);
-        }
-      });
-      console.log(`📂 Check your Downloads folder for the GLB files!`);
+      // Mesh generation completed successfully
 
       return {
         terrainResult,

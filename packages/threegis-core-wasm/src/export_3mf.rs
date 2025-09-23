@@ -6,6 +6,8 @@ pub struct Mesh3MFData {
     pub vertices: Vec<f32>,
     pub indices: Vec<u32>,
     pub colors: Option<Vec<f32>>,
+    pub name: Option<String>,
+    pub transform: Option<Vec<f64>>, // 4x4 transform matrix (16 elements)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -125,8 +127,10 @@ fn create_model_xml(model_data: &Model3MFData) -> Result<String, String> {
 
     xml.push_str("  </resources>\n");
 
-    // Build section (references all objects)
+    // Build section - use a simple build approach
     xml.push_str("  <build>\n");
+
+    // Add all objects to the build directly (3MF viewers should handle positioning correctly)
     for mesh_id in 0..model_data.meshes.len() {
         let object_id = mesh_id + 1;
         xml.push_str(&format!(
@@ -135,6 +139,7 @@ fn create_model_xml(model_data: &Model3MFData) -> Result<String, String> {
             object_id
         ));
     }
+
     xml.push_str("  </build>\n</model>");
 
     Ok(xml)

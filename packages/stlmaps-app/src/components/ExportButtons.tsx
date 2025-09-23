@@ -569,21 +569,41 @@ const ExportButtons: React.FC = () => {
     try {
       setLoading(prev => ({ ...prev, threemf: true }));
       
-      // Create scene without validation to preserve manifold geometry
+      // Use GLB scene but extract individual objects for 3MF
       const scene = createExportScene(false);
-      
-      // Extract mesh data for 3MF export
-      const meshes: THREE.Mesh[] = [];
-      
+      const meshes: any[] = [];
+
+      // Extract individual objects from the positioned GLB scene
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh && object.geometry) {
+          console.log(`🎯 3MF Export - Object "${object.name || 'unnamed'}" position: x=${object.position.x.toFixed(2)}, y=${object.position.y.toFixed(2)}, z=${object.position.z.toFixed(2)}`);
+          console.log(`🎯 3MF Export - Object "${object.name || 'unnamed'}" scale: x=${object.scale.x.toFixed(2)}, y=${object.scale.y.toFixed(2)}, z=${object.scale.z.toFixed(2)}`);
+
           const geometry = object.geometry;
-          
-          // Extract vertices
-          const positions = geometry.attributes.position?.array;
+
+          // Extract vertices from positioned geometry (already correctly transformed by createExportScene)
+          const positionAttribute = geometry.attributes.position;
+          if (!positionAttribute) return;
+
+          const positions = positionAttribute.array;
           if (!positions) return;
-          
-          // Extract indices or generate them
+
+          // Log Z position range for debugging
+          const zValues = [];
+          for (let i = 2; i < positions.length; i += 3) {
+            zValues.push(positions[i]);
+          }
+          const minZ = Math.min(...zValues);
+          const maxZ = Math.max(...zValues);
+          console.log(`📐 3MF Export - ${object.name || 'unnamed'} positioned Z range: ${minZ.toFixed(2)} to ${maxZ.toFixed(2)}`);
+
+          // Sample first few vertices to see actual coordinates
+          console.log(`🔍 3MF Export - ${object.name || 'unnamed'} sample vertices:`);
+          for (let i = 0; i < Math.min(15, positions.length); i += 3) {
+            console.log(`  Vertex ${i/3}: X=${positions[i].toFixed(2)}, Y=${positions[i+1].toFixed(2)}, Z=${positions[i+2].toFixed(2)}`);
+          }
+
+          // Extract indices
           let indices: number[] = [];
           if (geometry.index) {
             indices = Array.from(geometry.index.array);
@@ -593,36 +613,62 @@ const ExportButtons: React.FC = () => {
               indices.push(i);
             }
           }
-          
-          // Validate that all indices are within valid range
-          const maxVertexIndex = (positions.length / 3) - 1;
-          const validIndices = indices.filter(idx => idx >= 0 && idx <= maxVertexIndex);
-          if (validIndices.length !== indices.length) {
-            console.warn(`Mesh has invalid indices. Original: ${indices.length}, Valid: ${validIndices.length}`);
-            indices = validIndices;
-          }
-          
+
           // Extract colors if available
           let colors: number[] | null = null;
           if (geometry.attributes.color) {
-            colors = Array.from(geometry.attributes.color.array);
+            const colorArray = geometry.attributes.color.array;
+            colors = [];
+            for (let i = 0; i < colorArray.length; i++) {
+              colors.push(colorArray[i]);
+            }
           }
-          
+
+          // Apply object transforms to vertices manually (in case createExportScene didn't bake them in)
+          const transformedVertices = [];
+          for (let i = 0; i < positions.length; i += 3) {
+            // Apply object scale and position
+            const x = positions[i] * object.scale.x + object.position.x;
+            const y = positions[i + 1] * object.scale.y + object.position.y;
+            const z = positions[i + 2] * object.scale.z + object.position.z;
+
+            transformedVertices.push(x, y, z);
+          }
+
+          console.log(`🔄 3MF Export - ${object.name || 'unnamed'} applying object transforms:`);
+          console.log(`  Original first vertex: X=${positions[0].toFixed(2)}, Y=${positions[1].toFixed(2)}, Z=${positions[2].toFixed(2)}`);
+          console.log(`  Transformed first vertex: X=${transformedVertices[0].toFixed(2)}, Y=${transformedVertices[1].toFixed(2)}, Z=${transformedVertices[2].toFixed(2)}`);
+
+          // Check transformed Z range
+          const transformedZ = [];
+          for (let i = 2; i < transformedVertices.length; i += 3) {
+            transformedZ.push(transformedVertices[i]);
+          }
+          const transformedMinZ = Math.min(...transformedZ);
+          const transformedMaxZ = Math.max(...transformedZ);
+          console.log(`  Transformed Z range: ${transformedMinZ.toFixed(2)} to ${transformedMaxZ.toFixed(2)}`);
+
+          const convertedVertices = transformedVertices;
+
           meshes.push({
-            vertices: Array.from(positions),
+            name: object.name || 'mesh',
+            vertices: convertedVertices, // Use coordinate-converted vertices
             indices: indices,
             colors: colors,
+            transform: null // No additional transform needed
           });
         }
       });
-      
+
       if (meshes.length === 0) {
         console.warn("No valid meshes found for 3MF export");
         setLoading(prev => ({ ...prev, threemf: false }));
         return;
       }
-      
-      // Prepare data for WASM 3MF export
+
+      console.log(`🔧 3MF Export - Exporting ${meshes.length} individual objects with transforms`);
+
+      // Prepare data for WASM 3MF export with individual meshes and transforms
       const modelData = {
         meshes: meshes,
         title: "STLMaps 3D Model",
@@ -709,50 +755,7 @@ const ExportButtons: React.FC = () => {
     await generate3MFFile();
   };
 
-  // Always auto-download when a new download URL is set
-  useEffect(() => {
-    if (objDownloadUrl) {
-      const a = document.createElement('a');
-      a.href = objDownloadUrl;
-      a.download = 'model.obj';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
-  }, [objDownloadUrl]);
-
-  useEffect(() => {
-    if (stlDownloadUrl) {
-      const a = document.createElement('a');
-      a.href = stlDownloadUrl;
-      a.download = 'model.stl';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
-  }, [stlDownloadUrl]);
-
-  useEffect(() => {
-    if (gltfDownloadUrl) {
-      const a = document.createElement('a');
-      a.href = gltfDownloadUrl;
-      a.download = 'model.glb';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
-  }, [gltfDownloadUrl]);
-
-  useEffect(() => {
-    if (threemfDownloadUrl) {
-      const a = document.createElement('a');
-      a.href = threemfDownloadUrl;
-      a.download = 'model.3mf';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
-  }, [threemfDownloadUrl]);
+  // Download is now handled manually by button clicks
 
   const isDisabled = !geometryDataSets.terrainGeometry;
 
@@ -889,31 +892,35 @@ const ExportButtons: React.FC = () => {
                       <Typography variant="body2" color="text.secondary" mb={1}>
                         {format.description}
                       </Typography>
-                      {url ? (
-                        <Button
-                          component="a"
-                          variant="contained"
-                          disabled={isDisabled || isLoading}
-                          href={url}
-                          download={`model.${format.fileExtension}`}
-                          startIcon={<FileDownloadIcon />}
-                          fullWidth={isMobile}
-                          size={isMobile ? "small" : "medium"}
-                        >
-                          Download {format.fileExtension.toUpperCase()}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outlined"
-                          onClick={handler}
-                          disabled={isDisabled || isLoading}
-                          startIcon={isLoading ? null : <ModelTrainingIcon />}
-                          fullWidth={isMobile}
-                          size={isMobile ? "small" : "medium"}
-                        >
-                          {isLoading ? "Generating..." : `Generate ${format.fileExtension.toUpperCase()}`}
-                        </Button>
-                      )}
+                      <Button
+                        variant={url ? "contained" : "outlined"}
+                        onClick={url ? () => {
+                          // Trigger download and reset to generate state
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `model.${format.fileExtension}`;
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+
+                          // Reset URL to return button to "Generate" state
+                          setTimeout(() => {
+                            switch(format.id) {
+                              case 'obj': setObjDownloadUrl(''); break;
+                              case 'stl': setStlDownloadUrl(''); break;
+                              case 'glb': setGltfDownloadUrl(''); break;
+                              case '3mf': setThreemfDownloadUrl(''); break;
+                            }
+                          }, 100);
+                        } : handler}
+                        disabled={isDisabled || isLoading}
+                        startIcon={url ? <FileDownloadIcon /> : (isLoading ? null : <ModelTrainingIcon />)}
+                        fullWidth={isMobile}
+                        size={isMobile ? "small" : "medium"}
+                      >
+                        {url ? `Download ${format.fileExtension.toUpperCase()}` :
+                         (isLoading ? "Generating..." : `Generate ${format.fileExtension.toUpperCase()}`)}
+                      </Button>
                     </Box>
                   </Paper>
                 </Grid>

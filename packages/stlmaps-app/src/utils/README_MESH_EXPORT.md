@@ -1,25 +1,25 @@
-# Automatic GLB Mesh Export
+# GLB Mesh Export Utilities
 
-This document describes the automatic GLB export functionality that exports each mesh immediately after it's generated from the WASM context, before it's added to the 3D preview.
+This document describes the GLB export utility functions that can be used to export mesh data directly from WASM context to GLB format.
 
 ## Overview
 
-Every time a mesh is created (terrain or layer geometry), it is automatically exported as a GLB file and downloaded to the user's Downloads folder. This happens transparently without user intervention and doesn't affect the normal 3D preview workflow.
+The mesh export utilities provide functions to convert raw WASM mesh data to GLB format. These are primarily used for manual export functionality through the ExportButtons component, but can also be used programmatically when needed.
 
 ## Implementation
 
 ### Core Files
 
 1. **`src/utils/meshExporter.ts`** - Main export utility functions
-2. **`src/hooks/useGenerateMesh.ts`** - Integration points for automatic export
-3. **`src/utils/meshExporter.test.ts`** - Validation and testing utilities
+2. **`src/utils/meshExporter.test.ts`** - Validation and testing utilities
+3. **`src/components/ExportButtons.tsx`** - Manual export functionality using these utilities
 
 ### Export Flow
 
 ```
-WASM Mesh Generation → Automatic GLB Export → THREE.js Conversion → 3D Preview
-                      ↓
-                   Downloads Folder
+WASM Mesh Generation → THREE.js Conversion → 3D Preview
+                      ↓ (Manual Export)
+                   GLB Export Utilities → Downloads Folder
 ```
 
 ### Key Functions
@@ -40,41 +40,26 @@ WASM Mesh Generation → Automatic GLB Export → THREE.js Conversion → 3D Pre
 - Handles multiple geometries per layer
 - Generates filename with timestamp: `{layerName}_YYYY-MM-DDTHH-mm-ss.glb`
 
-## Integration Points
+## Manual Export Usage
 
-### Terrain Export
-Location: `useGenerateMesh.ts:627-635`
+The export utilities are designed to be called manually when needed. The primary integration is through the ExportButtons component, but they can also be used programmatically:
+
 ```typescript
-const wasmTerrainResult = await wasmModule.create_terrain_geometry(terrainParams);
+import { exportWasmMeshAsGLB } from '../utils/meshExporter';
 
-// Automatically export terrain mesh as GLB right after WASM generation
-try {
-  console.log('🚀 Automatically exporting terrain mesh as GLB...');
-  await exportTerrainMeshAsGLB(wasmTerrainResult);
-  console.log('✅ Terrain GLB export completed successfully');
-} catch (exportError) {
-  console.warn('⚠️ Terrain GLB export failed (non-critical):', exportError);
-}
-```
+// Example: Export mesh data manually
+const meshData = {
+  positions: Float32Array,
+  indices: Uint32Array,
+  colors: Float32Array,
+  normals: Float32Array
+};
 
-### Layer Export
-Location: `useGenerateMesh.ts:238-263` (parallel) and `useGenerateMesh.ts:419-444` (sequential)
-```typescript
-// Automatically export layer geometries as GLB right after WASM generation
-for (let geomIndex = 0; geomIndex < workerResult.geometries.length; geomIndex++) {
-  const processedGeom = workerResult.geometries[geomIndex];
-
-  if (processedGeom.hasData && processedGeom.vertices && processedGeom.vertices.length > 0) {
-    const layerGeomData = {
-      positions: processedGeom.vertices,
-      indices: processedGeom.indices,
-      colors: processedGeom.colors,
-      normals: processedGeom.normals
-    };
-
-    await exportLayerGeometryAsGLB(layerGeomData, layer.label);
-  }
-}
+await exportWasmMeshAsGLB(meshData, {
+  filename: 'my_mesh',
+  autoDownload: true,
+  meshName: 'CustomMesh'
+});
 ```
 
 ## File Naming Convention
@@ -112,8 +97,9 @@ for (let geomIndex = 0; geomIndex < workerResult.geometries.length; geomIndex++)
 
 ## Console Output Example
 
+When using the export utilities manually:
+
 ```
-🚀 Automatically exporting terrain mesh as GLB...
 ✅ GLB export successful: TerrainMesh {
   vertices: 2134,
   triangles: 4156,
@@ -122,23 +108,6 @@ for (let geomIndex = 0; geomIndex < workerResult.geometries.length; geomIndex++)
   blobSize: 287456,
   filename: 'terrain_2024-01-15T14-30-45.glb'
 }
-✅ Terrain GLB export completed successfully
-
-🚀 Automatically exporting layer "buildings" geometries as GLB...
-✅ GLB export successful: buildingsMesh {
-  vertices: 8924,
-  triangles: 15632,
-  hasColors: true,
-  hasNormals: true,
-  blobSize: 1204576,
-  filename: 'buildings_2024-01-15T14-30-46.glb'
-}
-✅ Layer "buildings" GLB export completed successfully
-
-🎯 Mesh generation completed! Automatically exported 2 GLB files:
-  ✅ Terrain mesh (2134 vertices)
-  ✅ buildings layer (8924 vertices)
-📂 Check your Downloads folder for the GLB files!
 ```
 
 ## GLB File Format
