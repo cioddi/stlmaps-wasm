@@ -213,6 +213,7 @@ let cancelFlag = false;
 let sharedVectorTiles: Map<string, SharedVectorTileData> = new Map();
 let sharedElevationData: any = null;
 let currentProcessId: string | null = null;
+let fetchingProcessId: string | null = null;  // Track which process is currently being fetched
 
 // ================================================================================
 // WASM Initialization
@@ -429,7 +430,7 @@ async function ensureVectorTilesForProcess(
   try {
     // Check if we already have shared vector tiles
     if (sharedVectorTiles.size > 0) {
-      
+
       return;
     }
 
@@ -437,15 +438,31 @@ async function ensureVectorTilesForProcess(
     if ((wasmModule as any).get_cached_process_ids_js) {
       const processIds = (wasmModule as any).get_cached_process_ids_js();
       if (processIds && processIds.includes(processId)) {
-        
+
         return;
       }
     }
 
-    // Create a unique worker process ID to avoid conflicts
-    const workerProcessId = `${processId}_worker_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    // Check if another worker is already fetching this process
+    if (fetchingProcessId === processId) {
+      // Wait for the other worker to finish fetching
+      let attempts = 0;
+      while (fetchingProcessId === processId && attempts < 100) {
+        await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+        attempts++;
+      }
+      // Check again if tiles are now available
+      if ((wasmModule as any).get_cached_process_ids_js) {
+        const processIds = (wasmModule as any).get_cached_process_ids_js();
+        if (processIds && processIds.includes(processId)) {
+          currentProcessId = processId;
+          return;
+        }
+      }
+    }
 
-    
+    // Set fetching flag to prevent other workers from fetching the same data
+    fetchingProcessId = processId;
 
     const [west, south, east, north] = bboxCoords;
     const fetchInput = {
@@ -456,22 +473,26 @@ async function ensureVectorTilesForProcess(
       zoom: 14,
       grid_width: 256,
       grid_height: 256,
-      process_id: workerProcessId
+      process_id: processId  // Use original process ID, not unique worker ID
     };
 
     if ((wasmModule as any).fetch_vector_tiles) {
       await (wasmModule as any).fetch_vector_tiles(fetchInput);
-      
 
-      // Update currentProcessId to the worker process ID so feature extraction uses it
-      currentProcessId = workerProcessId;
+      // Use the original process ID for consistency
+      currentProcessId = processId;
     } else {
-      
+
     }
 
   } catch (error) {
-    
+
     // Don't throw here - let the extraction attempt proceed and handle the error there
+  } finally {
+    // Clear fetching flag when done
+    if (fetchingProcessId === processId) {
+      fetchingProcessId = null;
+    }
   }
 }
 
