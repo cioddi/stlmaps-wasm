@@ -11,7 +11,6 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::elevation::{ElevationProcessingInput, ElevationProcessingResult, GridSize};
 use crate::module_state::TileData;
-use crate::console_log;
 
 // GPU-compatible data structures using bytemuck for zero-copy serialization
 #[repr(C)]
@@ -41,6 +40,104 @@ struct GridParams {
     num_tiles: u32,
     _padding: u32, // Align to 16-byte boundary
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct AlignmentParams {
+    bbox_min_lng: f32,
+    bbox_min_lat: f32,
+    bbox_max_lng: f32,
+    bbox_max_lat: f32,
+    min_elevation: f32,
+    max_elevation: f32,
+    vertical_exaggeration: f32,
+    terrain_base_height: f32,
+    grid_width: u32,
+    grid_height: u32,
+    num_vertices: u32,
+    terrain_size: f32,
+}
+
+// WebGPU compute shader for vertex alignment to terrain
+const VERTEX_ALIGNMENT_COMPUTE_SHADER: &str = r#"
+struct AlignmentParams {
+    bbox_min_lng: f32,
+    bbox_min_lat: f32,
+    bbox_max_lng: f32,
+    bbox_max_lat: f32,
+    min_elevation: f32,
+    max_elevation: f32,
+    vertical_exaggeration: f32,
+    terrain_base_height: f32,
+    grid_width: u32,
+    grid_height: u32,
+    num_vertices: u32,
+    terrain_size: f32,
+}
+
+@group(0) @binding(0) var<storage, read_write> vertices: array<f32>; // XYZ vertices
+@group(0) @binding(1) var<storage, read> elevation_grid: array<f32>; // Terrain elevation data
+@group(0) @binding(2) var<uniform> params: AlignmentParams;
+
+fn sample_terrain_elevation(mesh_x: f32, mesh_y: f32) -> f32 {
+    // Convert mesh coordinates (-terrain_size/2 to +terrain_size/2) to geographic coordinates
+    let half_size = params.terrain_size / 2.0;
+    let norm_x = (mesh_x + half_size) / params.terrain_size;
+    let norm_y = (mesh_y + half_size) / params.terrain_size;
+
+    // Convert to geographic coordinates
+    let lng = params.bbox_min_lng + (params.bbox_max_lng - params.bbox_min_lng) * norm_x;
+    let lat = params.bbox_min_lat + (params.bbox_max_lat - params.bbox_min_lat) * norm_y;
+
+    // Convert to grid indices for sampling
+    let grid_x = ((lng - params.bbox_min_lng) / (params.bbox_max_lng - params.bbox_min_lng)) * f32(params.grid_width - 1u);
+    let grid_y = ((lat - params.bbox_min_lat) / (params.bbox_max_lat - params.bbox_min_lat)) * f32(params.grid_height - 1u);
+
+    // Bilinear interpolation
+    let x0 = u32(floor(grid_x));
+    let y0 = u32(floor(grid_y));
+    let x1 = min(x0 + 1u, params.grid_width - 1u);
+    let y1 = min(y0 + 1u, params.grid_height - 1u);
+
+    let dx = grid_x - f32(x0);
+    let dy = grid_y - f32(y0);
+
+    let v00 = elevation_grid[y0 * params.grid_width + x0];
+    let v10 = elevation_grid[y0 * params.grid_width + x1];
+    let v01 = elevation_grid[y1 * params.grid_width + x0];
+    let v11 = elevation_grid[y1 * params.grid_width + x1];
+
+    let v0 = v00 * (1.0 - dx) + v10 * dx;
+    let v1 = v01 * (1.0 - dx) + v11 * dx;
+    let elevation = v0 * (1.0 - dy) + v1 * dy;
+
+    // Apply scaling to match terrain generation
+    let elevation_range = max(1.0, params.max_elevation - params.min_elevation);
+    let normalized_elevation = (elevation - params.min_elevation) / elevation_range;
+    return params.terrain_base_height + normalized_elevation * elevation_range * params.vertical_exaggeration;
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let vertex_id = global_id.x;
+    if (vertex_id >= params.num_vertices) { return; }
+
+    let base_idx = vertex_id * 3u;
+
+    // Get current vertex position
+    let mesh_x = vertices[base_idx];
+    let mesh_y = vertices[base_idx + 1u];
+    let current_z = vertices[base_idx + 2u];
+
+    // Sample terrain elevation at this position
+    let terrain_height = sample_terrain_elevation(mesh_x, mesh_y);
+
+    // Apply proportional terrain alignment like CPU version
+    // For now, align vertices directly to terrain (simplified version)
+    // TODO: Add proportional alignment based on geometry height range
+    vertices[base_idx + 2u] = terrain_height;
+}
+"#;
 
 // WebGPU compute shader for elevation grid processing
 const ELEVATION_COMPUTE_SHADER: &str = r#"
@@ -197,11 +294,12 @@ pub struct GpuElevationProcessor {
     queue: Queue,
     compute_pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
+    vertex_alignment_pipeline: Option<ComputePipeline>,
+    vertex_alignment_bind_group_layout: Option<BindGroupLayout>,
 }
 
 impl GpuElevationProcessor {
     pub async fn new() -> Result<Self, JsValue> {
-        console_log!("Initializing GPU elevation processor...");
 
         // Request WebGPU adapter and device
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -312,13 +410,74 @@ impl GpuElevationProcessor {
             entry_point: "main",
         });
 
-        console_log!("GPU elevation processor initialized successfully");
+        // Create vertex alignment shader and pipeline
+        let vertex_alignment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Vertex Alignment Compute Shader"),
+            source: wgpu::ShaderSource::Wgsl(VERTEX_ALIGNMENT_COMPUTE_SHADER.into()),
+        });
+
+        // Create vertex alignment bind group layout
+        let vertex_alignment_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Vertex Alignment Bind Group Layout"),
+            entries: &[
+                // Vertices buffer (read-write)
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Elevation grid buffer (read-only)
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Alignment parameters uniform
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // Create vertex alignment compute pipeline
+        let vertex_alignment_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Vertex Alignment Compute Pipeline"),
+            layout: Some(&device.create_pipeline_layout(
+                &wgpu::PipelineLayoutDescriptor {
+                    label: Some("Vertex Alignment Pipeline Layout"),
+                    bind_group_layouts: &[&vertex_alignment_bind_group_layout],
+                    push_constant_ranges: &[],
+                },
+            )),
+            module: &vertex_alignment_shader,
+            entry_point: "main",
+        });
+
 
         Ok(Self {
             device,
             queue,
             compute_pipeline,
             bind_group_layout,
+            vertex_alignment_pipeline: Some(vertex_alignment_pipeline),
+            vertex_alignment_bind_group_layout: Some(vertex_alignment_bind_group_layout),
         })
     }
 
@@ -327,7 +486,6 @@ impl GpuElevationProcessor {
         input: &ElevationProcessingInput,
         tile_data: &[TileData],
     ) -> Result<ElevationProcessingResult, JsValue> {
-        console_log!("Processing elevation data on GPU...");
 
         let grid_width = input.grid_width as usize;
         let grid_height = input.grid_height as usize;
@@ -519,7 +677,6 @@ impl GpuElevationProcessor {
             }
         }
 
-        console_log!("GPU elevation processing completed successfully");
 
         Ok(ElevationProcessingResult {
             elevation_grid,
@@ -534,6 +691,107 @@ impl GpuElevationProcessor {
             cache_hit_rate: 1.0, // GPU processing doesn't use cache directly
         })
     }
+
+    pub async fn align_vertices_to_terrain_gpu(
+        &self,
+        vertices: &mut [f32],
+        elevation_grid: &[f32],
+        alignment_params: AlignmentParams,
+    ) -> Result<(), JsValue> {
+
+        let vertex_alignment_pipeline = self.vertex_alignment_pipeline.as_ref()
+            .ok_or_else(|| JsValue::from_str("Vertex alignment pipeline not initialized"))?;
+
+        let vertex_alignment_bind_group_layout = self.vertex_alignment_bind_group_layout.as_ref()
+            .ok_or_else(|| JsValue::from_str("Vertex alignment bind group layout not initialized"))?;
+
+        // Create vertex buffer
+        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(vertices),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+        });
+
+        // Create elevation grid buffer
+        let elevation_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Elevation Grid Buffer"),
+            contents: bytemuck::cast_slice(elevation_grid),
+            usage: BufferUsages::STORAGE,
+        });
+
+        // Create parameters buffer
+        let params_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Alignment Params Buffer"),
+            contents: bytemuck::cast_slice(&[alignment_params]),
+            usage: BufferUsages::UNIFORM,
+        });
+
+        // Create bind group
+        let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Vertex Alignment Bind Group"),
+            layout: vertex_alignment_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: vertex_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: elevation_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Dispatch compute shader
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Vertex Alignment Encoder"),
+        });
+
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("Vertex Alignment Compute Pass"),
+                timestamp_writes: None,
+            });
+
+            compute_pass.set_pipeline(vertex_alignment_pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+
+            // Dispatch with workgroup size of 64
+            let num_vertices = alignment_params.num_vertices;
+            let workgroup_size = 64;
+            let num_workgroups = (num_vertices + workgroup_size - 1) / workgroup_size;
+
+            compute_pass.dispatch_workgroups(num_workgroups, 1, 1);
+        }
+
+        // Create staging buffer to read back results
+        let vertex_staging = self.device.create_buffer(&BufferDescriptor {
+            label: Some("Vertex Staging Buffer"),
+            size: vertex_buffer.size(),
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_buffer_to_buffer(&vertex_buffer, 0, &vertex_staging, 0, vertex_buffer.size());
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Read back results
+        let vertex_slice = vertex_staging.slice(..);
+        vertex_slice.map_async(wgpu::MapMode::Read, |_| {});
+        self.device.poll(wgpu::Maintain::Wait);
+
+        let vertex_data = vertex_slice.get_mapped_range();
+        let aligned_vertices: &[f32] = bytemuck::cast_slice(&vertex_data);
+
+        // Copy the aligned vertices back to the input array
+        vertices.copy_from_slice(aligned_vertices);
+
+        Ok(())
+    }
 }
 
 // Global GPU processor instance
@@ -547,11 +805,9 @@ pub async fn init_gpu_elevation_processor() -> Result<bool, JsValue> {
             unsafe {
                 GPU_PROCESSOR = Some(processor);
             }
-            console_log!("GPU elevation processor initialized successfully");
             Ok(true)
         }
         Err(e) => {
-            console_log!("Failed to initialize GPU processor: {:?}", e);
             Ok(false)
         }
     }
@@ -565,6 +821,47 @@ pub async fn process_elevation_gpu(
     unsafe {
         match &GPU_PROCESSOR {
             Some(processor) => processor.process_elevation_gpu(input, tile_data).await,
+            None => Err(JsValue::from_str("GPU processor not initialized")),
+        }
+    }
+}
+
+// GPU-accelerated vertex alignment function
+pub async fn align_vertices_to_terrain_gpu(
+    vertices: &mut [f32],
+    elevation_grid: &[f32],
+    bbox_min_lng: f64,
+    bbox_min_lat: f64,
+    bbox_max_lng: f64,
+    bbox_max_lat: f64,
+    min_elevation: f64,
+    max_elevation: f64,
+    vertical_exaggeration: f64,
+    terrain_base_height: f64,
+    grid_width: u32,
+    grid_height: u32,
+    terrain_size: f64,
+) -> Result<(), JsValue> {
+    unsafe {
+        match &GPU_PROCESSOR {
+            Some(processor) => {
+                let alignment_params = AlignmentParams {
+                    bbox_min_lng: bbox_min_lng as f32,
+                    bbox_min_lat: bbox_min_lat as f32,
+                    bbox_max_lng: bbox_max_lng as f32,
+                    bbox_max_lat: bbox_max_lat as f32,
+                    min_elevation: min_elevation as f32,
+                    max_elevation: max_elevation as f32,
+                    vertical_exaggeration: vertical_exaggeration as f32,
+                    terrain_base_height: terrain_base_height as f32,
+                    grid_width,
+                    grid_height,
+                    num_vertices: (vertices.len() / 3) as u32,
+                    terrain_size: terrain_size as f32,
+                };
+
+                processor.align_vertices_to_terrain_gpu(vertices, elevation_grid, alignment_params).await
+            }
             None => Err(JsValue::from_str("GPU processor not initialized")),
         }
     }

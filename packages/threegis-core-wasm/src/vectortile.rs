@@ -11,7 +11,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::module_state::{ModuleState, TileData};
 use crate::polygon_geometry::VtDataSet;
-use crate::{cache_keys, console_log, fetch};
+use crate::{cache_keys, fetch};
 
 // Reuse the TileRequest struct from elevation.rs
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -553,13 +553,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     let max_lat = bbox[3];
     let vt_dataset = &input.vt_data_set;
 
-    // Log VtDataSet to check if filter is arriving
-
-    console_log!(
-        "Starting feature extraction for layer '{}' using process ID: {}",
-        vt_dataset.source_layer,
-        input.process_id
-    );
+    // Starting feature extraction
 
     // Try to access cached vector tile data using the provided process_id
     let vector_tiles_data = match ModuleState::with(|state| {
@@ -567,10 +561,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     }) {
         Some(tiles) => tiles,
         None => {
-            console_log!(
-                "❌ ERROR: No cached vector tiles found for process ID: {}. Cannot extract features.",
-                input.process_id
-            );
+            // No cached vector tiles found
             // Return empty array instead of error, as fetching might happen separately
             return Ok(to_value(&Vec::<GeometryData>::new())?);
         }
@@ -578,35 +569,61 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
     // Get cached elevation data if available
     // Use the specific elevation_process_id provided in the input
-    let elevation_data: Option<crate::module_state::ElevationData> = match &input
+    let elevation_grid_data: Option<Vec<Vec<f64>>> = match &input
         .elevation_process_id
     {
-        Some(_process_id) => {
-            // TODO: Implement elevation data retrieval from process-specific cache
-            None
+        Some(elevation_process_id) => {
+            // Try the specified elevation process ID first
+            let result = ModuleState::with(|state| {
+                state.get_elevation_grid(elevation_process_id).cloned()
+            });
+
+            if result.is_some() {
+                result
+            } else {
+                // Fallback: try to find any available elevation grid
+                ModuleState::with(|state| {
+                    // Get all available elevation grids and use the first one
+                    for (_key, grid) in &state.elevation_grids {
+                        // Using fallback elevation grid from different process
+                        return Some(grid.clone());
+                    }
+                    None
+                })
+            }
         }
         None => {
-            console_log!(
-                "No elevation_process_id provided, using default process_id for elevation lookup: {}",
-                input.process_id
-            );
-            None // Fallback to main process_id if specific one not given
+            // No elevation_process_id provided, try using main process_id as fallback
+            let result = ModuleState::with(|state| {
+                state.get_elevation_grid(&input.process_id).cloned()
+            });
+
+            if result.is_some() {
+                result
+            } else {
+                // Fallback: try to find any available elevation grid
+                ModuleState::with(|state| {
+                    for (_key, grid) in &state.elevation_grids {
+                        // Using fallback elevation grid from different process
+                        return Some(grid.clone());
+                    }
+                    None
+                })
+            }
         }
     };
 
     let (elevation_grid, grid_size, elev_min_lng, elev_min_lat, elev_max_lng, elev_max_lat) =
-        match elevation_data {
-            Some(elev_data) => {
-                console_log!(
-                    "✅ Found cached elevation data. Grid: {}x{}",
-                    elev_data.grid_width,
-                    elev_data.grid_height
-                );
-                // Assuming elevation data also stores its bounding box - needed for calculate_base_elevation
-                // If not, we need to pass the original bbox from input. Let's assume we use original bbox for now.
+        match elevation_grid_data {
+            Some(elev_grid) => {
+                // Found cached elevation grid
+                let grid_height = elev_grid.len();
+                let grid_width = if grid_height > 0 { elev_grid[0].len() } else { 0 };
+                web_sys::console::log_1(&format!("WASM: Found elevation grid {}x{} for layer processing",
+                    grid_width, grid_height).into());
                 (
-                    elev_data.elevation_grid,
-                    (elev_data.grid_width, elev_data.grid_height),
+                    elev_grid,
+                    (grid_width as u32, grid_height as u32),
                     min_lng,
                     min_lat,
                     max_lng,
@@ -614,10 +631,8 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                 )
             }
             None => {
-                console_log!(
-                    "⚠️ No cached elevation data found for relevant key. Using flat elevation (0)."
-                );
-                // Create a small dummy grid if no elevation data available
+                // No cached elevation data found, using flat elevation
+                // Note: This is expected when not using DEM-based terrain alignment
                 let dummy_grid = vec![vec![0.0; 2]; 2];
                 (dummy_grid, (2, 2), min_lng, min_lat, max_lng, max_lat) // Use input bbox for dummy grid
             }
@@ -635,12 +650,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         let tile_y = vt_tile_data.y;
         let tile_z = vt_tile_data.z;
 
-        console_log!(
-            "Processing tile data for {}/{}/{}...",
-            tile_z,
-            tile_x,
-            tile_y
-        );
+        // Processing tile data
 
         // The raw MVT data should be stored in rust_parsed_mvt or buffer
         let raw_mvt_data = match vt_tile_data.rust_parsed_mvt {
@@ -651,12 +661,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         };
 
         if raw_mvt_data.is_empty() {
-            console_log!(
-                "  Skipping tile {}/{}/{} due to empty raw data.",
-                tile_z,
-                tile_x,
-                tile_y
-            );
+            // Skipping tile due to empty raw data
             continue;
         }
 
@@ -680,14 +685,8 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     parsed_tiles_to_cache.push((cache_key.clone(), parsed.clone()));
                     parsed
                 }
-                Err(e) => {
-                    console_log!(
-                        "  ❌ Failed to parse MVT data for tile {}/{}/{}: {}",
-                        tile_z,
-                        tile_x,
-                        tile_y,
-                        e
-                    );
+                Err(_e) => {
+                    // Failed to parse MVT data for tile
                     continue; // Skip this tile if parsing fails
                 }
             }
@@ -696,14 +695,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
         // Find the requested layer in the newly parsed tile
         let layer = match parsed_tile.layers.get(&vt_dataset.source_layer) {
             Some(layer_data) => {
-                console_log!(
-                    "📊 Layer '{}' received {} features from tile {}/{}/{}",
-                    vt_dataset.source_layer,
-                    layer_data.features.len(),
-                    tile_z,
-                    tile_x,
-                    tile_y
-                );
+                // Found layer data
 
                 // Count features by class for this tile
                 let mut class_counts: std::collections::HashMap<String, usize> =
@@ -724,16 +716,11 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     .collect();
                 class_stats.sort(); // Sort alphabetically for consistent output
 
-                console_log!(
-                    "📊 received Layer '{}' classes: {}",
-                    vt_dataset.source_layer,
-                    class_stats.join(", ")
-                );
+                // Class statistics computed
 
                 layer_data
             }
             None => {
-                // console_log!("  Source layer '{}' not found in tile {}/{}/{}. Available layers: {:?}",
                 //    vt_dataset.source_layer, tile_z, tile_x, tile_y, parsed_tile.layers.keys());
                 continue; // Skip this tile if the layer isn't present
             }
@@ -1048,14 +1035,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     }
                 }
                 _ => {
-                    // LOG ALL UNHANDLED GEOMETRY TYPES - THIS IS CRITICAL FOR DEBUGGING
-                    let class_value = feature
-                        .properties
-                        .get("class")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    console_log!("❌ SKIPPING UNHANDLED geometry type '{}' for feature class '{}' - THIS IS WHY FEATURES ARE MISSING!", 
-                        geometry_type_str, class_value);
+                    // Skip unhandled geometry types
                 }
             }
 
@@ -1102,24 +1082,10 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             geometry_data_list.extend(filtered_parts);
         }
 
-        // Log the filtering statistics for this tile
-        console_log!(
-            "📊received  Tile {}/{}/{} stats: {} total, {} filtered by expression, {} processed, {} geometries created, {} filtered by bbox",
-            tile_z, tile_x, tile_y,
-            layer.features.len(),
-            filtered_by_expression,
-            processed_features,
-            geometry_created,
-            geometry_filtered_by_bbox
-        );
+        // Tile processing completed
     }
 
-    console_log!(
-        "📊 Layer '{}': {} features → {} geometries after filtering",
-        vt_dataset.source_layer,
-        feature_count,
-        geometry_data_list.len()
-    );
+    // Feature extraction completed
 
     // Apply median height fallback for buildings without height data if enabled
     if vt_dataset.source_layer == "building" && vt_dataset.apply_median_height.unwrap_or(false) {
@@ -1146,7 +1112,6 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse input
     let input: VectortileProcessingInput = from_value(input_js)?;
 
-    console_log!("Fetching vector tiles for process ID: {}", input.process_id);
 
     // Calculate tiles for the requested bounding box
     let tiles = get_tiles_for_bbox(
@@ -1157,11 +1122,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
         input.zoom,
     );
 
-    console_log!(
-        "Fetching {} vector tiles for zoom level {}",
-        tiles.len(),
-        input.zoom
-    );
+    // Fetching vector tiles
 
     // Store the fetch results for later processing
     let mut tile_results = Vec::new();
@@ -1182,13 +1143,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             let fetch_promise = fetch(&url)?;
             let fetch_result = JsFuture::from(fetch_promise).await?;
 
-            // Debug: Check what type of data we're getting back from JS
-            console_log!(
-                "📦 WASM received fetch_result type: {:?}",
-                js_sys::Object::get_prototype_of(&fetch_result)
-                    .constructor()
-                    .name()
-            );
+            // Process fetch result
 
             // Extract the raw data array - we need to access the "rawData" property
             // since our JS helper function returns a TileFetchResponse object
@@ -1204,11 +1159,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             let data_array = Uint8Array::new(&raw_data_value);
             let mut data_vec = data_array.to_vec();
 
-            // Verify size after conversion
-            console_log!(
-                "📦 WASM data size after conversion: {} bytes",
-                data_vec.len()
-            );
+            // Data conversion completed
 
             // Check if the data is gzipped and decompress if necessary
             if data_vec.starts_with(&[0x1f, 0x8b]) {
@@ -1223,15 +1174,8 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
             }
 
             // Debug: Print first few bytes to check data format
-            let debug_bytes = if data_vec.len() > 20 {
-                &data_vec[0..20]
-            } else {
-                &data_vec
-            };
-            console_log!(
-                "🔍 DEBUG: First bytes of tile data (hex): {:02X?}",
-                debug_bytes
-            );
+            // Data format checked
+            // Debug info processed
 
             // Parse the MVT data using our enhanced Rust MVT parser
             let parsed_mvt = match enhanced_parse_mvt_data(&data_vec, &tile) {
@@ -1240,12 +1184,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                     ModuleState::with_mut(|state| {
                         state.set_parsed_mvt_tile(&tile_key, parsed.clone());
                     });
-                    console_log!(
-                        "Successfully parsed MVT data with Rust parser for tile {}/{}/{}",
-                        tile.z,
-                        tile.x,
-                        tile.y
-                    );
+                    // Successfully parsed MVT data
                     // Log the number of layers found
                     let _layer_count = parsed.layers.len();
                     let _layer_names: Vec<String> = parsed.layers.keys().cloned().collect();
@@ -1298,11 +1237,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
                 Err(_e) => None,
             };
 
-            // Debug: Print detailed info about the data being stored
-            console_log!(
-                "🔍 WASM DEBUG: Raw data length received from JS: {} bytes",
-                data_vec.len()
-            );
+            // Processing raw data
 
             // Create a hex dump of a small sample of the raw data
             let _hex_sample = if data_vec.len() > 32 {
@@ -1339,11 +1274,7 @@ pub async fn fetch_vector_tiles(input_js: JsValue) -> Result<JsValue, JsValue> {
     }
 
     // Store tiles under the process ID for consistency
-    console_log!(
-        "🔍 DEBUG: Storing {} vector tiles under process ID: {}",
-        tile_results.len(),
-        input.process_id
-    );
+    // Storing vector tiles under process ID
     ModuleState::with_mut(|state| {
         state.store_process_vector_tiles(
             &input.process_id,
@@ -1421,14 +1352,7 @@ fn enhanced_parse_mvt_data(
     tile_data: &[u8],
     tile_request: &TileRequest,
 ) -> Result<ParsedMvtTile, String> {
-    // First, log the original data length before any processing
-    console_log!(
-        "🔍 RAW DATA: Original tile data length: {} bytes for tile {}/{}/{}",
-        tile_data.len(),
-        tile_request.z,
-        tile_request.x,
-        tile_request.y
-    );
+    // Processing tile data
 
     // Print first 32 bytes of the raw data to verify what we're getting
     let _raw_preview = if tile_data.len() >= 32 {
@@ -1437,15 +1361,9 @@ fn enhanced_parse_mvt_data(
         format!("{:02X?}", &tile_data)
     };
 
-    // Check for common MVT/PBF patterns in the raw data
+    // Check MVT format
     if tile_data.len() >= 4 {
-        console_log!(
-            "🔍 CHECKING MVT FORMAT: First few bytes in decimal: [{}, {}, {}, {}]",
-            tile_data[0],
-            tile_data[1],
-            tile_data[2],
-            tile_data[3]
-        );
+        // Process MVT header
     }
 
     // Try to detect protobuf structure directly
@@ -1457,7 +1375,6 @@ fn enhanced_parse_mvt_data(
             let wire_type = byte & 0x7;
 
             if field_num > 0 && field_num < 20 && wire_type <= 5 {
-                // console_log!(
                 //     "  - Potential field at position {}: field_num={}, wire_type={}",
                 //     i,
                 //     field_num,
@@ -1472,18 +1389,10 @@ fn enhanced_parse_mvt_data(
 
     // Log if decompression changed the data size
     if data.len() != tile_data.len() {
-        //  console_log!("🔍 DECOMPRESSION: Data was compressed. Original size: {} bytes, Decompressed size: {} bytes",
         //      tile_data.len(), data.len());
     }
 
-    // Debug: Log raw data details
-    console_log!(
-        "🔍 DEBUG: Starting MVT parsing for tile {}/{}/{} (data size: {} bytes)",
-        tile_request.z,
-        tile_request.x,
-        tile_request.y,
-        data.len()
-    );
+    // Starting MVT parsing
 
     // Create the result structure
     let mut tile_result = ParsedMvtTile {
@@ -1504,9 +1413,7 @@ fn enhanced_parse_mvt_data(
         Ok(mvt_tile) => {
             // If no layers found, this could indicate a potential issue with the data format
             if mvt_tile.layers.is_empty() {
-                console_log!(
-                    "⚠️ WARNING: No layers found in the decoded MVT data. This might indicate:"
-                );
+                // WARNING: No layers found in the decoded MVT data
 
                 // Let's try an alternate approach: attempt to detect the protobuf structure manually
                 // This is a basic check to see if the data at least looks like a protobuf message
@@ -1522,8 +1429,7 @@ fn enhanced_parse_mvt_data(
                         let wire_type = tag_and_type & 0x7;
 
                         if field_number > 0 && field_number < 20 && wire_type <= 5 {
-                            console_log!("   Found potential protobuf field: number={}, wire_type={} at offset={}", 
-                                field_number, wire_type, offset);
+                            // Valid protobuf field detected
                         }
                         offset += 1;
                     }
@@ -1532,7 +1438,6 @@ fn enhanced_parse_mvt_data(
 
             // Process each layer in the tile
             for layer in mvt_tile.layers {
-                //  console_log!("  - Layer: '{}' with {} features, extent: {}",
                 //  layer.name, layer.features.len(), layer.extent.unwrap_or(4096));
 
                 let mut mvt_layer = MvtLayer {
@@ -1778,10 +1683,6 @@ fn apply_median_height_fallback(geometry_list: &mut Vec<GeometryData>) {
     if valid_heights.is_empty() {
         // No valid heights found, use a reasonable default for buildings
         let default_height = 15.0; // ~5 stories, reasonable urban building height
-        console_log!(
-            "🏢 No valid building heights found, using default height: {} meters",
-            default_height
-        );
 
         for geometry in geometry_list.iter_mut() {
             if geometry.height.is_none() || geometry.height == Some(0.0) {
@@ -1811,28 +1712,9 @@ fn apply_median_height_fallback(geometry_list: &mut Vec<GeometryData>) {
         upper_half[upper_half.len() / 2]
     };
 
-    console_log!(
-        "🏢 Calculated median height from upper 50%: {:.1} meters (from {} taller buildings out of {} total with valid heights)",
-        median_height,
-        upper_half.len(),
-        valid_heights.len()
-    );
+    // Calculated median height from upper 50%
 
-    // Log height distribution for debugging
-    if !valid_heights.is_empty() {
-        console_log!(
-            "🏢 Height distribution - Min: {:.1}m, Max: {:.1}m, Overall median: {:.1}m, Upper 50% median: {:.1}m",
-            valid_heights[0],
-            valid_heights[valid_heights.len() - 1],
-            if valid_heights.len() % 2 == 0 {
-                let mid = valid_heights.len() / 2;
-                (valid_heights[mid - 1] + valid_heights[mid]) / 2.0
-            } else {
-                valid_heights[valid_heights.len() / 2]
-            },
-            median_height
-        );
-    }
+    // Height distribution processing completed
 
     // Second pass: apply median height of upper 50% to buildings without height data
     let mut updated_count = 0;
@@ -1844,10 +1726,6 @@ fn apply_median_height_fallback(geometry_list: &mut Vec<GeometryData>) {
     }
 
     if updated_count > 0 {
-        console_log!(
-            "🏢 Applied upper 50% median height {:.1}m to {} buildings without height data",
-            median_height,
-            updated_count
-        );
+        // Applied median height to buildings without height data
     }
 }

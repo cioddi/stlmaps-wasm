@@ -136,11 +136,11 @@ const BboxSelector = forwardRef((props: Props, ref) => {
   const handleBboxClick = (e?: any) => {
     // Ensure we're in view mode before switching
     if (modeRef.current !== "view") {
-      console.log("BboxSelector click ignored - already in edit mode");
+      
       return;
     }
     
-    console.log("BboxSelector click detected, switching to edit mode");
+    
     
     // Prevent event bubbling to avoid map interactions
     if (e && e.originalEvent) {
@@ -155,7 +155,7 @@ const BboxSelector = forwardRef((props: Props, ref) => {
     // Set up exit conditions immediately but with proper guards
     if (mapHook.map) {
       const exitToView = () => {
-        console.log("Exiting bbox edit mode due to map interaction");
+        
         if (modeRef.current === "edit") {
           modeRef.current = "view";
           setMode("view");

@@ -11,7 +11,6 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::elevation::ElevationProcessingResult;
 use crate::terrain::{TerrainGeometryParams, TerrainGeometryResult};
-use crate::console_log;
 
 // GPU-compatible data structures
 #[repr(C)]
@@ -387,7 +386,6 @@ pub struct GpuTerrainProcessor {
 
 impl GpuTerrainProcessor {
     pub async fn new() -> Result<Self, JsValue> {
-        console_log!("Initializing GPU terrain processor...");
 
         // Request WebGPU adapter and device
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -625,7 +623,6 @@ impl GpuTerrainProcessor {
             entry_point: "main",
         });
 
-        console_log!("GPU terrain processor initialized successfully");
 
         Ok(Self {
             device,
@@ -646,7 +643,6 @@ impl GpuTerrainProcessor {
         elevation_data: &ElevationProcessingResult,
         params: &TerrainGeometryParams,
     ) -> Result<TerrainGeometryResult, JsValue> {
-        console_log!("Generating terrain mesh on GPU...");
 
         let source_width = elevation_data.grid_size.width as usize;
         let source_height = elevation_data.grid_size.height as usize;
@@ -895,7 +891,6 @@ impl GpuTerrainProcessor {
         // Create processed elevation grid (simplified for now)
         let processed_elevation_grid = elevation_data.elevation_grid.clone();
 
-        console_log!("GPU terrain mesh generation completed successfully");
 
         Ok(TerrainGeometryResult {
             positions,
@@ -922,11 +917,9 @@ pub async fn init_gpu_terrain_processor() -> Result<bool, JsValue> {
             unsafe {
                 GPU_TERRAIN_PROCESSOR = Some(processor);
             }
-            console_log!("GPU terrain processor initialized successfully");
             Ok(true)
         }
         Err(e) => {
-            console_log!("Failed to initialize GPU terrain processor: {:?}", e);
             Ok(false)
         }
     }

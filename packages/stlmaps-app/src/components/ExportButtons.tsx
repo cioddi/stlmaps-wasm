@@ -126,7 +126,7 @@ const ExportButtons: React.FC = () => {
       
       const attribute = validatedGeometry.attributes[name];
       if (attribute.count !== positionCount) {
-        console.warn(`Fixing mismatched attribute count for ${name}: ${attribute.count} vs position ${positionCount}`);
+        
         // Remove problematic attributes
         validatedGeometry.deleteAttribute(name);
       }
@@ -270,12 +270,12 @@ const ExportButtons: React.FC = () => {
           exportScene.add(exportMesh);
         });
 
-        console.log(`🔧 Export scene created from preview scene with ${meshesToExport.length} meshes`);
-        console.log(`✅ Manifold preservation: ${validateGeometries ? 'VALIDATION ENABLED (may break manifold)' : 'DISABLED (preserves manifold)'}`);
+        
+        
         return exportScene;
       }
 
-      console.warn('Export scene fallback: no meshes found in current preview scene, reconstructing manually');
+      
     }
 
     // Helper to check if geometry is valid for export
@@ -289,7 +289,7 @@ const ExportButtons: React.FC = () => {
       );
     };
 
-    console.log("Creating export scene with ModelPreview positioning logic");
+    
     console.log("Export context values:", {
       terrainBaseHeight: terrainSettings.baseHeight,
       terrainEnabled: terrainSettings.enabled,
@@ -452,7 +452,7 @@ const ExportButtons: React.FC = () => {
       });
     }
 
-    console.log(`Export scene created with ${exportScene.children.length} meshes using ModelPreview positioning`);
+    
     return exportScene;
   };
 
@@ -483,9 +483,9 @@ const ExportButtons: React.FC = () => {
       // Clean up URL
       URL.revokeObjectURL(url);
 
-      console.log("OBJ file generated and downloaded successfully");
+      
     } catch (error) {
-      console.error("Error generating OBJ file:", error);
+      
     } finally {
       setLoading(prev => ({ ...prev, obj: false }));
     }
@@ -517,9 +517,9 @@ const ExportButtons: React.FC = () => {
       // Clean up URL
       URL.revokeObjectURL(url);
 
-      console.log("STL file generated and downloaded successfully");
+      
     } catch (error) {
-      console.error("Error generating STL file:", error);
+      
     } finally {
       setLoading(prev => ({ ...prev, stl: false }));
     }
@@ -560,13 +560,13 @@ const ExportButtons: React.FC = () => {
           // Clean up URL
           URL.revokeObjectURL(url);
 
-          console.log("GLTF/GLB file generated and downloaded successfully");
+          
 
           // Update loading state when complete
           setLoading(prev => ({ ...prev, gltf: false }));
         },
         (error) => {
-          console.error("Error during GLTF export:", error);
+          
           setLoading(prev => ({ ...prev, gltf: false }));
         },
         { 
@@ -577,7 +577,7 @@ const ExportButtons: React.FC = () => {
         }
       );
     } catch (error) {
-      console.error("Error generating GLTF file:", error);
+      
       setLoading(prev => ({ ...prev, gltf: false }));
     }
   };
@@ -595,8 +595,8 @@ const ExportButtons: React.FC = () => {
       // Extract individual objects from the positioned GLB scene
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh && object.geometry) {
-          console.log(`🎯 3MF Export - Object "${object.name || 'unnamed'}" position: x=${object.position.x.toFixed(2)}, y=${object.position.y.toFixed(2)}, z=${object.position.z.toFixed(2)}`);
-          console.log(`🎯 3MF Export - Object "${object.name || 'unnamed'}" scale: x=${object.scale.x.toFixed(2)}, y=${object.scale.y.toFixed(2)}, z=${object.scale.z.toFixed(2)}`);
+          
+          
 
           const geometry = object.geometry;
 
@@ -614,12 +614,12 @@ const ExportButtons: React.FC = () => {
           }
           const minZ = Math.min(...zValues);
           const maxZ = Math.max(...zValues);
-          console.log(`📐 3MF Export - ${object.name || 'unnamed'} positioned Z range: ${minZ.toFixed(2)} to ${maxZ.toFixed(2)}`);
+          
 
           // Sample first few vertices to see actual coordinates
-          console.log(`🔍 3MF Export - ${object.name || 'unnamed'} sample vertices:`);
+          
           for (let i = 0; i < Math.min(15, positions.length); i += 3) {
-            console.log(`  Vertex ${i/3}: X=${positions[i].toFixed(2)}, Y=${positions[i+1].toFixed(2)}, Z=${positions[i+2].toFixed(2)}`);
+            
           }
 
           // Extract indices
@@ -654,9 +654,9 @@ const ExportButtons: React.FC = () => {
             transformedVertices.push(x, y, z);
           }
 
-          console.log(`🔄 3MF Export - ${object.name || 'unnamed'} applying object transforms:`);
-          console.log(`  Original first vertex: X=${positions[0].toFixed(2)}, Y=${positions[1].toFixed(2)}, Z=${positions[2].toFixed(2)}`);
-          console.log(`  Transformed first vertex: X=${transformedVertices[0].toFixed(2)}, Y=${transformedVertices[1].toFixed(2)}, Z=${transformedVertices[2].toFixed(2)}`);
+          
+          
+          
 
           // Check transformed Z range
           const transformedZ = [];
@@ -665,7 +665,7 @@ const ExportButtons: React.FC = () => {
           }
           const transformedMinZ = Math.min(...transformedZ);
           const transformedMaxZ = Math.max(...transformedZ);
-          console.log(`  Transformed Z range: ${transformedMinZ.toFixed(2)} to ${transformedMaxZ.toFixed(2)}`);
+          
 
           const convertedVertices = transformedVertices;
 
@@ -680,12 +680,12 @@ const ExportButtons: React.FC = () => {
       });
 
       if (meshes.length === 0) {
-        console.warn("No valid meshes found for 3MF export");
+        
         setLoading(prev => ({ ...prev, threemf: false }));
         return;
       }
 
-      console.log(`🔧 3MF Export - Exporting ${meshes.length} individual objects with transforms`);
+      
 
       // Prepare data for WASM 3MF export with individual meshes and transforms
       const modelData = {
@@ -748,10 +748,10 @@ const ExportButtons: React.FC = () => {
       // Clean up URL
       URL.revokeObjectURL(url);
 
-      console.log("3MF file generated and downloaded successfully");
+      
       setLoading(prev => ({ ...prev, threemf: false }));
     } catch (error) {
-      console.error("Error generating 3MF file:", error);
+      
       setLoading(prev => ({ ...prev, threemf: false }));
     }
   };

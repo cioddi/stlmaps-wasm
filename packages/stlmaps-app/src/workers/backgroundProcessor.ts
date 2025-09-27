@@ -431,7 +431,7 @@ async function optimizeGeometry(
     reportProgress(taskId, 100, 'Geometry optimization complete');
 
     const reductionPercentage = ((vertexCount - newVertexIndex) / vertexCount) * 100;
-    console.log(`Geometry optimized: ${vertexCount} -> ${newVertexIndex} vertices (${reductionPercentage.toFixed(1)}% reduction)`);
+    
 
     return {
       vertices: optimizedVertices,
@@ -518,14 +518,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       return;
     }
 
-    console.error(`Background processor error for task ${taskId}:`, error);
+    
     reportError(taskId, error instanceof Error ? error : new Error(String(error)));
   }
 };
 
 // Handle worker termination
 self.onunload = () => {
-  console.log('Background processor worker terminating...');
+  
 };
 
 export {}; // Make this a module

@@ -11,7 +11,6 @@ use bytemuck::{Pod, Zeroable};
 
 // Note: These imports would be used for future polygon processing integrations
 // use crate::polygon_geometry::{GeometryData, BufferGeometry, GridSize};
-use crate::console_log;
 
 // GPU-compatible data structures
 #[repr(C)]
@@ -288,7 +287,6 @@ pub struct GpuPolygonProcessor {
 
 impl GpuPolygonProcessor {
     pub async fn new() -> Result<Self, JsValue> {
-        console_log!("Initializing GPU polygon processor...");
 
         // Request WebGPU adapter and device (reuse GPU device from elevation if available)
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -468,7 +466,6 @@ impl GpuPolygonProcessor {
             entry_point: "main",
         });
 
-        console_log!("GPU polygon processor initialized successfully");
 
         Ok(Self {
             device,
@@ -489,7 +486,6 @@ impl GpuPolygonProcessor {
             return Ok(Vec::new());
         }
 
-        console_log!("Processing LineString buffer on GPU with {} points", points.len());
 
         // Convert input points to GPU format
         let gpu_points: Vec<Point2D> = points
@@ -590,7 +586,6 @@ impl GpuPolygonProcessor {
             .map(|p| [p.x as f64, p.y as f64])
             .collect();
 
-        console_log!("GPU LineString buffering completed, output {} points", output.len());
 
         Ok(output)
     }
@@ -604,7 +599,6 @@ impl GpuPolygonProcessor {
             return Ok(Vec::new());
         }
 
-        console_log!("Processing polygon clipping on GPU with {} polygons", polygons.len());
 
         // Flatten polygons and create offset/count arrays
         let mut flattened_points = Vec::new();
@@ -779,7 +773,6 @@ impl GpuPolygonProcessor {
             }
         }
 
-        console_log!("GPU polygon clipping completed, {} polygons processed", output_polygons.len());
 
         Ok(output_polygons)
     }
@@ -796,11 +789,9 @@ pub async fn init_gpu_polygon_processor() -> Result<bool, JsValue> {
             unsafe {
                 GPU_POLYGON_PROCESSOR = Some(processor);
             }
-            console_log!("GPU polygon processor initialized successfully");
             Ok(true)
         }
         Err(e) => {
-            console_log!("Failed to initialize GPU polygon processor: {:?}", e);
             Ok(false)
         }
     }

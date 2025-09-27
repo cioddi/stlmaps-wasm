@@ -27,14 +27,14 @@ export class CancellationToken {
     if (this._isCancelled) return;
     
     this._isCancelled = true;
-    console.log(`Token ${this._id} has been cancelled`);
+    
     
     // Execute all registered callbacks
     this._callbacks.forEach(callback => {
       try {
         callback();
       } catch (error) {
-        console.error('Error in cancellation callback:', error);
+        
       }
     });
     
@@ -97,7 +97,7 @@ export class CancellationTokenManager {
     this._currentToken = new CancellationToken();
     this._currentOperationName = operationName;
     
-    console.log(`Starting new operation: ${operationName}`);
+    
     return this._currentToken;
   }
   
@@ -106,7 +106,7 @@ export class CancellationTokenManager {
    */
   public cancelCurrentOperation(): void {
     if (this._currentToken && !this._currentToken.isCancelled) {
-      console.log(`Cancelling operation: ${this._currentOperationName}`);
+      
       this._currentToken.cancel();
     }
     

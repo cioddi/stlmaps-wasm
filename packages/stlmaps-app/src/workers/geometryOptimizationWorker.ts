@@ -167,13 +167,13 @@ async function createOptimizedGeometries(
       }
     };
 
-    console.log(`[GeometryWorker] Created ${geometries.length} optimized geometries for ${layerName}`);
-    console.log(`[GeometryWorker] Optimization: ${originalVertexCount} -> ${optimizedVertexCount} vertices (${reduction.toFixed(1)}% reduction)`);
+    
+    
 
     return result;
 
   } catch (error) {
-    console.error(`[GeometryWorker] Error creating geometries:`, error);
+    
     throw error;
   }
 }
@@ -194,7 +194,7 @@ async function optimizeGeometry(geometry: THREE.BufferGeometry): Promise<THREE.B
 
     return geometry;
   } catch (error) {
-    console.warn(`[GeometryWorker] Optimization failed, returning original:`, error);
+    
     return geometry;
   }
 }
@@ -299,7 +299,7 @@ async function mergeGeometries(
         } as WorkerResponse);
 
       } catch (mergeError) {
-        console.warn(`[GeometryWorker] Merging failed:`, mergeError);
+        
         merged = undefined;
       }
     }
@@ -317,7 +317,7 @@ async function mergeGeometries(
     };
 
   } catch (error) {
-    console.error(`[GeometryWorker] Error merging geometries:`, error);
+    
     throw error;
   }
 }
@@ -373,7 +373,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       case 'cancel':
         if (currentTaskId === id || !id) {
           cancelFlag = true;
-          console.log(`[GeometryWorker] Cancelling task: ${currentTaskId || 'all'}`);
+          
         }
         break;
 
@@ -384,7 +384,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     currentTaskId = null;
 
   } catch (error) {
-    console.error(`[GeometryWorker] Error handling message:`, error);
+    
 
     if (error instanceof Error && error.message === 'Task was cancelled') {
       // Don't report cancelled tasks as errors
@@ -403,7 +403,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
 // Handle worker errors
 self.onerror = (error) => {
-  console.error('[GeometryWorker] Unhandled error:', error);
+  
 
   if (currentTaskId) {
     postMessage({

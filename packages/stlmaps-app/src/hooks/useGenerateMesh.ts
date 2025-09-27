@@ -90,12 +90,12 @@ class ParallelLayerProcessor {
 
   async initializeContexts(layerCount: number): Promise<void> {
     const contextsNeeded = Math.min(layerCount, navigator.hardwareConcurrency || 4);
-    console.log(`🚀 Initializing ${contextsNeeded} WASM contexts for ${layerCount} layers`);
+    // Initializing WASM contexts
 
     await this.contextPool.ensureMinimumContexts(contextsNeeded);
 
     const stats = this.contextPool.getStats();
-    console.log(`✅ Context pool ready:`, stats);
+    // Context pool ready
   }
 
   async processLayersInParallel(
@@ -130,7 +130,7 @@ class ParallelLayerProcessor {
       const hasTerrainAlignment = layers.some(layer => layer.alignVerticesToTerrain);
 
       if (hasTerrainAlignment) {
-        console.log('🏔️ Sequential processing due to terrain alignment');
+        // Sequential processing due to terrain alignment
         return await this.processLayersSequentially(
           layers,
           bboxCoords,
@@ -142,7 +142,7 @@ class ParallelLayerProcessor {
           abortControllers
         );
       } else {
-        console.log('⚡ Parallel processing enabled');
+        // Parallel processing enabled
         return await this.processLayersParallel(
           layers,
           bboxCoords,
@@ -284,7 +284,7 @@ class ParallelLayerProcessor {
 
         const processingTime = Date.now() - layerStartTime;
 
-        console.log(`✅ Layer "${layer.label}" processed in ${processingTime}ms: ${geometries.length} geometries, ${totalVertexCount} vertices`);
+        // Layer processed successfully
 
         return {
           layer,
@@ -298,7 +298,7 @@ class ParallelLayerProcessor {
       } catch (error) {
         const processingTime = Date.now() - layerStartTime;
 
-        console.error(`❌ Layer "${layer.label}" failed after ${processingTime}ms:`, error);
+        // Layer processing failed
 
         return {
           layer,
@@ -319,7 +319,7 @@ class ParallelLayerProcessor {
     const sequentialEstimate = results.reduce((sum, r) => sum + r.processingTimeMs, 0);
     const efficiency = sequentialEstimate > 0 ? Math.min(100, (sequentialEstimate / totalTime) * 100) : 0;
 
-    console.log(`🎯 Parallel processing completed: ${totalTime}ms (${efficiency.toFixed(1)}% efficiency)`);
+    
 
     return results;
   }
@@ -438,7 +438,7 @@ class ParallelLayerProcessor {
           geometryCount: geometries.length
         });
 
-        console.log(`✅ Sequential layer "${layer.label}" processed in ${processingTime}ms`);
+        
 
       } catch (error) {
         const processingTime = Date.now() - layerStartTime;
@@ -453,7 +453,7 @@ class ParallelLayerProcessor {
           geometryCount: 0
         });
 
-        console.error(`❌ Sequential layer "${layer.label}" failed:`, error);
+        
       }
     }
 
@@ -585,16 +585,6 @@ export function useGenerateMesh() {
           message: 'Generating terrain mesh...'
         });
 
-        // Store terrain data in app state
-        setProcessedTerrainData({
-          processedElevationGrid: elevationResult.elevationGrid,
-          processedMinElevation: elevationResult.minElevation,
-          processedMaxElevation: elevationResult.maxElevation,
-        });
-
-        // Re-register elevation data for terrain generation
-        await processElevationForBbox(bboxCoords, processId);
-
         onProgress({
           stage: 'terrain',
           percentage: 15,
@@ -665,7 +655,7 @@ export function useGenerateMesh() {
 
       return result;
     } catch (error) {
-      console.error('❌ Terrain processing failed:', error);
+      
       throw new Error(`Terrain processing failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [processElevationForBbox, terrainSettings, setProcessedTerrainData]);
@@ -726,7 +716,7 @@ export function useGenerateMesh() {
       const processId = await processManager.startProcess(processConfig);
       currentProcessIdRef.current = processId;
 
-      console.log(`🚀 Started optimized mesh generation process: ${processId}`);
+      
 
       // Initialize layer processor
       const layerProcessor = new ParallelLayerProcessor();
@@ -776,7 +766,7 @@ export function useGenerateMesh() {
       });
 
       // Workers will handle their own vector tile fetching
-      console.log(`⚡ Workers will fetch vector tiles independently for optimal performance`);
+      
 
       // Initialize contexts for layer processing
       await layerProcessor.initializeContexts(vtLayers.length);
@@ -790,7 +780,12 @@ export function useGenerateMesh() {
           processedElevationGrid: terrainResult.processedElevationGrid,
           gridSize: terrainResult.gridSize,
           originalMinElevation: terrainResult.originalMinElevation,
-          originalMaxElevation: terrainResult.originalMaxElevation
+          originalMaxElevation: terrainResult.originalMaxElevation,
+          processedMinElevation: terrainResult.processedMinElevation,
+          processedMaxElevation: terrainResult.processedMaxElevation,
+          // Add terrain mesh vertices for direct mesh-based alignment
+          terrainVertices: terrainResult.terrainGeometry.attributes.position?.array || new Float32Array(),
+          terrainIndices: terrainResult.terrainGeometry.index?.array || new Uint32Array()
         },
         terrainSettings,
         debugSettings,
@@ -824,7 +819,7 @@ export function useGenerateMesh() {
         message: 'Optimized mesh generation complete!'
       });
 
-      console.log(`🎉 Optimized mesh generation completed in ${totalTime}ms (${efficiency.toFixed(1)}% efficiency)`);
+      
 
       // End performance monitoring and log analysis
       const performanceSession = performanceMonitor.endSession();
@@ -843,7 +838,7 @@ export function useGenerateMesh() {
       };
 
     } catch (error) {
-      console.error('❌ Optimized mesh generation failed:', error);
+      
 
       // Clean up on error
       if (layerProcessorRef.current) {
@@ -899,7 +894,7 @@ export function useGenerateMesh() {
 
   const startMeshGeneration = useCallback(async () => {
     if (isProcessingMesh) {
-      console.warn('Mesh generation already in progress, cancelling and restarting');
+      
       await cancelMeshGeneration();
       // Small additional delay after cancellation
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -936,7 +931,7 @@ export function useGenerateMesh() {
           layerHashes: currentLayerHashes,
         });
 
-        console.log('✅ Optimized mesh generation completed successfully');
+        
         console.log('📊 Performance metrics:', {
           totalTime: result.totalProcessingTimeMs,
           efficiency: `${result.parallelizationEfficiency.toFixed(1)}%`,
@@ -951,7 +946,7 @@ export function useGenerateMesh() {
 
       return result;
     } catch (error) {
-      console.error('❌ Optimized mesh generation error:', error);
+      
       throw error;
     }
   }, [
@@ -966,7 +961,7 @@ export function useGenerateMesh() {
 
   const cancelMeshGeneration = useCallback(async () => {
     if (abortControllerRef.current) {
-      console.log('🛑 Cancelling optimized mesh generation...');
+      
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
@@ -1032,7 +1027,7 @@ export function useGenerateMesh() {
       await cancelMeshGeneration();
 
       if (!bbox) {
-        console.warn("No bbox available, skipping optimized mesh generation");
+        
         immediateProcessingRef.current = false;
         return;
       }
@@ -1045,11 +1040,11 @@ export function useGenerateMesh() {
       immediateProcessingRef.current = hadActiveProcess;
 
       const timer = setTimeout(async () => {
-        console.log(`${hadActiveProcess ? 'Immediate' : 'Debounce'} timer expired, starting optimized mesh generation`);
+        
         try {
           await startMeshGeneration();
         } catch (error) {
-          console.error('Error during mesh generation:', error);
+          
         } finally {
           // Reset immediate processing flag after starting
           immediateProcessingRef.current = false;

@@ -93,7 +93,7 @@ export class WasmContextPool {
 
       // Set up error handling
       worker.onerror = (error) => {
-        console.error(`Worker ${workerId} error:`, error);
+        
       };
 
       // Initialize WASM in the worker
@@ -529,7 +529,7 @@ export class WasmContextPool {
 
   private log(message: string, ...args: any[]): void {
     if (this.config.enableDebugLogging) {
-      console.log(`[WasmContextPool] ${message}`, ...args);
+      
     }
   }
 

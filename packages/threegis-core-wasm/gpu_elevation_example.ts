@@ -58,15 +58,15 @@ class GPUElevationProcessor {
         const initResult = await init_gpu_elevation_processor();
         this.isInitialized = initResult;
 
-        console.log('GPU elevation processor initialized:', this.isInitialized);
+        
         return this.isInitialized;
       } else {
-        console.log('GPU not supported, will use CPU fallback');
+        
         this.isInitialized = true; // CPU fallback is always available
         return true;
       }
     } catch (error) {
-      console.error('Failed to initialize GPU processor:', error);
+      
       this.isInitialized = true; // Enable CPU fallback
       return true;
     }
@@ -112,13 +112,13 @@ async function example() {
   // Initialize the processor
   const initSuccess = await processor.initialize();
   if (!initSuccess) {
-    console.error('Failed to initialize elevation processor');
+    
     return;
   }
 
   // Get GPU information
   const gpuInfo = await processor.getGPUInfo();
-  console.log('GPU Information:', gpuInfo);
+  
 
   // Example elevation processing input
   const elevationInput: ElevationProcessingInput = {
@@ -138,20 +138,20 @@ async function example() {
 
   try {
     // Process elevation data (will use GPU if available)
-    console.time('Elevation Processing');
+    
     const result = await processor.processElevationData(elevationInput);
-    console.timeEnd('Elevation Processing');
+    
 
-    console.log('Elevation processing completed:');
-    console.log(`Grid size: ${result.grid_size.width}x${result.grid_size.height}`);
-    console.log(`Elevation range: ${result.min_elevation.toFixed(2)}m to ${result.max_elevation.toFixed(2)}m`);
-    console.log(`Cache hit rate: ${(result.cache_hit_rate * 100).toFixed(1)}%`);
+    
+    
+    
+    
 
     // The result.elevation_grid contains the processed elevation data
     // that can be used for terrain generation or other processing
 
   } catch (error) {
-    console.error('Error processing elevation data:', error);
+    
   }
 }
 
@@ -178,19 +178,19 @@ async function benchmarkGPUvsCPU() {
     process_id: 'benchmark_test'
   };
 
-  console.log('Running performance benchmark...');
+  
 
   // GPU processing
-  console.time('GPU Processing');
+  
   const gpuResult = await processor.processElevationData(largeInput);
-  console.timeEnd('GPU Processing');
+  
 
   // To test CPU-only processing, you could set an environment variable
   // or modify the WASM code to force CPU processing for comparison
 
-  console.log('GPU Benchmark Results:');
-  console.log(`Grid: ${gpuResult.grid_size.width}x${gpuResult.grid_size.height}`);
-  console.log(`Elevation range: ${gpuResult.min_elevation}m to ${gpuResult.max_elevation}m`);
+  
+  
+  
 }
 
 export { GPUElevationProcessor, example, benchmarkGPUvsCPU };

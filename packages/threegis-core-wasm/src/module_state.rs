@@ -11,7 +11,6 @@ use crate::vectortile::ParsedMvtTile;
 
 // Import the console_log macro
 #[allow(unused_imports)]
-use crate::console_log;
 
 // Cache size limit
 #[allow(dead_code)]

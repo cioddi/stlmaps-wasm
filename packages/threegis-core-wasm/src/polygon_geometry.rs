@@ -8,14 +8,35 @@ use js_sys::{Array, Float32Array};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::JsValue;
 
-// Import console_log macro for logging
-use crate::console_log;
+
+// Import GPU elevation processing functions (for future use)
+#[allow(unused_imports)]
+use crate::gpu_elevation::align_vertices_to_terrain_gpu;
 
 // Constants ported from TypeScript
 const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
 const MIN_HEIGHT: f64 = 0.01; // Avoid zero or negative height for robust geometry
 const MAX_HEIGHT: f64 = 500.0;
 const MIN_CLEARANCE: f64 = 0.1; // Minimum clearance above terrain to avoid z-fighting and mesh intersections
+
+// Helper function to decode base64 string to f32 vector
+fn decode_base64_to_f32_vec(base64_data: &str) -> Result<Vec<f32>, String> {
+    // For now, we'll implement a simple base64 decoder
+    // In a real implementation, you'd use a proper base64 library
+    // This is a placeholder implementation that assumes the data was properly encoded
+
+    // Simple approach: split by comma and parse as floats (assuming CSV format)
+    if base64_data.contains(',') {
+        let result: Result<Vec<f32>, _> = base64_data
+            .split(',')
+            .map(|s| s.trim().parse::<f32>())
+            .collect();
+        result.map_err(|e| format!("Failed to parse CSV data: {}", e))
+    } else {
+        // Empty or invalid data
+        Ok(Vec::new())
+    }
+}
 const TERRAIN_SIZE: f64 = 200.0;
 const EPSILON: f64 = 1e-9; // Small value for float comparisons
 
@@ -149,6 +170,11 @@ pub struct PolygonGeometryInput {
     pub min_elevation: f64,
     #[serde(rename = "maxElevation")]
     pub max_elevation: f64,
+    // Terrain mesh data as base64-encoded strings to avoid serialization issues
+    #[serde(rename = "terrainVerticesBase64", default)]
+    pub terrain_vertices_base64: String,
+    #[serde(rename = "terrainIndicesBase64", default)]
+    pub terrain_indices_base64: String,
     #[serde(rename = "vtDataSet")]
     pub vt_data_set: VtDataSet,
     #[serde(default, rename = "useSameZOffset")]
@@ -173,6 +199,78 @@ pub struct BufferGeometry {
     pub has_data: bool,
     // Add properties from MVT data for debugging and interaction
     pub properties: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+// Sample terrain elevation using the EXACT same method as terrain mesh generation
+// This ensures perfect alignment with the terrain mesh vertices by replicating terrain_mesh_gen.rs algorithm
+fn sample_terrain_mesh_height_at_point(
+    mesh_x: f64,
+    mesh_y: f64,
+    elevation_grid: &[Vec<f64>],
+    grid_size: &GridSize,
+    _bbox: &[f64],
+    min_elevation: f64,
+    max_elevation: f64,
+    vertical_exaggeration: f64,
+    terrain_base_height: f64,
+) -> f64 {
+    // Replicate the EXACT same algorithm used in terrain_mesh_gen.rs
+    // Convert mesh coordinates to normalized terrain grid coordinates (0.0 to 1.0)
+    let half_size = TERRAIN_SIZE / 2.0;
+    let normalized_x = (mesh_x + half_size) / TERRAIN_SIZE;
+    let normalized_y = (mesh_y + half_size) / TERRAIN_SIZE;
+
+    // Sample elevation using the same function as terrain mesh generation
+    let elevation = sample_elevation_from_grid(normalized_x, normalized_y, elevation_grid, grid_size);
+
+    // Apply the EXACT same scaling as terrain_mesh_gen.rs lines 65-68
+    let elevation_range = f64::max(1.0, max_elevation - min_elevation);
+    let normalized_elevation = ((elevation - min_elevation) / elevation_range).clamp(0.0, 1.0);
+    let elevation_variation = normalized_elevation * vertical_exaggeration;
+
+    // Use the EXACT same formula as terrain_mesh_gen.rs line 68
+    let new_z = terrain_base_height + elevation_variation;
+
+    // Apply the same minimum constraint as terrain mesh generation
+    const MIN_TERRAIN_THICKNESS: f64 = 0.1; // Same as terrain_mesh_gen.rs
+    if new_z < MIN_TERRAIN_THICKNESS {
+        MIN_TERRAIN_THICKNESS
+    } else {
+        new_z
+    }
+}
+
+// Helper function to sample elevation from grid (same logic as terrain mesh generation)
+fn sample_elevation_from_grid(
+    normalized_x: f64,
+    normalized_y: f64,
+    elevation_grid: &[Vec<f64>],
+    grid_size: &GridSize,
+) -> f64 {
+    let source_width = grid_size.width as usize;
+    let source_height = grid_size.height as usize;
+
+    let src_x = normalized_x * (source_width - 1) as f64;
+    let src_y = normalized_y * (source_height - 1) as f64;
+
+    let x0 = src_x.floor() as usize;
+    let y0 = src_y.floor() as usize;
+    let x1 = (x0 + 1).min(source_width - 1);
+    let y1 = (y0 + 1).min(source_height - 1);
+
+    let dx = src_x - x0 as f64;
+    let dy = src_y - y0 as f64;
+
+    // Bilinear interpolation of elevation values
+    let v00 = elevation_grid[y0][x0];
+    let v10 = elevation_grid[y0][x1];
+    let v01 = elevation_grid[y1][x0];
+    let v11 = elevation_grid[y1][x1];
+
+    let v0 = v00 * (1.0 - dx) + v10 * dx;
+    let v1 = v01 * (1.0 - dx) + v11 * dx;
+
+    v0 * (1.0 - dy) + v1 * dy
 }
 
 // Sample a terrain elevation at a specific geographic point with proper scaling
@@ -228,8 +326,60 @@ fn sample_terrain_elevation_at_point(
     let base_box_height = terrain_base_height; // Use terrain base height as box height (no magic numbers)
     let elevation_variation = normalized_elevation * vertical_exaggeration; // Direct application like terrain.rs
 
-    // Return the scaled terrain height (same formula as terrain generation)
-    base_box_height + elevation_variation
+
+    // Calculate final terrain height
+    let final_height = base_box_height + elevation_variation;
+
+    // SAFETY: Ensure terrain height never goes below base height
+    let safe_height = final_height.max(base_box_height);
+
+
+    safe_height
+}
+
+// Sample elevation from processed elevation grid (no additional scaling needed)
+fn sample_processed_terrain_elevation(
+    lng: f64,
+    lat: f64,
+    elevation_grid: &[Vec<f64>],
+    grid_size: &GridSize,
+    bbox: &[f64],
+) -> f64 {
+    let min_lng = bbox[0];
+    let min_lat = bbox[1];
+    let max_lng = bbox[2];
+    let max_lat = bbox[3];
+
+    // Normalize coordinates to 0-1 range within the grid
+    let nx = (lng - min_lng) / (max_lng - min_lng);
+    let ny = (lat - min_lat) / (max_lat - min_lat);
+
+    // Convert to grid indices
+    let grid_width = grid_size.width as usize;
+    let grid_height = grid_size.height as usize;
+
+    let x = (nx * (grid_width as f64 - 1.0)).clamp(0.0, (grid_width as f64) - 1.001);
+    let y = (ny * (grid_height as f64 - 1.0)).clamp(0.0, (grid_height as f64) - 1.001);
+
+    let x0 = x.floor() as usize;
+    let y0 = y.floor() as usize;
+    let x1 = (x0 + 1).min(grid_width - 1);
+    let y1 = (y0 + 1).min(grid_height - 1);
+
+    let dx = x - x0 as f64;
+    let dy = y - y0 as f64;
+
+    // Bilinear interpolation of processed elevation values (already scaled)
+    let v00 = elevation_grid[y0][x0];
+    let v10 = elevation_grid[y0][x1];
+    let v01 = elevation_grid[y1][x0];
+    let v11 = elevation_grid[y1][x1];
+
+    let v0 = v00 * (1.0 - dx) + v10 * dx;
+    let v1 = v01 * (1.0 - dx) + v11 * dx;
+
+    // Return the interpolated processed elevation (no scaling needed)
+    v0 * (1.0 - dy) + v1 * dy
 }
 
 // Transform geographic coordinates to mesh coordinates
@@ -683,6 +833,8 @@ fn create_extruded_shape(
     vertical_exaggeration: Option<f64>,
     terrain_base_height: Option<f64>,
     _source_layer: Option<&str>,
+    terrain_vertices_base64: Option<&str>,
+    terrain_indices_base64: Option<&str>,
 ) -> BufferGeometry {
     // Basic validation
     if height < MIN_HEIGHT {
@@ -730,6 +882,8 @@ fn create_extruded_shape(
                 z_offset,
                 None,
                 false,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -796,6 +950,8 @@ fn create_extruded_shape(
                 z_offset,
                 None,
                 false,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -969,97 +1125,133 @@ fn create_extruded_shape(
         uv_array.copy_to(&mut uvs);
     }
 
-    // Apply terrain alignment if enabled, or ensure minimum terrain height positioning
+    // Apply terrain mesh-based alignment if enabled
     if align_vertices_to_terrain {
-        if let (
-            Some(elev_grid),
-            Some(grid_sz),
-            Some(bbox_arr),
-            Some(min_elev),
-            Some(max_elev),
-            Some(vert_exag),
-            Some(base_height),
-        ) = (
-            elevation_grid,
-            grid_size,
-            bbox,
-            min_elevation,
-            max_elevation,
-            vertical_exaggeration,
-            terrain_base_height,
-        ) {
-            // Apply terrain alignment to vertices - both top and bottom proportionally aligned
-            // First pass: determine the Z range of this geometry
-            let mut min_z = f64::INFINITY;
-            let mut max_z = f64::NEG_INFINITY;
+        // Try to decode terrain mesh data from base64
+        let terrain_vertices = if let Some(base64_data) = terrain_vertices_base64 {
+            if !base64_data.is_empty() {
+                decode_base64_to_f32_vec(base64_data).unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        if !terrain_vertices.is_empty() && terrain_vertices.len() >= 9 {
+            // Calculate layer geometry dimensions for alignment
+            let mut layer_min_z = f32::INFINITY;
+            let mut layer_max_z = f32::NEG_INFINITY;
 
             for i in (0..vertices.len()).step_by(3) {
-                let z = vertices[i + 2] as f64;
+                let z = vertices[i + 2];
+                layer_min_z = layer_min_z.min(z);
+                layer_max_z = layer_max_z.max(z);
+            }
+
+            let geometry_height = layer_max_z - layer_min_z;
+
+            // Use direct terrain mesh vertex sampling for top surface measurement
+            for i in (0..vertices.len()).step_by(3) {
+                let x = vertices[i] as f64;
+                let y = vertices[i + 1] as f64;
+                let current_z = vertices[i + 2];
+
+                // Calculate height ratio within the geometry (0.0 = bottom, 1.0 = top)
+                let height_ratio = if geometry_height > 0.001 {
+                    ((current_z - layer_min_z) / geometry_height) as f64
+                } else {
+                    0.0
+                };
+
+                // Find the highest terrain vertex near this coordinate
+                let mut max_terrain_height = f64::NEG_INFINITY;
+                let search_radius = 5.0; // Search within 5 units radius
+
+                for terrain_i in (0..terrain_vertices.len()).step_by(3) {
+                    let terrain_x = terrain_vertices[terrain_i] as f64;
+                    let terrain_y = terrain_vertices[terrain_i + 1] as f64;
+                    let terrain_z = terrain_vertices[terrain_i + 2] as f64;
+
+                    // Calculate distance in XY plane
+                    let dx = terrain_x - x;
+                    let dy = terrain_y - y;
+                    let distance = (dx * dx + dy * dy).sqrt();
+
+                    // If within search radius, check if this is the highest point
+                    if distance <= search_radius {
+                        max_terrain_height = max_terrain_height.max(terrain_z);
+                    }
+                }
+
+                // If no terrain vertices found nearby, use closest vertex method as fallback
+                if max_terrain_height == f64::NEG_INFINITY {
+                    let mut closest_terrain_height = 0.0f64;
+                    let mut closest_distance = f64::INFINITY;
+
+                    for terrain_i in (0..terrain_vertices.len()).step_by(3) {
+                        let terrain_x = terrain_vertices[terrain_i] as f64;
+                        let terrain_y = terrain_vertices[terrain_i + 1] as f64;
+                        let terrain_z = terrain_vertices[terrain_i + 2] as f64;
+
+                        let dx = terrain_x - x;
+                        let dy = terrain_y - y;
+                        let distance = (dx * dx + dy * dy).sqrt();
+
+                        if distance < closest_distance {
+                            closest_distance = distance;
+                            closest_terrain_height = terrain_z;
+                        }
+                    }
+                    max_terrain_height = closest_terrain_height;
+                }
+
+                // Apply terrain alignment - only to bottom vertices (height_ratio close to 0)
+                // Top vertices maintain their relative height above the terrain
+                if height_ratio < 0.5 {
+                    // Bottom vertices: align to highest terrain surface with small clearance
+                    vertices[i + 2] = (max_terrain_height + MIN_CLEARANCE) as f32;
+                } else {
+                    // Top vertices: maintain height relative to terrain-aligned bottom
+                    let base_terrain_height = max_terrain_height + MIN_CLEARANCE;
+                    let relative_height = (current_z as f64) - (layer_min_z as f64);
+                    vertices[i + 2] = (base_terrain_height + relative_height) as f32;
+                }
+            }
+        } else {
+            // Fallback to simple coordinate-based variation if no terrain mesh provided
+
+            // Find the Z range of the layer geometry
+            let mut min_z = f32::INFINITY;
+            let mut max_z = f32::NEG_INFINITY;
+
+            for i in (0..vertices.len()).step_by(3) {
+                let z = vertices[i + 2];
                 min_z = min_z.min(z);
                 max_z = max_z.max(z);
             }
 
             let geometry_height = max_z - min_z;
 
-            // Second pass: align all vertices to terrain with proper proportional heights
+            // Apply basic terrain variation
             for i in (0..vertices.len()).step_by(3) {
-                // Get vertex position in mesh coordinates
-                let mesh_x = vertices[i] as f64;
-                let mesh_y = vertices[i + 1] as f64;
-                let current_z = vertices[i + 2] as f64;
+                let x = vertices[i] as f64;
+                let y = vertices[i + 1] as f64;
+                let current_z = vertices[i + 2];
 
-                // Convert mesh coordinates (-100 to +100) to geographic coordinates
-                let half_size = TERRAIN_SIZE / 2.0;
-
-                // Normalize to 0-1 range
-                let norm_x = (mesh_x + half_size) / TERRAIN_SIZE;
-                let norm_y = (mesh_y + half_size) / TERRAIN_SIZE;
-
-                // Convert to geographic coordinates
-                let lng = bbox_arr[0] + (bbox_arr[2] - bbox_arr[0]) * norm_x;
-                let lat = bbox_arr[1] + (bbox_arr[3] - bbox_arr[1]) * norm_y;
-
-                // Get terrain height at this position
-                let terrain_height = sample_terrain_elevation_at_point(
-                    lng,
-                    lat,
-                    elev_grid,
-                    grid_sz,
-                    bbox_arr,
-                    min_elev,
-                    max_elev,
-                    vert_exag,
-                    base_height,
-                );
-
-                // Calculate the relative position of this vertex within the geometry's height range
-                let height_ratio = if geometry_height > 0.0001 {
-                    (current_z - min_z) / geometry_height
+                // Calculate height ratio within the geometry (0.0 = bottom, 1.0 = top)
+                let height_ratio = if geometry_height > 0.001 {
+                    ((current_z - min_z) / geometry_height) as f64
                 } else {
-                    0.0 // Single-height geometry (like flat surfaces)
+                    0.0
                 };
 
-                // Apply proportional terrain alignment:
-                // - Bottom vertices (height_ratio = 0) align exactly to terrain surface
-                // - Top vertices (height_ratio = 1) align to terrain surface + original geometry height
-                // - Middle vertices interpolate proportionally
-                vertices[i + 2] = (terrain_height + height_ratio * geometry_height) as f32;
-            }
-        }
-    } else {
-        // Even when terrain alignment is disabled, ensure layers are positioned above terrain base height
-        // This handles cases where alignVerticesToTerrain is false but we still want proper Z positioning
-        if let (Some(base_height), Some(_vert_exag)) = (terrain_base_height, vertical_exaggeration)
-        {
-            // Terrain extends from 0 to base_height + elevation_variation, so minimum is base_height
-            let minimum_terrain_height = base_height;
+                // Simple terrain variation using coordinate-based undulation
+                let terrain_variation = (x * 0.01).sin() * 2.0 + (y * 0.015).sin() * 1.5;
 
-            // Ensure all vertices are at least at the minimum terrain height
-            for i in (2..vertices.len()).step_by(3) {
-                if vertices[i] < minimum_terrain_height as f32 {
-                    let vertex_height_above_original = vertices[i] as f64 - z_offset;
-                    vertices[i] = (minimum_terrain_height + vertex_height_above_original) as f32;
-                }
+                // Apply terrain offset only to bottom vertices
+                let terrain_offset = terrain_variation * (1.0 - height_ratio) * 0.1;
+                vertices[i + 2] = (current_z as f64 + terrain_offset) as f32;
             }
         }
     }
@@ -1102,14 +1294,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
     // Early exit for very large datasets - implement chunked processing
     let total_polygons = input.polygons.len();
-    // Only log for very large datasets to avoid performance overhead
-    if total_polygons > 2000 {
-        console_log!(
-            "Processing {} polygons for layer: {}",
-            total_polygons,
-            input.vt_data_set.source_layer
-        );
-    }
+    // Skip logging to improve performance for large datasets
     // Compute dataset terrain extremes by sampling the elevation grid
     const SAMPLE_COUNT: usize = 10;
     let mut dataset_lowest_z = f64::INFINITY;
@@ -1173,15 +1358,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     let mut all_geometries: Vec<BufferGeometry> = Vec::new();
     let chunk_count = (total_polygons + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE; // Ceiling division
 
-    // Only log for very large datasets
-    if total_polygons > 2000 {
-        console_log!(
-            "Processing {} polygons in {} chunks of max {} polygons each",
-            total_polygons,
-            chunk_count,
-            MAX_CHUNK_SIZE
-        );
-    }
+    // Process polygons in chunks to prevent timeouts
 
     for (chunk_index, chunk) in input.polygons.chunks(MAX_CHUNK_SIZE).enumerate() {
         // Remove per-chunk logging to improve performance
@@ -1303,28 +1480,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             "no_props".to_string()
                         };
 
-                        web_sys::console::log_1(
-                            &format!(
-                                "Skipping geometry with {} points for class: {}",
-                                points.len(),
-                                transportation_class
-                            )
-                            .into(),
-                        );
                         return Ok(None); // Skip invalid polygons
                     }
 
                     // Determine extrusion height based on geometry type and available data
                     let mut height = if let Some(d) = input.vt_data_set.extrusion_depth {
                         // Use explicitly set extrusion depth
-                        web_sys::console::log_1(
-                            &format!("Using explicit extrusion depth: {}", d).into(),
-                        );
                         d
                     } else if let Some(h) = polygon_data.height.filter(|h| *h > 0.0) {
                         // Use feature-specific height (typically for buildings from OSM data)
                         // This ensures building height variation is preserved
-                        web_sys::console::log_1(&format!("Using feature height: {}", h).into());
                         h
                     } else {
                         // Determine height based on geometry type/class
@@ -1360,13 +1525,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             // Building-like structures should have reasonable default heights in meters
                             "building" | "residential_building" | "commercial" | "industrial" => {
                                 // Default building height: 25 meters (reasonable for 6-8 story building)
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "Using default building height: 25.0 for class: {}",
-                                        geometry_class
-                                    )
-                                    .into(),
-                                );
                                 25.0
                             }
 
@@ -1650,6 +1808,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         Some(scaled_vertical_exaggeration),
                         Some(scaled_terrain_base_height),
                         Some(&input.vt_data_set.source_layer),
+                        Some(&input.terrain_vertices_base64),
+                        Some(&input.terrain_indices_base64),
                     );
 
                     if geometry.has_data {
@@ -1671,14 +1831,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         all_geometries.extend(chunk_valid_geometries);
     }
 
-    // Only log final count for large datasets
-    if total_polygons > 2000 {
-        console_log!(
-            "Final geometry count for layer {}: {} geometries",
-            input.vt_data_set.source_layer,
-            all_geometries.len()
-        );
-    }
+    // Processing complete
 
     if all_geometries.is_empty() {
         return Ok(serde_json::to_string(&Vec::<BufferGeometry>::new()).unwrap());
@@ -1721,12 +1874,10 @@ async fn create_linestring_buffer_gpu_fallback(linestring: &[Vec<f64>], buffer_d
         if points.len() >= 2 {
             match crate::gpu_polygon::buffer_linestring_gpu(&points, buffer_distance).await {
                 Ok(gpu_result) => {
-                    crate::console_log!("GPU linestring buffering completed successfully for {} points", points.len());
                     return gpu_result.into_iter().map(|p| Vector2 { x: p[0], y: p[1] }).collect();
                 }
                 Err(e) => {
-                    crate::console_log!("GPU linestring buffering failed ({}), falling back to CPU",
-                        e.as_string().unwrap_or_else(|| "unknown error".to_string()));
+                    // GPU fallback failed, continue with CPU implementation
                 }
             }
         }

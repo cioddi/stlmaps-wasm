@@ -62,7 +62,7 @@ export const validateExportFunctions = () => {
   const testMeshData = createTestMeshData();
   const testTerrainResult = createTestTerrainResult();
 
-  console.log('🧪 Validating mesh export functions...');
+  
 
   // Validate WasmMeshData structure
   if (!testMeshData.positions || !testMeshData.indices) {
@@ -82,7 +82,7 @@ export const validateExportFunctions = () => {
     throw new Error('exportLayerGeometryAsGLB function not found');
   }
 
-  console.log('✅ All export functions are properly structured');
+  
 
   // Test data validation
   console.log('Test mesh data:', {
@@ -100,7 +100,7 @@ export const demoExport = async () => {
   const testMeshData = createTestMeshData();
 
   try {
-    console.log('🚀 Demo: Exporting test triangle as GLB...');
+    
 
     const result = await exportWasmMeshAsGLB(testMeshData, {
       filename: 'test_triangle',
@@ -115,7 +115,7 @@ export const demoExport = async () => {
 
     return result;
   } catch (error) {
-    console.error('❌ Demo export failed:', error);
+    
     throw error;
   }
 };

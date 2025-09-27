@@ -178,7 +178,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
       
     }
   } catch (e) {
-    console.warn("Error during GPU capability detection:", e);
+    
     gpuCapabilityScore = isMobile ? 3 : 5; // Conservative fallback
   }
   
@@ -242,7 +242,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   // Special rule: Non-mobile devices with limited specs always get performance mode
   // This ensures older desktops/laptops with 4 cores and ≤8GB RAM don't get quality mode
   if (!isMobile && cpuCores <= 4 && deviceMemory <= 8) {
-    console.log("Forcing performance mode for non-mobile device with limited specs (≤4 cores, ≤8GB RAM)");
+    
     return 'performance';
   }
   
@@ -251,7 +251,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   const useQualityMode = totalScore >= qualityThreshold;
   
   const recommendedMode = useQualityMode ? 'quality' : 'performance';
-  console.log(`Recommended rendering mode: ${recommendedMode} (score: ${totalScore}/${qualityThreshold})`);
+  
   
   return recommendedMode;
 };
@@ -324,7 +324,7 @@ const ModelPreview = () => {
     
     // Clean up existing renderer and scene if they exist
     if (rendererRef.current) {
-      console.log("Cleaning up existing Three.js scene before re-initialization");
+      
       if (containerRef.current.contains(rendererRef.current.domElement)) {
         containerRef.current.removeChild(rendererRef.current.domElement);
       }
@@ -337,7 +337,7 @@ const ModelPreview = () => {
     }
     
     try {
-      console.log("Initializing Three.js scene");
+      
       setLoading(true);
       
       const width = containerRef.current.clientWidth;
@@ -619,11 +619,11 @@ const ModelPreview = () => {
       document.debug_camera = camera; // Expose camera to global scope for debugging
       
       animate();
-      console.log("Scene initialization completed");
+      
       updateScene();
       
     } catch (setupError) {
-      console.error("Error setting up 3D scene:", setupError);
+      
       setError(
         `Failed to setup 3D viewer: ${
           setupError instanceof Error
@@ -640,7 +640,7 @@ const ModelPreview = () => {
   const updateMaterialColors = useCallback(() => {
     if (!sceneDataRef.current || !Object.keys(layerColorUpdates).length) return;
 
-    console.log("Updating material colors only", layerColorUpdates);
+    
     const { modelGroup } = sceneDataRef.current;
     
     modelGroup.traverse((child) => {
@@ -690,7 +690,7 @@ const ModelPreview = () => {
             const zOffset = layerColorUpdates[zOffsetKey] as number;
             // Always position at terrain base height + layer zOffset (no magic numbers)
             child.position.z = terrainSettings.baseHeight + zOffset;
-            console.log(`🔧 Updated ${layerKey2} zOffset: terrain base (${terrainSettings.baseHeight}) + zOffset (${zOffset}) = ${child.position.z}`);
+            
           }
 
           // Handle height scale factor updates (real-time scaling)
@@ -783,7 +783,7 @@ const ModelPreview = () => {
         geometryMesh.position.z = 0; // Terrain geometry always at Z=0
         geometryMesh.castShadow = renderingMode === 'quality';
         geometryMesh.receiveShadow = renderingMode === 'quality';
-        console.log(`🏔️ Positioned terrain at Z=0`);
+        
         modelGroup.add(geometryMesh);
       }
       
@@ -828,10 +828,10 @@ const ModelPreview = () => {
               }
               if (individualGeometry.boundingBox) {
                 originalBottomZ = individualGeometry.boundingBox.min.z;
-                console.log(`🔧 Geometry ${vtDataset.sourceLayer} original bottom Z: ${originalBottomZ}`);
+                
                 // Translate geometry so bottom is at origin (z=0)
                 individualGeometry.translate(0, 0, -originalBottomZ);
-                console.log(`🔧 Translated geometry by ${-originalBottomZ} to put bottom at origin`);
+                
               }
 
               // Create mesh
@@ -923,14 +923,14 @@ const ModelPreview = () => {
             sourceLayer: vtDataset.sourceLayer,
             label: vtDataset.label || vtDataset.sourceLayer
           };
-          
+
           modelGroup.add(polygonMesh);
         });
       }
       
       setLoading(false);
     } catch (updateError) {
-      console.error("Error updating scene:", updateError);
+      
       setError(
         `Failed to update 3D scene: ${
           updateError instanceof Error
@@ -975,24 +975,24 @@ const ModelPreview = () => {
   useEffect(() => {
     if (!containerRef.current) return;
     
-    console.log("ModelPreview mounted");
+    
 
     // Auto-detect and set optimal rendering mode on first mount
     if (!hasSetInitialMode) {
       const detectedMode = detectDeviceCapabilities();
-      console.log(`Setting initial rendering mode to ${detectedMode} based on device capabilities`);
+      
       setRenderingMode(detectedMode);
       setHasSetInitialMode(true);
     }
     
     // Clear any existing canvases in the container first
     containerRef.current.querySelectorAll('button').forEach(button => {
-      console.log("Removing existing buttons before initialization");
+      
       button.remove();
     });
     // Clear any existing canvases in the container first
     containerRef.current.querySelectorAll('canvas').forEach(canvas => {
-      console.log("Removing existing canvas before initialization");
+      
       canvas.remove();
     });
     
@@ -1012,7 +1012,7 @@ const ModelPreview = () => {
     
     // Cleanup when component unmounts
     return () => {
-      console.log("Cleaning up ModelPreview resources");
+      
       window.removeEventListener('resize', handleResizeWrapper);
 
       // Clear debounce timeout
@@ -1079,7 +1079,7 @@ const ModelPreview = () => {
   // Handle color-only updates (debounced)
   useEffect(() => {
     if (colorOnlyUpdate && sceneDataRef.current?.initialized) {
-      console.log("Handling debounced color-only update");
+      
       debouncedUpdateMaterialColors();
     }
   }, [colorOnlyUpdate, debouncedUpdateMaterialColors]);
@@ -1087,7 +1087,7 @@ const ModelPreview = () => {
   // Handle full geometry updates
   useEffect(() => {
     if (sceneDataRef.current?.initialized && !colorOnlyUpdate) {
-      console.log("Triggering updateScene due to dependency changes");
+      
       updateScene();
     }
   }, [updateScene, geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries, renderingMode]);

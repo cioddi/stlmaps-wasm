@@ -64,14 +64,14 @@ const App: React.FC = () => {
   // Use the Rust functions when WASM is initialized
   useEffect(() => {
     if (isInitialized) {
-      console.log('WASM ready in App component.');
+      // WASM ready
     }
   }, [isInitialized]);
   
   // Log any WASM initialization errors
   useEffect(() => {
     if (error) {
-      console.error('Failed to initialize WASM:', error);
+      // WASM initialization failed
     }
   }, [error]);
 
@@ -79,7 +79,7 @@ const App: React.FC = () => {
   // Handle city selection to update both center and bbox  
   const handleCitySelect = (city: { coordinates: [number, number] } | null) => {
     if (city) {
-      console.log("🏙️ City selected:", city);
+      // City selected
       
       // Clear any existing bbox first to ensure React detects the change
       setBbox(null);
@@ -88,15 +88,15 @@ const App: React.FC = () => {
       // Wait for map animation to complete, then update bbox
       setTimeout(() => {
         if (bboxSelectorRef.current) {
-          console.log("🔄 Updating bbox after city jump...");
+          // Updating bbox after city jump
           try {
             bboxSelectorRef.current.updateBbox();
-            console.log("✅ Bbox updated - should trigger automatic geometry processing");
+            // Bbox updated
           } catch (error) {
-            console.error("❌ Failed to update bbox after city jump:", error);
+            // Failed to update bbox after city jump
           }
         } else {
-          console.warn("⚠️ BboxSelector ref not available for updateBbox");
+          // BboxSelector ref not available for updateBbox
         }
       }, 500);
     }
@@ -214,8 +214,8 @@ const App: React.FC = () => {
         height: 200,
       }}
       onChange={(geojson) => {
-        console.log("🔄 BboxSelector onChange triggered");
-        console.log("📦 New bbox geojson:", geojson);
+        // BboxSelector onChange triggered
+        // New bbox geojson received
         
         // Validate bbox geometry before setting
         if (geojson && geojson.geometry && geojson.geometry.coordinates) {
@@ -226,31 +226,24 @@ const App: React.FC = () => {
             const [bottomRightLng, bottomRightLat] = coords[2];
             const [bottomLeftLng, bottomLeftLat] = coords[3];
             
-            console.log("🗺️ Bbox bounds:", {
-              topLeft: [topLeftLng, topLeftLat],
-              topRight: [topRightLng, topRightLat], 
-              bottomRight: [bottomRightLng, bottomRightLat],
-              bottomLeft: [bottomLeftLng, bottomLeftLat],
-              width: Math.abs(topRightLng - topLeftLng),
-              height: Math.abs(topLeftLat - bottomLeftLat)
-            });
+            // Bbox bounds calculated
             
             // Check for invalid coordinates
             const allCoords = [topLeftLng, topLeftLat, topRightLng, topRightLat, bottomRightLng, bottomRightLat, bottomLeftLng, bottomLeftLat];
             const hasInvalidCoords = allCoords.some(coord => !Number.isFinite(coord));
             
             if (hasInvalidCoords) {
-              console.error("❌ Invalid bbox coordinates detected!", allCoords);
+              // Invalid bbox coordinates detected
               return;
             }
             
             setBbox(geojson);
-            console.log("✅ Bbox updated successfully");
+            // Bbox updated successfully
           } else {
-            console.error("❌ Invalid bbox geometry - insufficient coordinates:", coords);
+            // Invalid bbox geometry - insufficient coordinates
           }
         } else {
-          console.error("❌ Invalid bbox geojson structure:", geojson);
+          // Invalid bbox geojson structure
         }
       }}
     />

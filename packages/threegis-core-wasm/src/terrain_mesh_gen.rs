@@ -411,8 +411,7 @@ pub fn test_full_terrain_generation_manifold() -> Result<bool, String> {
         polygons.push(polygon);
     }
 
-    println!("Generated {} triangular polygons from full terrain pipeline", polygons.len());
-    println!("Total positions: {}, indices: {}", terrain_result.positions.len() / 3, terrain_result.indices.len() / 3);
+    // Terrain polygons generated
 
     // Create CSG and check if manifold
     let csg: CSG<()> = CSG::from_polygons(&polygons);
@@ -478,7 +477,7 @@ mod tests {
     fn test_terrain_mesh_is_manifold() {
         match test_manifold_terrain_mesh() {
             Ok(is_manifold) => {
-                println!("Terrain mesh manifold test result: {}", is_manifold);
+                // Test completed
                 assert!(is_manifold, "Terrain mesh should be manifold!");
             }
             Err(e) => {
@@ -491,7 +490,7 @@ mod tests {
     fn test_full_terrain_generation_with_fake_dem_is_manifold() {
         match test_full_terrain_generation_manifold() {
             Ok(is_manifold) => {
-                println!("Full terrain generation with DEM manifold test result: {}", is_manifold);
+                // Test completed
                 assert!(is_manifold, "Full terrain generation should produce manifold mesh!");
             }
             Err(e) => {

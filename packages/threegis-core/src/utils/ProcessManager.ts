@@ -158,7 +158,7 @@ class ProcessManager {
         wasmModule.clear_process_cache_js(processId);
       }
     } catch (error) {
-      console.warn('Failed to clear WASM cache:', error);
+      
     }
 
     // Remove process data
@@ -233,7 +233,7 @@ class ProcessManager {
       try {
         listener(status);
       } catch (error) {
-        console.error('Error in process status listener:', error);
+        
       }
     });
   }

@@ -91,14 +91,14 @@ export class PerformanceMonitor {
     // Start collecting metrics every 100ms
     this.startMetricsCollection();
 
-    console.log(`🔍 Performance monitoring started for session: ${sessionId}`);
+    
 
     return sessionId;
   }
 
   endSession(): ProcessingSession | null {
     if (!this.currentSession) {
-      console.warn('No active performance monitoring session');
+      
       return null;
     }
 
@@ -111,7 +111,7 @@ export class PerformanceMonitor {
     const session = this.currentSession;
     this.currentSession = null;
 
-    console.log('📊 Performance monitoring session completed:', session.analysis);
+    
 
     return session;
   }
@@ -140,7 +140,7 @@ export class PerformanceMonitor {
 
     this.currentSession.layerData.push(layerData);
 
-    console.log(`⏱️ Layer "${data.layerName}" processed in ${processingTimeMs.toFixed(1)}ms`);
+    
   }
 
   private startMetricsCollection(): void {
@@ -382,7 +382,7 @@ export class PerformanceMonitor {
 
         this.perfObserver.observe({ entryTypes: ['measure', 'navigation'] });
       } catch (error) {
-        console.warn('Performance Observer not available:', error);
+        
       }
     }
   }
@@ -397,28 +397,28 @@ export class PerformanceMonitor {
 
   logPerformanceSummary(session: ProcessingSession): void {
     if (!session.analysis) {
-      console.warn('No analysis data available for session');
+      
       return;
     }
 
     const analysis = session.analysis;
 
-    console.group('🚀 Performance Analysis Summary');
-    console.log(`Efficiency: ${analysis.efficiency.toFixed(1)}%`);
-    console.log(`Actual Speedup: ${analysis.actualSpeedup.toFixed(2)}x`);
-    console.log(`Theoretical Speedup: ${analysis.theoreticalSpeedup.toFixed(2)}x`);
-    console.log(`CPU Utilization: ${analysis.cpuUtilization.toFixed(1)}%`);
+    
+    
+    
+    
+    
 
     if (analysis.bottleneckDetected) {
-      console.warn(`⚠️ Bottleneck: ${analysis.bottleneckReason}`);
+      
     }
 
-    console.log('🔧 Recommendations:');
+    
     analysis.recommendedOptimizations.forEach((rec, index) => {
-      console.log(`  ${index + 1}. ${rec}`);
+      
     });
 
-    console.groupEnd();
+    
   }
 
   // Cleanup

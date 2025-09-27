@@ -85,7 +85,7 @@ export async function initializeWasm(): Promise<void> {
       );
 
       if (missingFunctions.length > 0) {
-        console.warn(`Some WASM functions not available: ${missingFunctions.join(', ')}`);
+        
         // Don't throw error - allow initialization to continue
       }
 

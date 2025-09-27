@@ -74,7 +74,7 @@ export class SharedResourceManager {
     bbox: [number, number, number, number]
   ): Promise<VectorTileData[]> {
     try {
-      console.log(`📦 Extracting vector tiles from main thread for process: ${processId}`);
+      
 
       const wasmModule = getWasmModule();
       if (!wasmModule) {
@@ -91,7 +91,7 @@ export class SharedResourceManager {
           const processIds = wasmModule.get_cached_process_ids_js();
 
           if (processIds && processIds.includes(processId)) {
-            console.log(`📦 Found process ${processId} in WASM cache`);
+            
 
             // Try different data keys that might contain vector tile information
             const possibleDataKeys = [
@@ -107,7 +107,7 @@ export class SharedResourceManager {
                 const tileDataJson = wasmModule.get_process_feature_data_js(processId, dataKey);
 
                 if (tileDataJson) {
-                  console.log(`✅ Found vector tile data under key: ${dataKey}`);
+                  
                   const tileData = JSON.parse(tileDataJson);
 
                   if (Array.isArray(tileData)) {
@@ -131,15 +131,15 @@ export class SharedResourceManager {
                   break; // Exit loop if we found data
                 }
               } catch (parseError) {
-                console.warn(`Failed to parse data for key ${dataKey}:`, parseError);
+                
               }
             }
           } else {
-            console.warn(`⚠️ Process ${processId} not found in cached process IDs`);
+            
           }
         }
       } catch (error) {
-        console.warn(`⚠️ Error accessing process feature data:`, error);
+        
       }
 
       // Alternative approach: Use fetch_vector_tiles to cache tiles (not extract)
@@ -156,15 +156,15 @@ export class SharedResourceManager {
         };
 
         this.resourceCache.set(processId, resourceState);
-        console.log(`✅ Cached ${vectorTiles.length} vector tiles for process ${processId}`);
+        
       } else {
-        console.warn(`⚠️ No vector tiles found in main thread cache for process ${processId}`);
+        
       }
 
       return vectorTiles;
 
     } catch (error) {
-      console.error(`❌ Failed to extract vector tiles from main thread:`, error);
+      
       return [];
     }
   }
@@ -178,7 +178,7 @@ export class SharedResourceManager {
     zoom: number
   ): Promise<VectorTileData[]> {
     try {
-      console.log(`🔄 Intercepting vector tile fetch for process: ${processId}`);
+      
 
       // Calculate which tiles we need for the bbox
       const tiles = this.calculateRequiredTiles(bbox, zoom);
@@ -208,7 +208,7 @@ export class SharedResourceManager {
             vectorTiles.push(vectorTile);
           }
         } catch (tileError) {
-          console.warn(`Failed to fetch tile ${tile.z}/${tile.x}/${tile.y}:`, tileError);
+          
         }
       }
 
@@ -222,13 +222,13 @@ export class SharedResourceManager {
         };
 
         this.resourceCache.set(processId, resourceState);
-        console.log(`✅ Intercepted and cached ${vectorTiles.length} vector tiles`);
+        
       }
 
       return vectorTiles;
 
     } catch (error) {
-      console.error(`❌ Failed to intercept vector tiles:`, error);
+      
       return [];
     }
   }
@@ -306,7 +306,7 @@ export class SharedResourceManager {
           worker.removeEventListener('message', messageHandler);
 
           if (event.data.success) {
-            console.log(`✅ Resources transferred to worker for process ${processId}`);
+            
             resolve();
           } else {
             reject(new Error(event.data.error || 'Resource transfer failed'));
@@ -323,7 +323,7 @@ export class SharedResourceManager {
         data: transferData
       });
 
-      console.log(`📤 Transferring ${transferData.vectorTiles.length} tiles to worker`);
+      
     });
   }
 
@@ -386,9 +386,9 @@ export class SharedResourceManager {
 
     if (resourceState) {
       resourceState.elevationData = elevationData;
-      console.log(`✅ Added elevation data to resource cache for process ${processId}`);
+      
     } else {
-      console.warn(`⚠️ No resource state found for process ${processId} when adding elevation data`);
+      
     }
   }
 
@@ -398,7 +398,7 @@ export class SharedResourceManager {
   clearResources(processId: string): void {
     const deleted = this.resourceCache.delete(processId);
     if (deleted) {
-      console.log(`🗑️ Cleared cached resources for process ${processId}`);
+      
     }
   }
 
@@ -459,7 +459,7 @@ export class SharedResourceManager {
     }
 
     if (cleaned > 0) {
-      console.log(`🧹 Cleaned up ${cleaned} old resource caches`);
+      
     }
   }
 }

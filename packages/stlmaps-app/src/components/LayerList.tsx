@@ -13,6 +13,7 @@ import {
   InputAdornment,
   FormControlLabel,
   Checkbox,
+  Button,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -24,8 +25,10 @@ import ForestIcon from '@mui/icons-material/Forest';
 import DirectionsIcon from '@mui/icons-material/Directions';
 import LayersIcon from '@mui/icons-material/Layers';
 import FormatColorFillIcon from '@mui/icons-material/FormatColorFill';
-// THREE import no longer needed since colors are now strings
+import BugReportIcon from '@mui/icons-material/BugReport';
 import { useAppStore } from '../stores/useAppStore';
+import { VertexDebugDialog } from './VertexDebugDialog';
+import * as THREE from 'three';
 
 // No props needed anymore as we'll use the Zustand store
 
@@ -69,6 +72,7 @@ const LayerList: React.FC = () => {
   const {
     vtLayers,
     terrainSettings,
+    sceneGetter,
     toggleLayerEnabled,
     setLayerColor,
     setLayerExtrusionDepth,
@@ -84,6 +88,18 @@ const LayerList: React.FC = () => {
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({
     terrain: false,
     buildings: true,
+  });
+
+  const [debugDialog, setDebugDialog] = useState<{
+    open: boolean;
+    layerName: string;
+    layerMesh: THREE.Mesh | null;
+    terrainMesh: THREE.Mesh | null;
+  }>({
+    open: false,
+    layerName: '',
+    layerMesh: null,
+    terrainMesh: null
   });
 
   const handleLayerToggle = (index: number) => {
@@ -139,6 +155,72 @@ const LayerList: React.FC = () => {
       ...prev,
       [layerId]: !prev[layerId]
     }));
+  };
+
+  const analyzeLayerVertices = (layerIndex: number) => {
+    const layer = vtLayers[layerIndex];
+
+    if (!layer) {
+      return;
+    }
+
+    if (!sceneGetter) {
+      return;
+    }
+
+    const scene = sceneGetter();
+    if (!scene) {
+      return;
+    }
+
+    // Find the layer mesh and terrain mesh in the scene
+    let layerMesh: THREE.Mesh | null = null;
+    let terrainMesh: THREE.Mesh | null = null;
+    const meshes: Array<{name: string; userData: any}> = [];
+
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        meshes.push({name: child.name, userData: child.userData});
+
+        // Check if this is the layer mesh by matching userData properties
+        const meshLabel = child.userData?.label;
+        const meshSourceLayer = child.userData?.sourceLayer;
+
+        if ((meshLabel && meshLabel === layer.label) ||
+            (meshSourceLayer && meshSourceLayer === layer.sourceLayer) ||
+            (meshLabel && meshLabel === layer.sourceLayer)) {
+          layerMesh = child;
+        }
+
+        // Check if this is the terrain mesh
+        if (child.name === 'terrain') {
+          terrainMesh = child;
+        }
+      }
+    });
+
+    console.log('Debug mesh search:', {
+      targetLayer: layer.label || layer.sourceLayer,
+      targetSourceLayer: layer.sourceLayer,
+      foundMeshes: meshes.map(m => ({
+        name: m.name,
+        userDataLabel: m.userData?.label,
+        userDataSourceLayer: m.userData?.sourceLayer
+      })),
+      foundLayerMesh: !!layerMesh,
+      foundTerrainMesh: !!terrainMesh
+    });
+
+    setDebugDialog({
+      open: true,
+      layerName: layer.label || layer.sourceLayer,
+      layerMesh,
+      terrainMesh
+    });
+  };
+
+  const closeDebugDialog = () => {
+    setDebugDialog(prev => ({ ...prev, open: false }));
   };
 
   const getLayerIcon = (sourceLayer: string, label?: string) => {
@@ -469,11 +551,34 @@ const LayerList: React.FC = () => {
                   />
                 </Box>
 
+                {/* Debug Vertex Heights Button */}
+                <Box sx={{ mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<BugReportIcon />}
+                    onClick={() => analyzeLayerVertices(index)}
+                    fullWidth
+                  >
+                    Debug Vertex Heights
+                  </Button>
+                </Box>
+
               </Box>
             </Collapse>
           </StyledPaper>
         );
       })}
+
+      {/* Debug Dialog */}
+      <VertexDebugDialog
+        open={debugDialog.open}
+        onClose={closeDebugDialog}
+        layerName={debugDialog.layerName}
+        layerMesh={debugDialog.layerMesh}
+        terrainMesh={debugDialog.terrainMesh}
+      />
+
     </Box>
   );
 };

@@ -16,6 +16,7 @@ pub struct TerrainGeometryParams {
     pub vertical_exaggeration: f64,
     pub terrain_base_height: f64,
     pub process_id: String,
+    pub use_simple_mesh: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,6 +42,11 @@ pub async fn check_gpu_terrain_support() -> bool {
 pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsValue> {
     // Parse parameters
     let params: TerrainGeometryParams = serde_wasm_bindgen::from_value(params_js)?;
+
+    // Check if simple mesh (flat terrain) is requested
+    if params.use_simple_mesh {
+        return create_simple_flat_terrain(&params).await;
+    }
 
     // Get elevation data
     let elevation_grid = {
@@ -147,22 +153,18 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     let use_gpu_terrain = std::env::var("WASM_GPU_TERRAIN_FORCE").is_ok();
 
     if use_gpu_terrain {
-        crate::console_log!("WARNING: Using GPU terrain generation which produces non-manifold geometry");
         match crate::gpu_terrain::generate_terrain_mesh_gpu(&elevation_result, &params).await {
             Ok(gpu_result) => {
-                crate::console_log!("GPU terrain generation completed successfully (non-manifold)!");
                 let js_result = convert_terrain_geometry_to_js(gpu_result)?;
                 return Ok(js_result);
             }
-            Err(e) => {
-                crate::console_log!("GPU terrain generation failed ({}), falling back to CPU",
-                    e.as_string().unwrap_or_else(|| "unknown error".to_string()));
+            Err(_e) => {
+                // GPU processing failed, fall back to CPU
             }
         }
     }
 
     // Use manifold mesh-based terrain generation (CPU - produces guaranteed manifold geometry)
-    crate::console_log!("Using manifold mesh-cutting terrain generation");
 
     match terrain_mesh_gen::generate_terrain_with_mesh_cutting(&elevation_result, &params) {
         Ok(result) => {
@@ -224,4 +226,77 @@ fn convert_terrain_geometry_to_js(result: TerrainGeometryResult) -> Result<JsVal
     )?;
 
     Ok(js_obj.into())
+}
+
+// Create a simple flat terrain block without elevation data
+async fn create_simple_flat_terrain(params: &TerrainGeometryParams) -> Result<JsValue, JsValue> {
+    // Create a simple flat rectangular mesh at the base terrain height
+    let base_height = params.terrain_base_height;
+
+    // Define terrain size - matching the regular terrain size
+    let terrain_size = 200.0; // Same as TERRAIN_SIZE in polygon_geometry.rs
+    let half_size = terrain_size / 2.0;
+
+    // Create vertices for a simple flat rectangle
+    // Bottom vertices (4 corners at base level)
+    let positions = vec![
+        -half_size as f32, -half_size as f32, 0.0,      // Bottom-left bottom
+        half_size as f32,  -half_size as f32, 0.0,      // Bottom-right bottom
+        half_size as f32,  half_size as f32,  0.0,      // Top-right bottom
+        -half_size as f32, half_size as f32,  0.0,      // Top-left bottom
+        // Top vertices (4 corners at terrain height)
+        -half_size as f32, -half_size as f32, base_height as f32, // Bottom-left top
+        half_size as f32,  -half_size as f32, base_height as f32, // Bottom-right top
+        half_size as f32,  half_size as f32,  base_height as f32, // Top-right top
+        -half_size as f32, half_size as f32,  base_height as f32, // Top-left top
+    ];
+
+    // Create indices for a box (12 triangles = 36 indices)
+    let indices = vec![
+        // Bottom face (looking up)
+        0, 1, 2,  0, 2, 3,
+        // Top face (looking down)
+        4, 6, 5,  4, 7, 6,
+        // Front face
+        0, 4, 5,  0, 5, 1,
+        // Right face
+        1, 5, 6,  1, 6, 2,
+        // Back face
+        2, 6, 7,  2, 7, 3,
+        // Left face
+        3, 7, 4,  3, 4, 0,
+    ];
+
+    // Create colors (uniform terrain color)
+    let colors: Vec<f32> = (0..8).flat_map(|_| vec![0.8, 0.6, 0.4]).collect(); // 8 vertices * 3 components
+
+    // Create normals
+    let normals = vec![
+        // Bottom vertices (pointing down)
+        0.0, 0.0, -1.0,  0.0, 0.0, -1.0,  0.0, 0.0, -1.0,  0.0, 0.0, -1.0,
+        // Top vertices (pointing up)
+        0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,
+    ];
+
+    // Create a flat elevation grid (2x2 grid with base height)
+    let processed_elevation_grid = vec![
+        vec![base_height, base_height],
+        vec![base_height, base_height],
+    ];
+
+    // Create result
+    let result = TerrainGeometryResult {
+        positions,
+        indices,
+        colors,
+        normals,
+        processed_elevation_grid,
+        processed_min_elevation: base_height,
+        processed_max_elevation: base_height,
+        original_min_elevation: base_height,
+        original_max_elevation: base_height,
+    };
+
+    // Convert to JavaScript object
+    convert_terrain_geometry_to_js(result)
 }

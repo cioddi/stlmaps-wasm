@@ -208,19 +208,15 @@ pub async fn process_elevation_data_async(input_json: &str) -> Result<JsValue, J
         match crate::gpu_elevation::process_elevation_gpu(&input, &tile_data_array).await {
             Ok(gpu_result) => {
                 // GPU processing succeeded
-                crate::console_log!("GPU elevation processing completed successfully!");
                 return Ok(to_value(&gpu_result)?);
             }
-            Err(e) => {
+            Err(_e) => {
                 // GPU processing failed, fall back to CPU
-                crate::console_log!("GPU processing failed ({}), falling back to CPU",
-                    e.as_string().unwrap_or_else(|| "unknown error".to_string()));
             }
         }
     }
 
     // CPU fallback processing (original implementation)
-    crate::console_log!("Using CPU elevation processing");
 
     // Replace previous per-tile pixel loop with grid-based accumulation
 

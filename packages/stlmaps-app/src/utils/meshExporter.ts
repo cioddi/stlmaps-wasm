@@ -102,12 +102,12 @@ export async function exportWasmMeshAsGLB(
 
             resolve({ blob, url });
           } catch (error) {
-            console.error('Error processing GLB export result:', error);
+            
             reject(error);
           }
         },
         (error) => {
-          console.error('GLB export failed:', error);
+          
           reject(error);
         },
         {
@@ -121,7 +121,7 @@ export async function exportWasmMeshAsGLB(
     });
 
   } catch (error) {
-    console.error('Error in exportWasmMeshAsGLB:', error);
+    
     throw error;
   }
 }
@@ -204,7 +204,7 @@ export async function batchExportMeshesAsGLB(
       });
       results.push({ ...result, name });
     } catch (error) {
-      console.error(`Failed to export mesh ${name}:`, error);
+      
     }
   }
 

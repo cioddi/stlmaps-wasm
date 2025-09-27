@@ -193,6 +193,8 @@ interface LayerProcessingInput {
     gridSize: { width: number; height: number };
     originalMinElevation: number;
     originalMaxElevation: number;
+    processedMinElevation: number;
+    processedMaxElevation: number;
   };
   terrainSettings: any;
   debugMode: boolean;
@@ -218,11 +220,11 @@ let currentProcessId: string | null = null;
 
 async function initializeWasmInWorker(): Promise<void> {
   try {
-    console.log(`[Worker] Initializing WASM module...`);
+    
 
     // Initialize WASM fetch helpers first
     initWorkerWasmFetchHelpers();
-    console.log(`[Worker] WASM fetch helpers initialized`);
+    
 
     // Validate WebAssembly support
     if (!WebAssembly) {
@@ -273,7 +275,7 @@ async function initializeWasmInWorker(): Promise<void> {
     }
 
     isInitialized = true;
-    console.log(`[Worker] WASM module initialized successfully`);
+    
 
   } catch (error) {
     isInitialized = false;
@@ -288,7 +290,7 @@ async function initializeWasmInWorker(): Promise<void> {
 
 async function syncSharedResources(data: ResourceSyncData): Promise<void> {
   try {
-    console.log(`[Worker] Syncing shared resources for process: ${data.processId}`);
+    
 
     // Store process ID for future reference
     currentProcessId = data.processId;
@@ -312,10 +314,10 @@ async function syncSharedResources(data: ResourceSyncData): Promise<void> {
       await loadResourcesIntoWasm(data);
     }
 
-    console.log(`[Worker] Successfully synced ${data.vectorTiles.length} vector tiles`);
+    
 
   } catch (error) {
-    console.error(`[Worker] Failed to sync shared resources:`, error);
+    
     throw error;
   }
 }
@@ -328,7 +330,7 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
   try {
     // Load vector tiles into WASM process cache using add_process_feature_data_js
     if ((wasmModule as any).add_process_feature_data_js && data.vectorTiles.length > 0) {
-      console.log(`[Worker] Loading ${data.vectorTiles.length} vector tiles into WASM process cache`);
+      
 
       // Store vector tiles as JSON data in process cache
       const tileDataForWasm = data.vectorTiles.map(tile => ({
@@ -353,10 +355,10 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
           );
 
           if (success) {
-            console.log(`[Worker] ✅ Successfully stored vector tiles under key: ${dataKey}`);
+            
           }
         } catch (keyError) {
-          console.warn(`[Worker] Failed to store tiles under key ${dataKey}:`, keyError);
+          
         }
       }
 
@@ -378,7 +380,7 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
             JSON.stringify(tileData)
           );
         } catch (tileError) {
-          console.warn(`[Worker] Failed to store individual tile ${tile.tileKey}:`, tileError);
+          
         }
       }
     }
@@ -393,17 +395,17 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
         );
 
         if (success) {
-          console.log(`[Worker] ✅ Successfully stored elevation data`);
+          
         }
       } catch (elevationError) {
-        console.warn(`[Worker] Failed to store elevation data:`, elevationError);
+        
       }
     }
 
-    console.log(`[Worker] Successfully loaded resources into WASM instance for process ${data.processId}`);
+    
 
   } catch (error) {
-    console.warn(`[Worker] Warning: Could not load resources into WASM:`, error);
+    
     // Don't throw here as the worker can still function with fallback methods
   }
 }
@@ -427,7 +429,7 @@ async function ensureVectorTilesForProcess(
   try {
     // Check if we already have shared vector tiles
     if (sharedVectorTiles.size > 0) {
-      console.log(`[Worker] Using ${sharedVectorTiles.size} shared vector tiles for process ${processId}`);
+      
       return;
     }
 
@@ -435,7 +437,7 @@ async function ensureVectorTilesForProcess(
     if ((wasmModule as any).get_cached_process_ids_js) {
       const processIds = (wasmModule as any).get_cached_process_ids_js();
       if (processIds && processIds.includes(processId)) {
-        console.log(`[Worker] Vector tiles already available in WASM cache for process ${processId}`);
+        
         return;
       }
     }
@@ -443,7 +445,7 @@ async function ensureVectorTilesForProcess(
     // Create a unique worker process ID to avoid conflicts
     const workerProcessId = `${processId}_worker_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-    console.log(`[Worker] Fetching vector tiles directly with worker process ID: ${workerProcessId}`);
+    
 
     const [west, south, east, north] = bboxCoords;
     const fetchInput = {
@@ -459,16 +461,16 @@ async function ensureVectorTilesForProcess(
 
     if ((wasmModule as any).fetch_vector_tiles) {
       await (wasmModule as any).fetch_vector_tiles(fetchInput);
-      console.log(`[Worker] ✅ Successfully fetched vector tiles for worker process ${workerProcessId}`);
+      
 
       // Update currentProcessId to the worker process ID so feature extraction uses it
       currentProcessId = workerProcessId;
     } else {
-      console.warn(`[Worker] fetch_vector_tiles function not available`);
+      
     }
 
   } catch (error) {
-    console.warn(`[Worker] Warning: Could not ensure vector tiles for process ${processId}:`, error);
+    
     // Don't throw here - let the extraction attempt proceed and handle the error there
   }
 }
@@ -540,6 +542,9 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
       gridSize: terrainData.gridSize,
       minElevation: terrainData.originalMinElevation,
       maxElevation: terrainData.originalMaxElevation,
+      // Add terrain mesh data as CSV strings for easy serialization
+      terrainVerticesBase64: terrainData.terrainVertices ? Array.from(terrainData.terrainVertices).join(',') : '',
+      terrainIndicesBase64: terrainData.terrainIndices ? Array.from(terrainData.terrainIndices).join(',') : '',
       vtDataSet: {
         ...layerConfig,
         geometryDebugMode: debugMode
@@ -668,7 +673,7 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
     };
 
   } catch (error) {
-    console.error(`[Worker] Layer processing failed:`, error);
+    
     throw error;
   }
 }
@@ -719,7 +724,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       case 'cancel':
         if (currentTaskId === id || !id) {
           cancelFlag = true;
-          console.log(`[Worker] Cancelling task: ${currentTaskId || 'all'}`);
+          
         }
         break;
 
@@ -729,7 +734,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           try {
             (wasmModule as any).clear_process_cache_js();
           } catch (cleanupError) {
-            console.warn('[Worker] Cleanup error:', cleanupError);
+            
           }
         }
 
@@ -743,7 +748,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     }
 
   } catch (error) {
-    console.error(`[Worker] Error handling message:`, error);
+    
 
     postMessage({
       id,
@@ -755,7 +760,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
 // Handle worker errors
 self.onerror = (error) => {
-  console.error('[Worker] Unhandled error:', error);
+  
 
   if (currentTaskId) {
     postMessage({
