@@ -155,6 +155,7 @@ interface AppState {
   setLayerBufferSize: (index: number, size: number) => void;
   toggleLayerUseAdaptiveScaleFactor: (index: number) => void;
   toggleLayerAlignVerticesToTerrain: (index: number) => void;
+  toggleLayerApplyMedianHeight: (index: number) => void;
   setLayerHeightScaleFactor: (index: number, factor: number) => void;
   setLayerCsgClipping: (index: number, enabled: boolean) => void;
   setLayerOrder: (index: number, order: number) => void;
@@ -451,6 +452,11 @@ export const useAppStore = create<AppState>()(
     toggleLayerAlignVerticesToTerrain: (index) => set(state => ({
       vtLayers: state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, alignVerticesToTerrain: !layer.alignVerticesToTerrain } : layer
+      )
+    })),
+    toggleLayerApplyMedianHeight: (index) => set(state => ({
+      vtLayers: state.vtLayers.map((layer, i) =>
+        i === index ? { ...layer, applyMedianHeight: !layer.applyMedianHeight } : layer
       )
     })),
     setLayerHeightScaleFactor: (index, factor) => set(state => {

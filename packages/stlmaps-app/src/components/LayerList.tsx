@@ -81,6 +81,7 @@ const LayerList: React.FC = () => {
     setLayerBufferSize,
     toggleLayerUseAdaptiveScaleFactor,
     toggleLayerAlignVerticesToTerrain,
+    toggleLayerApplyMedianHeight,
     setLayerHeightScaleFactor,
     setTerrainSettings,
   } = useAppStore();
@@ -300,9 +301,9 @@ const LayerList: React.FC = () => {
               onChange={(_, newValue) => setTerrainSettings({
                 verticalExaggeration: newValue as number
               })}
-              min={0.1}
-              max={10.0}
-              step={0.1}
+              min={0.01}
+              max={20.0}
+              step={0.5}
               marks={[
                 { value: 0.1, label: "0.1" },
                 { value: 5, label: "5" },
@@ -550,6 +551,22 @@ const LayerList: React.FC = () => {
                     label="Align Vertices to Terrain"
                   />
                 </Box>
+
+                {/* Apply Median Height - only show for building layers */}
+                {layer.sourceLayer === 'building' && (
+                  <Box sx={{ mt: 2 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={layer.applyMedianHeight === true}
+                          onChange={() => toggleLayerApplyMedianHeight(index)}
+                          size="small"
+                        />
+                      }
+                      label="Apply Median Height (fix buildings with height=5)"
+                    />
+                  </Box>
+                )}
 
                 {/* Debug Vertex Heights Button */}
                 <Box sx={{ mt: 2 }}>

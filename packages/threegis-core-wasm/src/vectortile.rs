@@ -1745,56 +1745,45 @@ fn decode_mvt_geometry_to_tile_coords(commands: &[u32], geom_type_str: &str) -> 
 }
 
 /// Apply median height fallback for buildings without height data
-/// Uses the median of the upper 50% of buildings with defined heights
-/// Includes all positive height values including render_height=5
+/// Uses the median of buildings with render_height > 5 and applies it to buildings with render_height < 6
 fn apply_median_height_fallback(geometry_list: &mut Vec<GeometryData>) {
-    // First pass: collect all valid heights (> 0.0, including all render_height values)
+    // First pass: collect heights from buildings with render_height > 5
     let mut valid_heights: Vec<f64> = geometry_list
         .iter()
         .filter_map(|geom| geom.height)
-        .filter(|&h| h > 0.0) // Accept all positive heights including render_height=5
+        .filter(|&h| h > 5.0) // Only consider buildings with height > 5
         .collect();
 
     if valid_heights.is_empty() {
-        // No valid heights found, use a reasonable default for buildings
-        let default_height = 15.0; // ~5 stories, reasonable urban building height
-
-        for geometry in geometry_list.iter_mut() {
-            if geometry.height.is_none() || geometry.height == Some(0.0) {
-                geometry.height = Some(default_height);
-            }
-        }
+        // No buildings with height > 5 found, don't modify any heights
         return;
     }
 
-    // Sort heights to work with upper 50%
+    // Sort heights to calculate median
     valid_heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-    // Take the upper 50% of buildings (taller half)
-    let split_point = valid_heights.len() / 2;
-    let upper_half = &valid_heights[split_point..];
-
-    // Calculate median of the upper 50%
-    let median_height = if upper_half.len() == 1 {
-        // Only one building in upper half
-        upper_half[0]
-    } else if upper_half.len() % 2 == 0 {
-        // Even number of elements in upper half: average of middle two
-        let mid = upper_half.len() / 2;
-        (upper_half[mid - 1] + upper_half[mid]) / 2.0
+    // Calculate median of all buildings with height > 5
+    let median_height = if valid_heights.len() == 1 {
+        valid_heights[0]
+    } else if valid_heights.len() % 2 == 0 {
+        // Even number of elements: average of middle two
+        let mid = valid_heights.len() / 2;
+        (valid_heights[mid - 1] + valid_heights[mid]) / 2.0
     } else {
-        // Odd number of elements in upper half: middle element
-        upper_half[upper_half.len() / 2]
+        // Odd number of elements: middle element
+        valid_heights[valid_heights.len() / 2]
     };
 
-    // Calculated median height from upper 50%
-
-    // Height distribution processing completed
-
-    // Second pass: apply median height of upper 50% to buildings without height data
+    // Second pass: apply median height to buildings with height < 6
     let mut updated_count = 0;
     for geometry in geometry_list.iter_mut() {
-        if geometry.height.is_none() || geometry.height == Some(0.0) {
+        if let Some(height) = geometry.height {
+            if height < 6.0 {
+                geometry.height = Some(median_height);
+                updated_count += 1;
+            }
+        } else {
+            // Also apply to buildings with no height data
             geometry.height = Some(median_height);
             updated_count += 1;
         }
