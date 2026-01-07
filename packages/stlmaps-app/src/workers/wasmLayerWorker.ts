@@ -570,7 +570,9 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
         ...layerConfig,
         geometryDebugMode: debugMode
       },
-      useSameZOffset: true,
+      // Buildings should NOT use same Z offset - each building needs to sit on its own terrain location
+      // Other layers like roads/parks can share Z offset for consistency
+      useSameZOffset: layerConfig.sourceLayer !== 'building',
       processId: activeProcessId,
     };
 

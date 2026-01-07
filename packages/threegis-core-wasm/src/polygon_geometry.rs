@@ -1,13 +1,11 @@
 use crate::bbox_filter::polygon_intersects_bbox;
 use crate::extrude;
-use crate::console_log;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-// Sequential processing for WASM compatibility
-// use csgrs::csg::CSG; // Temporarily commented out - CSG functionality disabled
 use js_sys::{Array, Float32Array};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::JsValue;
+
 
 
 // Import GPU elevation processing functions (for future use)
@@ -15,12 +13,15 @@ use wasm_bindgen::prelude::JsValue;
 use crate::gpu_elevation::align_vertices_to_terrain_gpu;
 
 // Constants ported from TypeScript
-const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
+const BUILDING_SUBMERGE_OFFSET: f64 = 0.05; // How far buildings are embedded into terrain (small to avoid artifacts)
 const MIN_HEIGHT: f64 = 0.01; // Avoid zero or negative height for robust geometry
 const MAX_HEIGHT: f64 = 500.0;
 const MIN_CLEARANCE: f64 = 0.1; // Minimum clearance above terrain to avoid z-fighting and mesh intersections
 // Scale factor to make vertical exaggeration values more visible (must match terrain_mesh_gen.rs)
 const EXAGGERATION_SCALE_FACTOR: f64 = 5.0;
+// Maximum edge length for subdivision (ensures terrain-aligned geometries follow terrain properly)
+// TERRAIN_SIZE is 200.0, so 5.0 means roughly 40 segments across the full terrain
+const MAX_EDGE_LENGTH: f64 = 5.0;
 
 // Helper function to decode base64 string to f32 vector
 fn decode_base64_to_f32_vec(base64_data: &str) -> Result<Vec<f32>, String> {
@@ -274,6 +275,322 @@ fn sample_elevation_from_grid(
     let v1 = v01 * (1.0 - dx) + v11 * dx;
 
     v0 * (1.0 - dy) + v1 * dy
+}
+
+/// Subdivide polygon edges to ensure no edge is longer than max_length.
+/// This is important for terrain-aligned geometries to follow terrain properly.
+fn subdivide_polygon_edges(points: &[Vector2], max_length: f64) -> Vec<Vector2> {
+    if points.len() < 2 {
+        return points.to_vec();
+    }
+    
+    let mut result = Vec::with_capacity(points.len() * 2);
+    
+    for i in 0..points.len() {
+        let p1 = points[i];
+        let p2 = points[(i + 1) % points.len()];
+        
+        // Calculate edge length
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        let edge_length = (dx * dx + dy * dy).sqrt();
+        
+        // Always add the start point
+        result.push(p1);
+        
+        // If edge is longer than max_length, subdivide it
+        if edge_length > max_length {
+            let num_segments = (edge_length / max_length).ceil() as usize;
+            for j in 1..num_segments {
+                let t = j as f64 / num_segments as f64;
+                result.push(Vector2 {
+                    x: p1.x + dx * t,
+                    y: p1.y + dy * t,
+                });
+            }
+        }
+    }
+    
+    result
+}
+
+/// Clip a polygon against a plane using Sutherland-Hodgman algorithm
+fn clip_polygon_against_plane(
+    polygon: &[(f64, f64, f64)],
+    plane_normal: (f64, f64, f64),
+    plane_point: (f64, f64, f64),
+) -> Vec<(f64, f64, f64)> {
+    if polygon.is_empty() {
+        return Vec::new();
+    }
+
+    let mut output = Vec::new();
+    
+    for i in 0..polygon.len() {
+        let current = polygon[i];
+        let next = polygon[(i + 1) % polygon.len()];
+        
+        // Calculate signed distance to plane
+        let current_dist = (current.0 - plane_point.0) * plane_normal.0
+            + (current.1 - plane_point.1) * plane_normal.1
+            + (current.2 - plane_point.2) * plane_normal.2;
+        let next_dist = (next.0 - plane_point.0) * plane_normal.0
+            + (next.1 - plane_point.1) * plane_normal.1
+            + (next.2 - plane_point.2) * plane_normal.2;
+        
+        let current_inside = current_dist >= -1e-10;
+        let next_inside = next_dist >= -1e-10;
+        
+        if current_inside {
+            output.push(current);
+        }
+        
+        // If edge crosses plane, add intersection point
+        if current_inside != next_inside {
+            let t = current_dist / (current_dist - next_dist);
+            let intersection = (
+                current.0 + t * (next.0 - current.0),
+                current.1 + t * (next.1 - current.1),
+                current.2 + t * (next.2 - current.2),
+            );
+            output.push(intersection);
+        }
+    }
+    
+    output
+}
+
+/// Clip a 3D mesh to a bounding box using polygon clipping algorithm.
+/// This produces clean cut edges and watertight geometry with cap faces.
+/// Returns (clipped_vertices, clipped_indices)
+fn clip_mesh_to_bbox_3d(
+    vertices: &[f32],
+    indices: &[u32],
+    bbox_min_x: f64,
+    bbox_min_y: f64,
+    bbox_max_x: f64,
+    bbox_max_y: f64,
+) -> (Vec<f32>, Vec<u32>) {
+    if indices.is_empty() || vertices.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    let mut new_vertices = Vec::new();
+    let mut new_indices = Vec::new();
+    let mut vertex_map: HashMap<(i64, i64, i64), u32> = HashMap::new();
+    
+    // Track edges for cap generation: edge -> count
+    let mut edge_count: HashMap<(u32, u32), usize> = HashMap::new();
+    
+    // Process each triangle
+    for tri in indices.chunks(3) {
+        if tri.len() != 3 {
+            continue;
+        }
+
+        let i0 = tri[0] as usize * 3;
+        let i1 = tri[1] as usize * 3;
+        let i2 = tri[2] as usize * 3;
+
+        if i0 + 2 >= vertices.len() || i1 + 2 >= vertices.len() || i2 + 2 >= vertices.len() {
+            continue;
+        }
+
+        // Get triangle vertices
+        let mut polygon = vec![
+            (vertices[i0] as f64, vertices[i0 + 1] as f64, vertices[i0 + 2] as f64),
+            (vertices[i1] as f64, vertices[i1 + 1] as f64, vertices[i1 + 2] as f64),
+            (vertices[i2] as f64, vertices[i2 + 1] as f64, vertices[i2 + 2] as f64),
+        ];
+
+        // Clip against all 4 bounding box planes
+        // Left plane (X = min_x)
+        polygon = clip_polygon_against_plane(&polygon, (1.0, 0.0, 0.0), (bbox_min_x, 0.0, 0.0));
+        if polygon.is_empty() { continue; }
+        
+        // Right plane (X = max_x)
+        polygon = clip_polygon_against_plane(&polygon, (-1.0, 0.0, 0.0), (bbox_max_x, 0.0, 0.0));
+        if polygon.is_empty() { continue; }
+        
+        // Bottom plane (Y = min_y)
+        polygon = clip_polygon_against_plane(&polygon, (0.0, 1.0, 0.0), (0.0, bbox_min_y, 0.0));
+        if polygon.is_empty() { continue; }
+        
+        // Top plane (Y = max_y)
+        polygon = clip_polygon_against_plane(&polygon, (0.0, -1.0, 0.0), (0.0, bbox_max_y, 0.0));
+        if polygon.is_empty() { continue; }
+
+        // Triangulate the clipped polygon (fan triangulation)
+        if polygon.len() < 3 {
+            continue;
+        }
+
+        for i in 1..(polygon.len() - 1) {
+            let v0 = polygon[0];
+            let v1 = polygon[i];
+            let v2 = polygon[i + 1];
+
+            // Quantize for deduplication
+            let key0 = (
+                (v0.0 * 1000.0).round() as i64,
+                (v0.1 * 1000.0).round() as i64,
+                (v0.2 * 1000.0).round() as i64,
+            );
+            let key1 = (
+                (v1.0 * 1000.0).round() as i64,
+                (v1.1 * 1000.0).round() as i64,
+                (v1.2 * 1000.0).round() as i64,
+            );
+            let key2 = (
+                (v2.0 * 1000.0).round() as i64,
+                (v2.1 * 1000.0).round() as i64,
+                (v2.2 * 1000.0).round() as i64,
+            );
+
+            let idx0 = *vertex_map.entry(key0).or_insert_with(|| {
+                let idx = (new_vertices.len() / 3) as u32;
+                new_vertices.push(v0.0 as f32);
+                new_vertices.push(v0.1 as f32);
+                new_vertices.push(v0.2 as f32);
+                idx
+            });
+
+            let idx1 = *vertex_map.entry(key1).or_insert_with(|| {
+                let idx = (new_vertices.len() / 3) as u32;
+                new_vertices.push(v1.0 as f32);
+                new_vertices.push(v1.1 as f32);
+                new_vertices.push(v1.2 as f32);
+                idx
+            });
+
+            let idx2 = *vertex_map.entry(key2).or_insert_with(|| {
+                let idx = (new_vertices.len() / 3) as u32;
+                new_vertices.push(v2.0 as f32);
+                new_vertices.push(v2.1 as f32);
+                new_vertices.push(v2.2 as f32);
+                idx
+            });
+
+            new_indices.push(idx0);
+            new_indices.push(idx1);
+            new_indices.push(idx2);
+            
+            // Track edges (store in canonical order: smaller index first)
+            let edges = [
+                (idx0.min(idx1), idx0.max(idx1)),
+                (idx1.min(idx2), idx1.max(idx2)),
+                (idx2.min(idx0), idx2.max(idx0)),
+            ];
+            
+            for edge in &edges {
+                *edge_count.entry(*edge).or_insert(0) += 1;
+            }
+        }
+    }
+    
+    // Find boundary edges (edges that appear only once - these are open edges)
+    let boundary_edges: Vec<(u32, u32)> = edge_count
+        .iter()
+        .filter(|(_, &count)| count == 1)
+        .map(|(&edge, _)| edge)
+        .collect();
+    
+    // Collect boundary vertices on each bbox plane and create cap polygons
+    if !boundary_edges.is_empty() {
+        let tolerance = 0.1;
+        
+        // Separate boundary edges by which plane they're on
+        let mut edges_on_min_x = Vec::new();
+        let mut edges_on_max_x = Vec::new();
+        let mut edges_on_min_y = Vec::new();
+        let mut edges_on_max_y = Vec::new();
+        
+        for &(idx0, idx1) in &boundary_edges {
+            let x0 = new_vertices[idx0 as usize * 3] as f64;
+            let y0 = new_vertices[idx0 as usize * 3 + 1] as f64;
+            
+            let x1 = new_vertices[idx1 as usize * 3] as f64;
+            let y1 = new_vertices[idx1 as usize * 3 + 1] as f64;
+            
+            // Check if both vertices are on a boundary plane
+            if (x0 - bbox_min_x).abs() < tolerance && (x1 - bbox_min_x).abs() < tolerance {
+                edges_on_min_x.push((idx0, idx1));
+            } else if (x0 - bbox_max_x).abs() < tolerance && (x1 - bbox_max_x).abs() < tolerance {
+                edges_on_max_x.push((idx0, idx1));
+            } else if (y0 - bbox_min_y).abs() < tolerance && (y1 - bbox_min_y).abs() < tolerance {
+                edges_on_min_y.push((idx0, idx1));
+            } else if (y0 - bbox_max_y).abs() < tolerance && (y1 - bbox_max_y).abs() < tolerance {
+                edges_on_max_y.push((idx0, idx1));
+            }
+        }
+        
+        // Helper to build chains and triangulate caps for one boundary plane
+        // Can have multiple disconnected chains (e.g., when linestring exits and re-enters bbox)
+        let mut build_cap = |edges: &[(u32, u32)]| {
+            if edges.is_empty() { return; }
+            
+            let mut used = vec![false; edges.len()];
+            
+            // Process all chains on this boundary
+            loop {
+                // Find first unused edge to start a new chain
+                let start_idx = used.iter().position(|&u| !u);
+                if start_idx.is_none() { break; }
+                let start_idx = start_idx.unwrap();
+                
+                // Build ordered chain of vertices starting from this edge
+                let mut chain = Vec::new();
+                chain.push(edges[start_idx].0);
+                chain.push(edges[start_idx].1);
+                used[start_idx] = true;
+                
+                // Keep adding connected edges
+                let mut changed = true;
+                while changed {
+                    changed = false;
+                    for i in 0..edges.len() {
+                        if used[i] { continue; }
+                        
+                        let last = *chain.last().unwrap();
+                        if edges[i].0 == last {
+                            chain.push(edges[i].1);
+                            used[i] = true;
+                            changed = true;
+                        } else if edges[i].1 == last {
+                            chain.push(edges[i].0);
+                            used[i] = true;
+                            changed = true;
+                        }
+                    }
+                }
+                
+                // Remove duplicates
+                chain.dedup();
+                
+                if chain.len() < 3 { continue; }
+                
+                // Triangulate the boundary contour using fan triangulation
+                // This creates a cap face that fills the hole
+                let first_idx = chain[0];
+                for i in 1..(chain.len() - 1) {
+                    let idx1 = chain[i];
+                    let idx2 = chain[i + 1];
+                    
+                    // Add triangle (first, i, i+1)
+                    new_indices.push(first_idx);
+                    new_indices.push(idx1);
+                    new_indices.push(idx2);
+                }
+            }
+        };
+        
+        build_cap(&edges_on_min_x);
+        build_cap(&edges_on_max_x);
+        build_cap(&edges_on_min_y);
+        build_cap(&edges_on_max_y);
+    }
+
+    (new_vertices, new_indices)
 }
 
 // Sample a terrain elevation at a specific geographic point with proper scaling
@@ -868,6 +1185,227 @@ fn is_point_inside_polygon(point: Vector2, polygon: &[Vector2]) -> bool {
     inside
 }
 
+/// Calculate the signed area of a polygon (positive = counter-clockwise, negative = clockwise)
+fn signed_polygon_area(points: &[Vector2]) -> f64 {
+    if points.len() < 3 {
+        return 0.0;
+    }
+    let mut area = 0.0;
+    let n = points.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        area += points[i].x * points[j].y;
+        area -= points[j].x * points[i].y;
+    }
+    area * 0.5
+}
+
+/// Maximum edge length for polygon subdivision before triangulation
+/// Smaller values = more triangles but slower processing
+const MAX_POLYGON_EDGE_LENGTH: f64 = 1.0; // In mesh coordinates - balanced value
+
+/// Clean a polygon for triangulation - validates, subdivides edges, and returns points if valid
+fn clean_polygon_for_triangulation(points: &[Vector2]) -> Option<Vec<Vector2>> {
+    if points.len() < 3 {
+        return None;
+    }
+    
+    // Check for minimum area - very small polygons cause triangulation issues
+    let area = signed_polygon_area(points).abs();
+    if area < EPSILON * EPSILON * 100.0 {
+        return None;
+    }
+    
+    // Subdivide edges to create more perimeter vertices
+    // This helps earcut create smaller triangles
+    let subdivided = subdivide_polygon_edges(points, MAX_POLYGON_EDGE_LENGTH);
+    
+    Some(subdivided)
+}
+
+/// Create extruded geometry from a pre-triangulated quad strip (for terrain-aligned roads)
+/// This bypasses earcut entirely, creating geometry with small quads that follow terrain well
+fn create_extruded_shape_from_quad_strip(
+    quad_mesh: &LineStringMesh,
+    height: f64,
+    bbox: &[f64],
+    elevation_grid: &[Vec<f64>],
+    grid_size: &GridSize,
+    min_elevation: f64,
+    max_elevation: f64,
+    vertical_exaggeration: f64,
+    terrain_base_height: f64,
+    _terrain_vertices_base64: &str,
+    _terrain_indices_base64: &str,
+    properties: Option<std::collections::HashMap<String, serde_json::Value>>,
+) -> BufferGeometry {
+    let num_2d_verts = quad_mesh.vertices.len() / 2;
+    if num_2d_verts < 4 || quad_mesh.indices.is_empty() {
+        return BufferGeometry {
+            vertices: Vec::new(),
+            normals: None,
+            colors: None,
+            indices: None,
+            uvs: None,
+            has_data: false,
+            properties,
+        };
+    }
+
+    // Transform 2D vertices to mesh coordinates and sample terrain elevation
+    let mut bottom_verts: Vec<[f32; 3]> = Vec::with_capacity(num_2d_verts);
+    let mut top_verts: Vec<[f32; 3]> = Vec::with_capacity(num_2d_verts);
+
+    for i in 0..num_2d_verts {
+        let geo_x = quad_mesh.vertices[i * 2];
+        let geo_y = quad_mesh.vertices[i * 2 + 1];
+
+        // Transform to mesh coordinates
+        let [mesh_x, mesh_y] = transform_to_mesh_coordinates(geo_x, geo_y, bbox);
+
+        // Sample terrain elevation at this point using grid-based method
+        let terrain_z = sample_terrain_mesh_height_at_point(
+            mesh_x,
+            mesh_y,
+            elevation_grid,
+            grid_size,
+            bbox,
+            min_elevation,
+            max_elevation,
+            vertical_exaggeration,
+            terrain_base_height,
+        ) as f32;
+
+        // Small offset to embed bottom slightly into terrain
+        let bottom_z = terrain_z - 0.05;
+        let top_z = terrain_z + height as f32;
+
+        bottom_verts.push([mesh_x as f32, mesh_y as f32, bottom_z]);
+        top_verts.push([mesh_x as f32, mesh_y as f32, top_z]);
+    }
+
+    // Build vertex buffer: bottom vertices followed by top vertices
+    let mut vertices: Vec<f32> = Vec::with_capacity((num_2d_verts * 2) * 3);
+    for v in &bottom_verts {
+        vertices.push(v[0]);
+        vertices.push(v[1]);
+        vertices.push(v[2]);
+    }
+    for v in &top_verts {
+        vertices.push(v[0]);
+        vertices.push(v[1]);
+        vertices.push(v[2]);
+    }
+
+    // Build index buffer
+    let mut indices: Vec<u32> = Vec::new();
+    let top_offset = num_2d_verts as u32;
+
+    // Bottom face (reverse winding for outward normals)
+    for tri in quad_mesh.indices.chunks(3) {
+        if tri.len() == 3 {
+            indices.push(tri[0]);
+            indices.push(tri[2]);
+            indices.push(tri[1]);
+        }
+    }
+
+    // Top face (normal winding)
+    for tri in quad_mesh.indices.chunks(3) {
+        if tri.len() == 3 {
+            indices.push(top_offset + tri[0]);
+            indices.push(top_offset + tri[1]);
+            indices.push(top_offset + tri[2]);
+        }
+    }
+
+    // Side walls - create quads between bottom and top for each edge
+    // We need to find the boundary edges and create walls for them
+    // For a quad strip, the boundary is the left and right edges plus the ends
+    
+    // Build side walls by iterating through pairs
+    let num_pairs = num_2d_verts / 2;
+    
+    // Left side (even indices: 0, 2, 4, ...)
+    for i in 0..(num_pairs - 1) {
+        let b0 = (i * 2) as u32;       // bottom left[i]
+        let b1 = ((i + 1) * 2) as u32; // bottom left[i+1]
+        let t0 = top_offset + b0;       // top left[i]
+        let t1 = top_offset + b1;       // top left[i+1]
+        
+        // Quad as two triangles (outward facing on left side)
+        indices.push(b0);
+        indices.push(t0);
+        indices.push(b1);
+        
+        indices.push(t0);
+        indices.push(t1);
+        indices.push(b1);
+    }
+
+    // Right side (odd indices: 1, 3, 5, ...)
+    for i in 0..(num_pairs - 1) {
+        let b0 = (i * 2 + 1) as u32;       // bottom right[i]
+        let b1 = ((i + 1) * 2 + 1) as u32; // bottom right[i+1]
+        let t0 = top_offset + b0;           // top right[i]
+        let t1 = top_offset + b1;           // top right[i+1]
+        
+        // Quad as two triangles (outward facing on right side - reversed winding)
+        indices.push(b0);
+        indices.push(b1);
+        indices.push(t0);
+        
+        indices.push(t0);
+        indices.push(b1);
+        indices.push(t1);
+    }
+
+    // Start cap (first pair)
+    {
+        let bl = 0u32;                // bottom left[0]
+        let br = 1u32;                // bottom right[0]
+        let tl = top_offset;          // top left[0]
+        let tr = top_offset + 1;      // top right[0]
+        
+        // Quad as two triangles
+        indices.push(bl);
+        indices.push(br);
+        indices.push(tl);
+        
+        indices.push(tl);
+        indices.push(br);
+        indices.push(tr);
+    }
+
+    // End cap (last pair)
+    {
+        let last_pair = num_pairs - 1;
+        let bl = (last_pair * 2) as u32;     // bottom left[last]
+        let br = (last_pair * 2 + 1) as u32; // bottom right[last]
+        let tl = top_offset + bl;             // top left[last]
+        let tr = top_offset + br;             // top right[last]
+        
+        // Quad as two triangles (reversed winding)
+        indices.push(bl);
+        indices.push(tl);
+        indices.push(br);
+        
+        indices.push(tl);
+        indices.push(tr);
+        indices.push(br);
+    }
+
+    BufferGeometry {
+        vertices,
+        normals: None,
+        colors: None,
+        indices: Some(indices),
+        uvs: None,
+        has_data: true,
+        properties,
+    }
+}
+
 // REVISED: Improved implementation of an extruded shape using the extrude_geometry function
 fn create_extruded_shape(
     unique_shape_points: &[Vector2],
@@ -1179,16 +1717,6 @@ fn create_extruded_shape(
     // Apply per-vertex terrain alignment if enabled
     // This aligns each vertex's Z coordinate to the terrain height at that specific X,Y position
     if align_vertices_to_terrain {
-        // Only log once per layer to avoid spam (use a simple heuristic based on vertex count)
-        static mut DEBUG_LOG_COUNT: u32 = 0;
-        let should_log = unsafe { 
-            DEBUG_LOG_COUNT += 1;
-            DEBUG_LOG_COUNT <= 3  // Only log first 3 geometries
-        };
-        
-        if should_log {
-            console_log!("[TERRAIN ALIGN] align_vertices_to_terrain is TRUE, geometry #{}", unsafe { DEBUG_LOG_COUNT });
-        }
         // Check if we have elevation data for proper terrain alignment
         let has_elevation_data = elevation_grid.is_some() 
             && grid_size.is_some() 
@@ -1198,18 +1726,6 @@ fn create_extruded_shape(
             && vertical_exaggeration.is_some()
             && terrain_base_height.is_some();
 
-        if should_log {
-            console_log!("[TERRAIN ALIGN] has_elevation_data: {}, grid: {}, size: {}, bbox: {}, min: {}, max: {}, exag: {}, base: {}",
-                has_elevation_data, 
-                elevation_grid.is_some(),
-                grid_size.is_some(),
-                bbox.is_some(),
-                min_elevation.is_some(),
-                max_elevation.is_some(),
-                vertical_exaggeration.is_some(),
-                terrain_base_height.is_some());
-        }
-
         if has_elevation_data {
             let elev_grid = elevation_grid.unwrap();
             let g_size = grid_size.unwrap();
@@ -1218,23 +1734,6 @@ fn create_extruded_shape(
             let max_elev = max_elevation.unwrap();
             let vert_exag = vertical_exaggeration.unwrap();
             let base_height = terrain_base_height.unwrap();
-
-            // Debug: Check actual elevation grid variation (only compute if logging)
-            if should_log {
-                let mut grid_min = f64::INFINITY;
-                let mut grid_max = f64::NEG_INFINITY;
-                for row in elev_grid.iter() {
-                    for &val in row.iter() {
-                        grid_min = grid_min.min(val);
-                        grid_max = grid_max.max(val);
-                    }
-                }
-                
-                // Debug: log elevation data info
-                console_log!("[TERRAIN ALIGN] Grid size: {}x{}, min_elev: {:.2}, max_elev: {:.2}, vert_exag: {:.2}, base_height: {:.2}", 
-                    g_size.width, g_size.height, min_elev, max_elev, vert_exag, base_height);
-                console_log!("[TERRAIN ALIGN] Actual grid values range: {:.2} to {:.2}", grid_min, grid_max);
-            }
 
             // Find the original geometry's min and max Z to determine the extrusion height
             let mut original_min_z = f32::INFINITY;
@@ -1248,9 +1747,6 @@ fn create_extruded_shape(
 
             // Process EVERY vertex individually - sample terrain at each vertex's X,Y position
             let vertex_count = vertices.len() / 3;
-            
-            // Debug: sample a few vertices to verify terrain heights vary
-            let mut debug_samples: Vec<(f64, f64, f64)> = Vec::new();
             
             for vertex_idx in 0..vertex_count {
                 let base_idx = vertex_idx * 3;
@@ -1273,11 +1769,6 @@ fn create_extruded_shape(
                     base_height,
                 );
 
-                // Collect debug samples for first few vertices
-                if debug_samples.len() < 5 {
-                    debug_samples.push((mesh_x, mesh_y, terrain_height_at_this_point));
-                }
-
                 // Determine if this is a bottom or top vertex based on original Z
                 // Bottom vertices are at original_min_z (typically 0 from extrusion)
                 // Top vertices are at original_max_z (extrusion height)
@@ -1290,67 +1781,6 @@ fn create_extruded_shape(
                 } else {
                     // Top vertex: terrain height at this X,Y + clearance + extrusion height
                     vertices[base_idx + 2] = (terrain_height_at_this_point + MIN_CLEARANCE + extrusion_height) as f32;
-                }
-            }
-            
-            // Log debug samples (only for first few geometries)
-            if should_log && !debug_samples.is_empty() {
-                console_log!("[TERRAIN ALIGN] Vertex X range in samples: {:.2} to {:.2}", 
-                    debug_samples.iter().map(|(x,_,_)| *x).fold(f64::INFINITY, f64::min),
-                    debug_samples.iter().map(|(x,_,_)| *x).fold(f64::NEG_INFINITY, f64::max));
-                console_log!("[TERRAIN ALIGN] Vertex Y range in samples: {:.2} to {:.2}", 
-                    debug_samples.iter().map(|(_,y,_)| *y).fold(f64::INFINITY, f64::min),
-                    debug_samples.iter().map(|(_,y,_)| *y).fold(f64::NEG_INFINITY, f64::max));
-                console_log!("[TERRAIN ALIGN] Terrain height range in samples: {:.4} to {:.4}", 
-                    debug_samples.iter().map(|(_,_,h)| *h).fold(f64::INFINITY, f64::min),
-                    debug_samples.iter().map(|(_,_,h)| *h).fold(f64::NEG_INFINITY, f64::max));
-                for (i, (x, y, h)) in debug_samples.iter().enumerate() {
-                    console_log!("[TERRAIN ALIGN] Sample {}: mesh({:.2}, {:.2}) -> terrain_height: {:.4}", i, x, y, h);
-                }
-                
-                // Log ACTUAL final vertex Z values to verify alignment
-                let mut final_z_min = f32::INFINITY;
-                let mut final_z_max = f32::NEG_INFINITY;
-                let mut bottom_z_values: Vec<f32> = Vec::new();
-                let mut top_z_values: Vec<f32> = Vec::new();
-                for i in (0..vertices.len()).step_by(3) {
-                    let z = vertices[i + 2];
-                    final_z_min = final_z_min.min(z);
-                    final_z_max = final_z_max.max(z);
-                    // Classify as bottom or top based on proximity to min/max
-                    if (z - final_z_min).abs() < 1.0 && bottom_z_values.len() < 10 {
-                        bottom_z_values.push(z);
-                    } else if top_z_values.len() < 10 {
-                        top_z_values.push(z);
-                    }
-                }
-                console_log!("[TERRAIN ALIGN] FINAL vertex Z range: {:.4} to {:.4}", final_z_min, final_z_max);
-                console_log!("[TERRAIN ALIGN] Original extrusion height was: {:.4}", extrusion_height);
-                
-                // Sample a few ACTUAL bottom and top vertices to show variation
-                let mut actual_bottom_samples: Vec<(f64, f64, f32)> = Vec::new();
-                let mut actual_top_samples: Vec<(f64, f64, f32)> = Vec::new();
-                for i in (0..vertices.len().min(60)).step_by(3) {
-                    let x = vertices[i] as f64;
-                    let y = vertices[i + 1] as f64;
-                    let z = vertices[i + 2];
-                    if (z - final_z_min).abs() < (final_z_max - final_z_min) / 2.0 {
-                        if actual_bottom_samples.len() < 5 {
-                            actual_bottom_samples.push((x, y, z));
-                        }
-                    } else {
-                        if actual_top_samples.len() < 5 {
-                            actual_top_samples.push((x, y, z));
-                        }
-                    }
-                }
-                console_log!("[TERRAIN ALIGN] Bottom vertex samples (should vary per X,Y):");
-                for (i, (x, y, z)) in actual_bottom_samples.iter().enumerate() {
-                    console_log!("  Bottom {}: ({:.2}, {:.2}) -> Z={:.4}", i, x, y, z);
-                }
-                console_log!("[TERRAIN ALIGN] Top vertex samples (should vary per X,Y):");
-                for (i, (x, y, z)) in actual_top_samples.iter().enumerate() {
-                    console_log!("  Top {}: ({:.2}, {:.2}) -> Z={:.4}", i, x, y, z);
                 }
             }
         }
@@ -1504,6 +1934,98 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         false
                     };
 
+                    // SPECIAL PATH: For terrain-aligned LineStrings, use quad-strip mesh for better terrain following
+                    let is_terrain_aligned_linestring = polygon_data.r#type.as_deref() == Some("LineString")
+                        && input.vt_data_set.align_vertices_to_terrain.unwrap_or(false);
+
+                    if is_terrain_aligned_linestring && polygon_data.geometry.len() >= 2 {
+                        // Use buffer size from layer configuration
+                        let config_buffer_size = input
+                            .vt_data_set
+                            .buffer_size
+                            .unwrap_or(if is_major_road { 2.0 } else { 1.5 });
+                        let buffer_distance = config_buffer_size * 0.00001;
+
+                        // Create quad-strip mesh for this linestring
+                        if let Some(quad_mesh) = create_linestring_quad_strip(
+                            &polygon_data.geometry,
+                            buffer_distance,
+                            &input.bbox,
+                            None,
+                        ) {
+                            // Extract properties
+                            let mut properties: Option<std::collections::HashMap<String, serde_json::Value>> = 
+                                if let Some(ref tags) = polygon_data.tags {
+                                    if let serde_json::Value::Object(obj) = tags {
+                                        let mut map = std::collections::HashMap::new();
+                                        for (k, v) in obj.iter() {
+                                            map.insert(k.clone(), v.clone());
+                                        }
+                                        Some(map)
+                                    } else { None }
+                                } else { None };
+
+                            // Add layer metadata
+                            let layer_name = input.vt_data_set.source_layer.clone();
+                            match properties {
+                                Some(ref mut props) => {
+                                    props.entry("__sourceLayer".to_string())
+                                        .or_insert(serde_json::Value::String(layer_name.clone()));
+                                }
+                                None => {
+                                    let mut map = std::collections::HashMap::new();
+                                    map.insert("__sourceLayer".to_string(), serde_json::Value::String(layer_name.clone()));
+                                    properties = Some(map);
+                                }
+                            }
+
+                            // Get height from layer config
+                            let height = input.vt_data_set.extrusion_depth.unwrap_or(0.3);
+                            let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
+                            let scaled_height = (height * meters_to_units).clamp(MIN_HEIGHT, MAX_HEIGHT);
+
+                            // Create geometry directly from quad strip mesh
+                            let mut geometry = create_extruded_shape_from_quad_strip(
+                                &quad_mesh,
+                                scaled_height,
+                                &input.bbox,
+                                &input.elevation_grid,
+                                &input.grid_size,
+                                input.min_elevation,
+                                input.max_elevation,
+                                input.vertical_exaggeration,
+                                input.terrain_base_height,
+                                &input.terrain_vertices_base64,
+                                &input.terrain_indices_base64,
+                                properties,
+                            );
+
+                            // Clip the 3D mesh to the bounding box
+                            if geometry.has_data {
+                                if let Some(ref indices) = geometry.indices {
+                                    let half_tile = TERRAIN_SIZE / 2.0;
+                                    let (clipped_vertices, clipped_indices) = clip_mesh_to_bbox_3d(
+                                        &geometry.vertices,
+                                        indices,
+                                        -half_tile,
+                                        -half_tile,
+                                        half_tile,
+                                        half_tile,
+                                    );
+                                    
+                                    if !clipped_indices.is_empty() {
+                                        geometry.vertices = clipped_vertices;
+                                        geometry.indices = Some(clipped_indices);
+                                        // Clear normals as they need recalculation after clipping
+                                        geometry.normals = None;
+                                        return Ok(Some(geometry));
+                                    }
+                                }
+                            }
+                        }
+                        // Fall through to regular processing if quad strip fails
+                    }
+
                     // Handle both Polygon and LineString geometries
                     let points: Vec<Vector2> = if polygon_data.r#type.as_deref()
                         == Some("LineString")
@@ -1537,9 +2059,9 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             // Convert buffer size to appropriate coordinate scale (assuming meter-like units)
                             let buffer_distance = config_buffer_size * 0.00001; // Scale factor for coordinate space
 
-                            // Use robust linestring buffering algorithm
+                            // Use robust linestring buffering algorithm with bbox for subdivision
                             buffered_points =
-                                create_linestring_buffer(&polygon_data.geometry, buffer_distance);
+                                create_linestring_buffer(&polygon_data.geometry, buffer_distance, &input.bbox);
 
                             buffered_points
                         } else {
@@ -1688,13 +2210,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         return Ok(None); // Skip invalid polygon after cleaning
                     }
 
-                    // Determine if CSG clipping should be used
-                    let use_csg = input.csg_clipping.unwrap_or(false);
-
                     // Clip against the overall terrain tile bounds (include any shape that overlaps)
                     let half_tile = TERRAIN_SIZE * 0.5;
 
-                    // Always ensure points are properly clipped to the terrain bounds
+                    // Apply clipping to all polygons
+                    let use_csg = input.csg_clipping.unwrap_or(false);
+
                     let clipped_points = if use_csg {
                         // CSG-based clipping for smoother results
                         clip_polygon_to_bbox_2d(
@@ -1711,46 +2232,18 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
                     // Skip polygons that truly have no valid representation after clipping
                     if clipped_points.is_empty() {
-                        let _transportation_class = if let Some(ref props) = polygon_data.properties
-                        {
-                            if let serde_json::Value::Object(obj) = props {
-                                if let Some(serde_json::Value::String(class)) = obj.get("class") {
-                                    class.clone()
-                                } else {
-                                    "unknown".to_string()
-                                }
-                            } else {
-                                "no_props".to_string()
-                            }
-                        } else {
-                            "no_props".to_string()
-                        };
-
                         return Ok(None);
                     }
 
-                    // For polygons with insufficient points, try to reuse the original cleaned points
-                    // if they might be partially visible within the bbox
+                    // For polygons with insufficient points, try fallback
                     let final_points = if clipped_points.len() < 3 {
-                        // Check if the original polygon should visibly intersect the bbox
-                        let half_tile_with_margin = half_tile * 1.05; // 5% margin
-                        let bbox_with_margin = [
-                            -half_tile_with_margin,
-                            -half_tile_with_margin,
-                            half_tile_with_margin,
-                            half_tile_with_margin,
-                        ];
-
-                        // Check if original polygon has any points near the bbox
+                        let half_tile_with_margin = half_tile * 1.05;
                         let potentially_visible = cleaned_points.iter().any(|pt| {
-                            pt.x >= bbox_with_margin[0]
-                                && pt.x <= bbox_with_margin[2]
-                                && pt.y >= bbox_with_margin[1]
-                                && pt.y <= bbox_with_margin[3]
+                            pt.x >= -half_tile_with_margin && pt.x <= half_tile_with_margin &&
+                            pt.y >= -half_tile_with_margin && pt.y <= half_tile_with_margin
                         });
 
                         if potentially_visible {
-                            // Use a simple fallback approach to clip against the actual boundary
                             let fallback = simple_clip_polygon(
                                 &cleaned_points,
                                 &[-half_tile, -half_tile, half_tile, half_tile],
@@ -1759,50 +2252,24 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             if fallback.len() >= 3 {
                                 fallback
                             } else {
-                                // Last chance: If we're dealing with a very large polygon that extends
-                                // far beyond the bounds, just use the bbox corners to ensure we show something
-                                vec![
-                                    Vector2 {
-                                        x: -half_tile,
-                                        y: -half_tile,
-                                    },
-                                    Vector2 {
-                                        x: half_tile,
-                                        y: -half_tile,
-                                    },
-                                    Vector2 {
-                                        x: half_tile,
-                                        y: half_tile,
-                                    },
-                                    Vector2 {
-                                        x: -half_tile,
-                                        y: half_tile,
-                                    },
-                                ]
+                                return Ok(None);
                             }
                         } else {
-                            // Not visible, skip
-                            let _transportation_class = if let Some(ref props) =
-                                polygon_data.properties
-                            {
-                                if let serde_json::Value::Object(obj) = props {
-                                    if let Some(serde_json::Value::String(class)) = obj.get("class")
-                                    {
-                                        class.clone()
-                                    } else {
-                                        "unknown".to_string()
-                                    }
-                                } else {
-                                    "no_props".to_string()
-                                }
-                            } else {
-                                "no_props".to_string()
-                            };
-
                             return Ok(None);
                         }
                     } else {
                         clipped_points
+                    };
+
+                    // Check if this is a buffered linestring
+                    let _is_buffered_linestring = polygon_data.r#type.as_deref() == Some("LineString");
+
+                    // Subdivide edges for terrain-aligned layers to ensure smooth terrain following
+                    // Now applies to ALL geometry types including buffered linestrings
+                    let final_points = if input.vt_data_set.align_vertices_to_terrain.unwrap_or(false) {
+                        subdivide_polygon_edges(&final_points, MAX_EDGE_LENGTH)
+                    } else {
+                        final_points
                     };
 
                     // SUCCESS: This geometry made it through all filters
@@ -1821,16 +2288,16 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     };
 
                     // Compute per-polygon terrain extremes for base alignment
+                    // Sample at vertices AND interior points to capture full terrain variation
                     let mut lowest_terrain_z = f64::INFINITY;
                     let mut highest_terrain_z = f64::NEG_INFINITY;
-                    // Also track raw elevation values (in meters, before exaggeration) for height adjustment
-                    let mut lowest_raw_elevation = f64::INFINITY;
-                    let mut highest_raw_elevation = f64::NEG_INFINITY;
                     
-                    for pt in &final_points {
-                        let tz = sample_terrain_elevation_at_point(
-                            pt.x,
-                            pt.y,
+                    // Helper to sample and update min/max
+                    // Note: final_points are already in MESH coordinates after transform_to_mesh_coordinates
+                    let mut sample_point = |mesh_x: f64, mesh_y: f64| {
+                        let tz = sample_terrain_mesh_height_at_point(
+                            mesh_x,
+                            mesh_y,
                             &input.elevation_grid,
                             &input.grid_size,
                             &input.bbox,
@@ -1841,31 +2308,66 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         );
                         lowest_terrain_z = lowest_terrain_z.min(tz);
                         highest_terrain_z = highest_terrain_z.max(tz);
-                        
-                        // Sample raw elevation (without exaggeration) for height adjustment
-                        let raw_elev = sample_raw_elevation_at_point(
-                            pt.x,
-                            pt.y,
-                            &input.elevation_grid,
-                            &input.grid_size,
-                            &input.bbox,
-                        );
-                        lowest_raw_elevation = lowest_raw_elevation.min(raw_elev);
-                        highest_raw_elevation = highest_raw_elevation.max(raw_elev);
-                    }
-                    // Optionally use dataset-wide extremes
-                    if use_same_z_offset {
-                        lowest_terrain_z = dataset_lowest_z;
-                        highest_terrain_z = dataset_highest_z;
+                    };
+                    
+                    // Sample at all polygon vertices
+                    for pt in &final_points {
+                        sample_point(pt.x, pt.y);
                     }
                     
-                    // Calculate raw elevation difference (in meters, before exaggeration)
-                    // This is the actual terrain slope that the building sits on
-                    let raw_elevation_difference = (highest_raw_elevation - lowest_raw_elevation).max(0.0);
-                    // Base z offset: position bottom face above terrain surface with clearance
-                    // Add clearance to prevent mesh intersections with terrain (required for 3D printing)
+                    // Calculate polygon centroid and sample there too
+                    if !final_points.is_empty() {
+                        let mut cx = 0.0;
+                        let mut cy = 0.0;
+                        for pt in &final_points {
+                            cx += pt.x;
+                            cy += pt.y;
+                        }
+                        cx /= final_points.len() as f64;
+                        cy /= final_points.len() as f64;
+                        sample_point(cx, cy);
+                        
+                        // Also sample at midpoints of edges for better coverage
+                        for i in 0..final_points.len() {
+                            let j = (i + 1) % final_points.len();
+                            let mx = (final_points[i].x + final_points[j].x) / 2.0;
+                            let my = (final_points[i].y + final_points[j].y) / 2.0;
+                            sample_point(mx, my);
+                        }
+                        
+                        // Sample points between centroid and each vertex (interior sampling)
+                        for pt in &final_points {
+                            let ix = (cx + pt.x) / 2.0;
+                            let iy = (cy + pt.y) / 2.0;
+                            sample_point(ix, iy);
+                        }
+                    }
+                    
+                    // Calculate per-polygon terrain Z difference BEFORE applying dataset-wide z_offset
+                    // This is the terrain slope under THIS specific building polygon
+                    let polygon_terrain_z_difference = (highest_terrain_z - lowest_terrain_z).max(0.0);
+                    
+                    // Optionally use dataset-wide extremes for Z positioning (not for height adjustment)
+                    if use_same_z_offset {
+                        lowest_terrain_z = dataset_lowest_z;
+                        // Note: we keep polygon_terrain_z_difference as the per-polygon value
+                    }
+                    
+                    // Base z offset: position bottom face relative to the LOWEST terrain point
                     let user_z_offset = input.vt_data_set.z_offset.unwrap_or(0.0);
-                    let z_offset = lowest_terrain_z - user_z_offset + MIN_CLEARANCE;
+                    
+                    // For buildings (non-terrain-aligned), submerge slightly INTO the ground
+                    // For terrain-aligned layers, add clearance to prevent z-fighting
+                    let is_building = !input.vt_data_set.align_vertices_to_terrain.unwrap_or(false);
+                    let z_offset = if is_building {
+                        // Buildings: position at lowest terrain point, applying user offset and submerge
+                        // user_z_offset is typically negative (e.g., -0.01) to push buildings down
+                        // We ADD user_z_offset (which adds a negative, i.e., subtracts) and subtract submerge
+                        lowest_terrain_z + user_z_offset - BUILDING_SUBMERGE_OFFSET
+                    } else {
+                        // Other layers: add clearance above terrain
+                        lowest_terrain_z + user_z_offset + MIN_CLEARANCE
+                    };
 
                     // Extract properties from polygon_data for attaching to geometry
                     let mut properties = if let Some(ref props) = polygon_data.properties {
@@ -1901,19 +2403,31 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         }
                     }
 
+                    // Validate polygon before triangulation
+                    // Self-intersecting polygons (common in buffered linestrings at sharp turns)
+                    // cause earcut triangulation to produce corrupt geometry
+                    let cleaned_points = match clean_polygon_for_triangulation(&final_points) {
+                        Some(points) => points,
+                        None => {
+                            // Polygon is too small or self-intersecting, skip it
+                            return Ok(None);
+                        }
+                    };
+
                     // Calculate scaling factor from meters to terrain units
                     let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
 
                     // Scale height for extrusion (building heights need scaling)
                     height *= meters_to_units;
                     
-                    // Optionally add terrain elevation difference to height (useful for buildings on slopes)
-                    // This ensures buildings extend from the lowest terrain point to maintain consistent roof height
-                    // We use raw_elevation_difference (in meters) scaled to terrain units, NOT the exaggerated terrain Z
-                    if input.vt_data_set.add_terrain_difference_to_height.unwrap_or(false) {
-                        // Scale the raw elevation difference (meters) to terrain units
-                        let scaled_elevation_diff = raw_elevation_difference * meters_to_units;
-                        height += scaled_elevation_diff;
+                    // ALWAYS add per-polygon terrain Z difference to height for buildings on slopes
+                    // This ensures buildings extend from the lowest terrain point up past the highest
+                    // terrain point UNDER THIS SPECIFIC BUILDING (not the entire dataset)
+                    // This is required to prevent floating or submerged buildings on sloped terrain
+                    let is_building = !input.vt_data_set.align_vertices_to_terrain.unwrap_or(false);
+                    if is_building && polygon_terrain_z_difference > 0.01 {
+                        // polygon_terrain_z_difference is the terrain slope under this building only
+                        height += polygon_terrain_z_difference;
                     }
 
                     // Final clamp in terrain units
@@ -1923,7 +2437,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     // The sample_terrain_mesh_height_at_point function will apply EXAGGERATION_SCALE_FACTOR
                     // to match exactly what terrain_mesh_gen.rs does
                     let geometry = create_extruded_shape(
-                        &final_points,
+                        &cleaned_points,
+
                         height,
                         z_offset,
                         properties,
@@ -2027,26 +2542,83 @@ async fn create_linestring_buffer_gpu_fallback(linestring: &[Vec<f64>], buffer_d
     }
 
     // CPU fallback
-    create_linestring_buffer(linestring, buffer_distance)
+    create_linestring_buffer(linestring, buffer_distance, &[0.0, 0.0, 1.0, 1.0]) // Default bbox for GPU fallback
 }
 
 // Create a proper buffered polygon from a linestring with even width throughout
-fn create_linestring_buffer(linestring: &[Vec<f64>], buffer_distance: f64) -> Vec<Vector2> {
+fn create_linestring_buffer(linestring: &[Vec<f64>], buffer_distance: f64, bbox: &[f64]) -> Vec<Vector2> {
     if linestring.len() < 2 {
         return Vec::new();
     }
 
-    // Convert to Vector2 points
-    let points: Vec<Vector2> = linestring
+    // Calculate max segment length in the input coordinate space (geographic degrees)
+    // Target: segments of ~5 mesh units after transformation to mesh coords (TERRAIN_SIZE = 200)
+    // Mesh coords range is -100 to +100 (200 units total)
+    // For terrain alignment, we want segments of ~5 mesh units = 2.5% of tile
+    let bbox_width = if bbox.len() >= 4 { (bbox[2] - bbox[0]).abs() } else { 0.01 };
+    let bbox_height = if bbox.len() >= 4 { (bbox[3] - bbox[1]).abs() } else { 0.01 };
+    
+    // 5 mesh units = 5/200 = 2.5% of tile dimension
+    // Using the smaller dimension to ensure sufficient subdivision
+    let max_segment_length = f64::min(bbox_width, bbox_height) * 0.025;
+
+    // Convert to Vector2 points and filter invalid points
+    let raw_points: Vec<Vector2> = linestring
         .iter()
         .filter_map(|p| {
-            if p.len() >= 2 {
+            if p.len() >= 2 && p[0].is_finite() && p[1].is_finite() {
                 Some(Vector2 { x: p[0], y: p[1] })
             } else {
                 None
             }
         })
         .collect();
+
+    if raw_points.len() < 2 {
+        return Vec::new();
+    }
+
+    // Subdivide long segments to ensure enough points for smooth curves and terrain alignment
+    let mut subdivided_points: Vec<Vector2> = Vec::new();
+    for i in 0..raw_points.len() {
+        let current = raw_points[i];
+        
+        if i > 0 {
+            let prev = raw_points[i - 1];
+            let dx = current.x - prev.x;
+            let dy = current.y - prev.y;
+            let segment_length = (dx * dx + dy * dy).sqrt();
+            
+            if segment_length > max_segment_length && max_segment_length > EPSILON {
+                // Subdivide this segment
+                let num_subdivisions = (segment_length / max_segment_length).ceil() as usize;
+                for j in 1..num_subdivisions {
+                    let t = j as f64 / num_subdivisions as f64;
+                    subdivided_points.push(Vector2 {
+                        x: prev.x + dx * t,
+                        y: prev.y + dy * t,
+                    });
+                }
+            }
+        }
+        
+        subdivided_points.push(current);
+    }
+
+    // Remove duplicate consecutive points (which cause zero-length segments)
+    let mut points: Vec<Vector2> = Vec::with_capacity(subdivided_points.len());
+    for pt in subdivided_points {
+        if let Some(last) = points.last() {
+            let dx = pt.x - last.x;
+            let dy = pt.y - last.y;
+            let dist_sq = dx * dx + dy * dy;
+            // Skip if too close to previous point
+            if dist_sq < EPSILON * EPSILON {
+                continue;
+            }
+        }
+        points.push(pt);
+    }
 
     if points.len() < 2 {
         return Vec::new();
@@ -2062,6 +2634,14 @@ fn create_linestring_buffer(linestring: &[Vec<f64>], buffer_distance: f64) -> Ve
         return Vec::new();
     }
 
+    // Validate that all offset points are finite
+    let all_left_valid = left_offsets.iter().all(|p| p.x.is_finite() && p.y.is_finite());
+    let all_right_valid = right_offsets.iter().all(|p| p.x.is_finite() && p.y.is_finite());
+    
+    if !all_left_valid || !all_right_valid {
+        return Vec::new();
+    }
+
     // Simple polygon construction: left side + right side (reversed) - no end caps
     // Add left side
     polygon_points.extend(left_offsets);
@@ -2069,33 +2649,40 @@ fn create_linestring_buffer(linestring: &[Vec<f64>], buffer_distance: f64) -> Ve
     // Add right side (reversed) - this creates a simple closed polygon
     polygon_points.extend(right_offsets.into_iter().rev());
 
+    // Final validation: ensure we have enough points for a valid polygon
+    if polygon_points.len() < 3 {
+        return Vec::new();
+    }
+
     polygon_points
 }
 
-// Create offset line with consistent perpendicular distance
+// Create offset line with bevel joins at sharp angles to prevent self-intersections
 fn create_offset_line(points: &[Vector2], offset_distance: f64) -> Vec<Vector2> {
     if points.len() < 2 {
         return Vec::new();
     }
 
+    // Miter limit - when angle is sharper than this, use bevel instead of miter
+    // cos(60°) = 0.5, meaning angles sharper than 120° will use bevel
+    const MITER_LIMIT_COS: f64 = 0.5;
+
     let mut offsets = Vec::new();
 
     for i in 0..points.len() {
-        let offset_point = if i == 0 {
+        if i == 0 {
             // First point - offset perpendicular to first segment
             let dx = points[1].x - points[0].x;
             let dy = points[1].y - points[0].y;
             let length = (dx * dx + dy * dy).sqrt();
 
-            if length < EPSILON {
-                points[0]
-            } else {
+            if length >= EPSILON {
                 let perp_x = -dy / length * offset_distance;
                 let perp_y = dx / length * offset_distance;
-                Vector2 {
+                offsets.push(Vector2 {
                     x: points[0].x + perp_x,
                     y: points[0].y + perp_y,
-                }
+                });
             }
         } else if i == points.len() - 1 {
             // Last point - offset perpendicular to last segment
@@ -2103,18 +2690,16 @@ fn create_offset_line(points: &[Vector2], offset_distance: f64) -> Vec<Vector2> 
             let dy = points[i].y - points[i - 1].y;
             let length = (dx * dx + dy * dy).sqrt();
 
-            if length < EPSILON {
-                points[i]
-            } else {
+            if length >= EPSILON {
                 let perp_x = -dy / length * offset_distance;
                 let perp_y = dx / length * offset_distance;
-                Vector2 {
+                offsets.push(Vector2 {
                     x: points[i].x + perp_x,
                     y: points[i].y + perp_y,
-                }
+                });
             }
         } else {
-            // Middle point - use bisector but maintain exact distance
+            // Middle point - check angle and decide between miter and bevel
             let prev_dx = points[i].x - points[i - 1].x;
             let prev_dy = points[i].y - points[i - 1].y;
             let prev_len = (prev_dx * prev_dx + prev_dy * prev_dy).sqrt();
@@ -2124,52 +2709,58 @@ fn create_offset_line(points: &[Vector2], offset_distance: f64) -> Vec<Vector2> 
             let next_len = (next_dx * next_dx + next_dy * next_dy).sqrt();
 
             if prev_len < EPSILON || next_len < EPSILON {
-                points[i]
+                continue;
+            }
+
+            // Normalize directions
+            let prev_norm_x = prev_dx / prev_len;
+            let prev_norm_y = prev_dy / prev_len;
+            let next_norm_x = next_dx / next_len;
+            let next_norm_y = next_dy / next_len;
+
+            // Calculate dot product to determine angle
+            let dot = prev_norm_x * next_norm_x + prev_norm_y * next_norm_y;
+
+            // Calculate perpendiculars
+            let prev_perp_x = -prev_norm_y;
+            let prev_perp_y = prev_norm_x;
+            let next_perp_x = -next_norm_y;
+            let next_perp_y = next_norm_x;
+
+            if dot < MITER_LIMIT_COS {
+                // Sharp angle - use bevel join (add both perpendicular points)
+                // This prevents self-intersection by not extending to the miter point
+                offsets.push(Vector2 {
+                    x: points[i].x + prev_perp_x * offset_distance,
+                    y: points[i].y + prev_perp_y * offset_distance,
+                });
+                offsets.push(Vector2 {
+                    x: points[i].x + next_perp_x * offset_distance,
+                    y: points[i].y + next_perp_y * offset_distance,
+                });
             } else {
-                // Normalize directions
-                let prev_norm_x = prev_dx / prev_len;
-                let prev_norm_y = prev_dy / prev_len;
-                let next_norm_x = next_dx / next_len;
-                let next_norm_y = next_dy / next_len;
-
-                // Calculate perpendiculars
-                let prev_perp_x = -prev_norm_y;
-                let prev_perp_y = prev_norm_x;
-                let next_perp_x = -next_norm_y;
-                let next_perp_y = next_norm_x;
-
-                // Bisector direction
+                // Gentle angle - use miter join (single bisector point)
                 let bisector_x = prev_perp_x + next_perp_x;
                 let bisector_y = prev_perp_y + next_perp_y;
                 let bisector_len = (bisector_x * bisector_x + bisector_y * bisector_y).sqrt();
 
                 if bisector_len < EPSILON {
-                    // 180 degree turn, use previous segment perpendicular
-                    Vector2 {
+                    // Nearly 180 degree turn
+                    offsets.push(Vector2 {
                         x: points[i].x + prev_perp_x * offset_distance,
                         y: points[i].y + prev_perp_y * offset_distance,
-                    }
+                    });
                 } else {
-                    // Calculate angle to maintain exact offset distance
-                    let dot = prev_norm_x * next_norm_x + prev_norm_y * next_norm_y;
-                    let angle_factor = if dot < -0.99 {
-                        // Nearly 180 degrees, avoid extreme scaling
-                        1.0
-                    } else {
-                        // Scale to maintain exact perpendicular distance
-                        1.0 / ((1.0 + dot) * 0.5).sqrt()
-                    };
-
+                    // Calculate proper miter distance
+                    let angle_factor = (1.0 / ((1.0 + dot) * 0.5).sqrt()).min(2.0);
                     let scale = offset_distance * angle_factor;
-                    Vector2 {
+                    offsets.push(Vector2 {
                         x: points[i].x + (bisector_x / bisector_len) * scale,
                         y: points[i].y + (bisector_y / bisector_len) * scale,
-                    }
+                    });
                 }
             }
-        };
-
-        offsets.push(offset_point);
+        }
     }
 
     offsets
@@ -2193,4 +2784,151 @@ fn calculate_simple_offset(p1: Vector2, p2: Vector2, offset_distance: f64) -> Ve
         x: p2.x + perp_x * offset_distance,
         y: p2.y + perp_y * offset_distance,
     }
+}
+/// Result of creating a linestring road mesh as a quad strip
+/// This bypasses earcut triangulation for better terrain alignment
+#[derive(Debug, Clone)]
+pub struct LineStringMesh {
+    /// Vertices as flat array [x0, y0, x1, y1, ...]
+    pub vertices: Vec<f64>,
+    /// Triangle indices
+    pub indices: Vec<u32>,
+}
+
+/// Create a linestring road mesh as a quad strip for terrain alignment
+/// Returns vertices and indices ready for extrusion, bypassing earcut
+fn create_linestring_quad_strip(
+    linestring: &[Vec<f64>], 
+    buffer_distance: f64, 
+    bbox: &[f64],
+    max_segment_length_override: Option<f64>,
+) -> Option<LineStringMesh> {
+    if linestring.len() < 2 {
+        return None;
+    }
+
+    // Calculate max segment length based on terrain requirements
+    // We want dense vertices for terrain alignment
+    let bbox_width = if bbox.len() >= 4 { (bbox[2] - bbox[0]).abs() } else { 0.01 };
+    let bbox_height = if bbox.len() >= 4 { (bbox[3] - bbox[1]).abs() } else { 0.01 };
+    
+    // Target: segments of ~2 mesh units for good terrain following
+    // 2 mesh units = 2/200 = 1% of tile dimension
+    let max_segment_length = max_segment_length_override
+        .unwrap_or(f64::min(bbox_width, bbox_height) * 0.01);
+
+    // Convert to Vector2 points and filter invalid points
+    let raw_points: Vec<Vector2> = linestring
+        .iter()
+        .filter_map(|p| {
+            if p.len() >= 2 && p[0].is_finite() && p[1].is_finite() {
+                Some(Vector2 { x: p[0], y: p[1] })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if raw_points.len() < 2 {
+        return None;
+    }
+
+    // Aggressively subdivide to ensure dense vertices for terrain alignment
+    let mut subdivided_points: Vec<Vector2> = Vec::new();
+    for i in 0..raw_points.len() {
+        let current = raw_points[i];
+        
+        if i > 0 {
+            let prev = raw_points[i - 1];
+            let dx = current.x - prev.x;
+            let dy = current.y - prev.y;
+            let segment_length = (dx * dx + dy * dy).sqrt();
+            
+            if segment_length > max_segment_length && max_segment_length > EPSILON {
+                let num_subdivisions = (segment_length / max_segment_length).ceil() as usize;
+                for j in 1..num_subdivisions {
+                    let t = j as f64 / num_subdivisions as f64;
+                    subdivided_points.push(Vector2 {
+                        x: prev.x + dx * t,
+                        y: prev.y + dy * t,
+                    });
+                }
+            }
+        }
+        
+        subdivided_points.push(current);
+    }
+
+    // Remove duplicate consecutive points
+    let mut points: Vec<Vector2> = Vec::with_capacity(subdivided_points.len());
+    for pt in subdivided_points {
+        if let Some(last) = points.last() {
+            let dx = pt.x - last.x;
+            let dy = pt.y - last.y;
+            if dx * dx + dy * dy < EPSILON * EPSILON {
+                continue;
+            }
+        }
+        points.push(pt);
+    }
+
+    if points.len() < 2 {
+        return None;
+    }
+
+    // Generate left and right offset points
+    let left_offsets = create_offset_line(&points, buffer_distance);
+    let right_offsets = create_offset_line(&points, -buffer_distance);
+
+    if left_offsets.len() < 2 || right_offsets.len() < 2 {
+        return None;
+    }
+
+    // Ensure left and right have same length (they should from create_offset_line)
+    let num_points = left_offsets.len().min(right_offsets.len());
+    if num_points < 2 {
+        return None;
+    }
+
+    // Build vertices: interleave left and right for quad strip
+    // Layout: [left0, right0, left1, right1, left2, right2, ...]
+    let mut vertices: Vec<f64> = Vec::with_capacity(num_points * 4);
+    for i in 0..num_points {
+        let left = &left_offsets[i];
+        let right = &right_offsets[i];
+        
+        if !left.x.is_finite() || !left.y.is_finite() || !right.x.is_finite() || !right.y.is_finite() {
+            continue;
+        }
+        
+        vertices.push(left.x);
+        vertices.push(left.y);
+        vertices.push(right.x);
+        vertices.push(right.y);
+    }
+
+    let actual_pairs = vertices.len() / 4;
+    if actual_pairs < 2 {
+        return None;
+    }
+
+    // Build triangle indices for quad strip
+    // Each quad (4 vertices) becomes 2 triangles
+    let mut indices: Vec<u32> = Vec::with_capacity((actual_pairs - 1) * 6);
+    for i in 0..(actual_pairs - 1) {
+        let base = (i * 2) as u32;
+        // Vertices: base = left[i], base+1 = right[i], base+2 = left[i+1], base+3 = right[i+1]
+        
+        // Triangle 1: left[i], right[i], left[i+1]
+        indices.push(base);
+        indices.push(base + 1);
+        indices.push(base + 2);
+        
+        // Triangle 2: right[i], right[i+1], left[i+1]
+        indices.push(base + 1);
+        indices.push(base + 3);
+        indices.push(base + 2);
+    }
+
+    Some(LineStringMesh { vertices, indices })
 }
