@@ -2227,10 +2227,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             // Clean the hole polygon
                             let cleaned_hole = clean_polygon_footprint(&hole_mesh_points);
                             if cleaned_hole.is_empty() || cleaned_hole.len() < 3 {
+                                return None;
+                            }
+                            
+                            // Clip hole to bbox (same as exterior ring)
+                            let half_tile = TERRAIN_SIZE * 0.5;
+                            let clipped_hole = simple_clip_polygon(
+                                &cleaned_hole,
+                                &[-half_tile, -half_tile, half_tile, half_tile],
+                            );
+                            
+                            if clipped_hole.is_empty() || clipped_hole.len() < 3 {
                                 None
                             } else {
                                 // Convert back to Vec<Vec<f64>> format
-                                Some(cleaned_hole.iter().map(|v| vec![v.x, v.y]).collect())
+                                Some(clipped_hole.iter().map(|v| vec![v.x, v.y]).collect())
                             }
                         }).collect()
                     });
