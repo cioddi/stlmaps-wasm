@@ -45,7 +45,9 @@ pub struct VectorTileResult {
 // Structure for the GeometryData that we extract from vector tiles
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GeometryData {
-    pub geometry: Vec<Vec<f64>>, // Represents a geometry's coordinates
+    pub geometry: Vec<Vec<f64>>, // Represents a geometry's coordinates (exterior ring for polygons)
+    #[serde(default)]
+    pub holes: Option<Vec<Vec<Vec<f64>>>>, // Array of holes (inner rings) for polygon geometries
     pub r#type: Option<String>,  // Geometry type (e.g., "Polygon", "LineString")
     pub height: Option<f64>,     // Feature height
     pub layer: Option<String>,   // Source layer name
@@ -833,12 +835,16 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             match geometry_type_str {
                 "Polygon" => {
                     // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer is polygon, next is rings, inner is points [px, py]
-                    for ring_tile_coords in &feature.geometry {
-                        // Iterate through rings (usually 1 outer, N inner)
+                    // First ring is exterior, subsequent rings are holes
+                    // We need to group them together into a single polygon with holes
+                    
+                    let mut exterior_ring: Option<Vec<Vec<f64>>> = None;
+                    let mut hole_rings: Vec<Vec<Vec<f64>>> = Vec::new();
+                    
+                    for (ring_idx, ring_tile_coords) in feature.geometry.iter().enumerate() {
                         let mut transformed_ring: Vec<Vec<f64>> =
                             Vec::with_capacity(ring_tile_coords.len());
                         for point_tile_coords in ring_tile_coords {
-                            // Iterate through points in the ring
                             if point_tile_coords.len() >= 2 {
                                 let (lng, lat) = convert_tile_coords_to_lnglat(
                                     point_tile_coords[0],
@@ -853,32 +859,48 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         }
 
                         if !transformed_ring.is_empty() {
-                            //
-                            let _base_elevation = calculate_base_elevation(
-                                &transformed_ring,
-                                &elevation_grid,
-                                grid_size.0 as usize,
-                                grid_size.1 as usize,
-                                elev_min_lng,
-                                elev_min_lat,
-                                elev_max_lng,
-                                elev_max_lat, // Use elevation bbox
-                            );
-                            //
-
-                            transformed_geometry_parts.push(GeometryData {
-                                geometry: transformed_ring,
-                                r#type: Some("Polygon".to_string()),
-                                height: Some(height_value),
-                                layer: Some(vt_dataset.source_layer.clone()),
-                                label: vt_dataset.label.clone(),
-                                tags: None,
-                                properties: Some(
-                                    serde_json::to_value(&feature.properties)
-                                        .unwrap_or(serde_json::Value::Null),
-                                ),
-                            });
+                            if ring_idx == 0 {
+                                // First ring is the exterior
+                                exterior_ring = Some(transformed_ring);
+                            } else {
+                                // Subsequent rings are holes
+                                hole_rings.push(transformed_ring);
+                            }
                         }
+                    }
+                    
+                    // Create the polygon with holes if we have an exterior ring
+                    if let Some(exterior) = exterior_ring {
+                        let _base_elevation = calculate_base_elevation(
+                            &exterior,
+                            &elevation_grid,
+                            grid_size.0 as usize,
+                            grid_size.1 as usize,
+                            elev_min_lng,
+                            elev_min_lat,
+                            elev_max_lng,
+                            elev_max_lat,
+                        );
+
+                        let holes = if hole_rings.is_empty() {
+                            None
+                        } else {
+                            Some(hole_rings)
+                        };
+
+                        transformed_geometry_parts.push(GeometryData {
+                            geometry: exterior,
+                            holes,
+                            r#type: Some("Polygon".to_string()),
+                            height: Some(height_value),
+                            layer: Some(vt_dataset.source_layer.clone()),
+                            label: vt_dataset.label.clone(),
+                            tags: None,
+                            properties: Some(
+                                serde_json::to_value(&feature.properties)
+                                    .unwrap_or(serde_json::Value::Null),
+                            ),
+                        });
                     }
                 }
                 "LineString" | "MultiLineString" => {
@@ -927,6 +949,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                             transformed_geometry_parts.push(GeometryData {
                                 geometry: transformed_line,
+                                holes: None,
                                 r#type: Some("LineString".to_string()),
                                 height: Some(height_value),
                                 layer: Some(vt_dataset.source_layer.clone()),
@@ -972,6 +995,7 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
                                 transformed_geometry_parts.push(GeometryData {
                                     geometry: vec![transformed_point],
+                                    holes: None,
                                     r#type: Some("Point".to_string()),
                                     height: Some(height_value),
                                     layer: Some(vt_dataset.source_layer.clone()),
@@ -987,9 +1011,14 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                     }
                 }
                 "MultiPolygon" => {
-                    // Handle MultiPolygon geometries (multiple separate polygons)
+                    // Handle MultiPolygon geometries with proper hole support
                     // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer Vec contains multiple polygon rings
-                    // Note: This is a simplified approach - proper MultiPolygon handling would need to group rings by polygon
+                    // In MVT format, rings are ordered: exterior rings (clockwise) followed by holes (counter-clockwise)
+                    // We group them into proper polygon structures with exterior + holes
+                    
+                    let mut current_exterior: Option<Vec<Vec<f64>>> = None;
+                    let mut current_holes: Vec<Vec<Vec<f64>>> = Vec::new();
+                    
                     for ring_tile_coords in &feature.geometry {
                         let mut transformed_ring: Vec<Vec<f64>> =
                             Vec::with_capacity(ring_tile_coords.len());
@@ -1006,32 +1035,78 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                                 transformed_ring.push(vec![lng, lat]);
                             }
                         }
-
-                        if !transformed_ring.is_empty() {
-                            let _base_elevation = calculate_base_elevation(
-                                &transformed_ring,
-                                &elevation_grid,
-                                grid_size.0 as usize,
-                                grid_size.1 as usize,
-                                elev_min_lng,
-                                elev_min_lat,
-                                elev_max_lng,
-                                elev_max_lat,
-                            );
-
-                            transformed_geometry_parts.push(GeometryData {
-                                geometry: transformed_ring,
-                                r#type: Some("Polygon".to_string()),
-                                height: Some(height_value),
-                                layer: Some(vt_dataset.source_layer.clone()),
-                                label: vt_dataset.label.clone(),
-                                tags: None,
-                                properties: Some(
-                                    serde_json::to_value(&feature.properties)
-                                        .unwrap_or(serde_json::Value::Null),
-                                ),
-                            });
+                        
+                        if transformed_ring.is_empty() {
+                            continue;
                         }
+
+                        // Determine if this is an exterior ring (counter-clockwise) or hole (clockwise)
+                        // using the shoelace formula for signed area
+                        // GeoJSON/MVT spec: counter-clockwise = exterior, clockwise = hole
+                        let is_exterior = {
+                            let mut area = 0.0;
+                            for i in 0..transformed_ring.len() {
+                                let j = (i + 1) % transformed_ring.len();
+                                area += transformed_ring[i][0] * transformed_ring[j][1];
+                                area -= transformed_ring[j][0] * transformed_ring[i][1];
+                            }
+                            area < 0.0  // Negative area = counter-clockwise = exterior
+                        };
+
+                        if is_exterior {
+                            // Save previous polygon if it exists
+                            if let Some(exterior) = current_exterior.take() {
+                                let holes = if current_holes.is_empty() {
+                                    None
+                                } else {
+                                    Some(current_holes.clone())
+                                };
+                                
+                                transformed_geometry_parts.push(GeometryData {
+                                    geometry: exterior,
+                                    holes,
+                                    r#type: Some("Polygon".to_string()),
+                                    height: Some(height_value),
+                                    layer: Some(vt_dataset.source_layer.clone()),
+                                    label: vt_dataset.label.clone(),
+                                    tags: None,
+                                    properties: Some(
+                                        serde_json::to_value(&feature.properties)
+                                            .unwrap_or(serde_json::Value::Null),
+                                    ),
+                                });
+                                current_holes.clear();
+                            }
+                            
+                            // Start new polygon with this exterior ring
+                            current_exterior = Some(transformed_ring);
+                        } else {
+                            // This is a hole - add it to current polygon's holes
+                            current_holes.push(transformed_ring);
+                        }
+                    }
+                    
+                    // Don't forget the last polygon
+                    if let Some(exterior) = current_exterior {
+                        let holes = if current_holes.is_empty() {
+                            None
+                        } else {
+                            Some(current_holes)
+                        };
+                        
+                        transformed_geometry_parts.push(GeometryData {
+                            geometry: exterior,
+                            holes,
+                            r#type: Some("Polygon".to_string()),
+                            height: Some(height_value),
+                            layer: Some(vt_dataset.source_layer.clone()),
+                            label: vt_dataset.label.clone(),
+                            tags: None,
+                            properties: Some(
+                                serde_json::to_value(&feature.properties)
+                                    .unwrap_or(serde_json::Value::Null),
+                            ),
+                        });
                     }
                 }
                 _ => {

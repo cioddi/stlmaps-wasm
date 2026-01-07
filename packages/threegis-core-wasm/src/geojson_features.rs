@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 // Structure for the GeometryData that we extract from geojson features
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GeometryData {
-    pub geometry: Vec<Vec<f64>>, // Represents a geometry's coordinates
+    pub geometry: Vec<Vec<f64>>, // Represents a geometry's coordinates (exterior ring for polygons)
+    #[serde(default)]
+    pub holes: Option<Vec<Vec<Vec<f64>>>>, // Array of holes (inner rings) for polygon geometries
     pub r#type: String,          // Geometry type (e.g., "Polygon", "LineString")
     pub height: f64,             // Feature height
     pub base_elevation: f64,     // Elevation at geometry position

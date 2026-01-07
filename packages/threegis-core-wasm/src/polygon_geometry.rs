@@ -54,7 +54,9 @@ struct Vector2 {
 // Deserializable struct matching GeometryData from TypeScript
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometryData {
-    pub geometry: Vec<Vec<f64>>, // Array of [lng, lat] points
+    pub geometry: Vec<Vec<f64>>, // Array of [lng, lat] points (exterior ring)
+    #[serde(default)]
+    pub holes: Option<Vec<Vec<Vec<f64>>>>, // Optional holes (inner rings) for polygons
     pub r#type: Option<String>,  // Geometry type (e.g., "Polygon", "LineString")
     pub height: Option<f64>,
     pub layer: Option<String>, // Source layer for processing
@@ -1409,6 +1411,7 @@ fn create_extruded_shape_from_quad_strip(
 // REVISED: Improved implementation of an extruded shape using the extrude_geometry function
 fn create_extruded_shape(
     unique_shape_points: &[Vector2],
+    holes: Option<&Vec<Vec<Vec<f64>>>>,
     height: f64,
     z_offset: f64,
     properties: Option<std::collections::HashMap<String, serde_json::Value>>,
@@ -1466,6 +1469,7 @@ fn create_extruded_shape(
             ];
             return create_extruded_shape(
                 &square_points,
+                None,
                 height,
                 z_offset,
                 None,
@@ -1534,6 +1538,7 @@ fn create_extruded_shape(
             ];
             return create_extruded_shape(
                 &rect_points,
+                None,
                 height,
                 z_offset,
                 None,
@@ -1568,14 +1573,29 @@ fn create_extruded_shape(
     //
     // Convert the points to the format expected by extrude_geometry
     // The extrude function expects a list of shapes, each shape is an array of rings
-    // First ring is the contour, any additional rings are holes (not used here)
+    // First ring is the contour (exterior ring), any additional rings are holes
     let mut shape_points = Vec::new();
     for point in unique_shape_points {
         shape_points.push([point.x, point.y]);
     }
 
-    // Create the shape array (rings array)
-    let shape_with_rings = vec![shape_points];
+    // Create the shape array (rings array) - start with exterior ring
+    let mut shape_with_rings = vec![shape_points];
+    
+    // Add holes if they exist
+    if let Some(holes) = holes {
+        for hole in holes {
+            let mut hole_points = Vec::new();
+            for point in hole {
+                if point.len() >= 2 {
+                    hole_points.push([point[0], point[1]]);
+                }
+            }
+            if !hole_points.is_empty() {
+                shape_with_rings.push(hole_points);
+            }
+        }
+    }
 
     // Create an array of shapes (only one shape for now)
     let shapes = vec![shape_with_rings];
@@ -2189,6 +2209,32 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         })
                         .collect();
 
+                    // Transform and clean holes as well
+                    let transformed_holes: Option<Vec<Vec<Vec<f64>>>> = polygon_data.holes.as_ref().map(|holes| {
+                        holes.iter().filter_map(|hole| {
+                            // Convert hole from lng/lat to mesh coordinates
+                            let hole_mesh_points: Vec<Vector2> = hole.iter()
+                                .filter_map(|pt| {
+                                    if pt.len() >= 2 {
+                                        let [mx, my] = transform_to_mesh_coordinates(pt[0], pt[1], &input.bbox);
+                                        Some(Vector2 { x: mx, y: my })
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            
+                            // Clean the hole polygon
+                            let cleaned_hole = clean_polygon_footprint(&hole_mesh_points);
+                            if cleaned_hole.is_empty() || cleaned_hole.len() < 3 {
+                                None
+                            } else {
+                                // Convert back to Vec<Vec<f64>> format
+                                Some(cleaned_hole.iter().map(|v| vec![v.x, v.y]).collect())
+                            }
+                        }).collect()
+                    });
+
                     // Clean and validate the polygon
                     let cleaned_points = clean_polygon_footprint(&mesh_points);
                     if cleaned_points.is_empty() {
@@ -2438,7 +2484,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     // to match exactly what terrain_mesh_gen.rs does
                     let geometry = create_extruded_shape(
                         &cleaned_points,
-
+                        transformed_holes.as_ref(),
                         height,
                         z_offset,
                         properties,

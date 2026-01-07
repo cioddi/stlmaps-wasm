@@ -212,8 +212,8 @@ const defaultLayers: VtDataSet[] = [
     enabled: true,
     color: "#74e010",
     bufferSize: 2,
-    extrusionDepth: 0.2,
-    zOffset: -0.01,
+    extrusionDepth: 0.8,
+    zOffset: -0.2,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
     order: 2
@@ -320,7 +320,7 @@ export const useAppStore = create<AppState>()(
     // Terrain configuration
     terrainSettings: {
       enabled: true,
-      verticalExaggeration: 1,
+      verticalExaggeration: 0.5,
       baseHeight: 5,
       color: "#db7329",
       simpleMesh: false
