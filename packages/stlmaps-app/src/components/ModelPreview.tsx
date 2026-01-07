@@ -843,19 +843,6 @@ const ModelPreview = () => {
                 if (!individualGeometry.boundingBox) {
                   individualGeometry.computeBoundingBox();
                 }
-                const zMin = individualGeometry.boundingBox?.min.z ?? 0;
-                const zMax = individualGeometry.boundingBox?.max.z ?? 0;
-                const vertexCount = individualGeometry.attributes.position?.count ?? 0;
-                console.log(`🏗️ Terrain-aligned ${vtDataset.sourceLayer} mesh:`, {
-                  alignVerticesToTerrain: true,
-                  layerZOffset: layerZOffset,
-                  finalMeshPositionZ: polygonMesh.position.z,
-                  vertexCount,
-                  vertexZMin: zMin.toFixed(2),
-                  vertexZMax: zMax.toFixed(2),
-                  vertexZRange: (zMax - zMin).toFixed(2),
-                  note: 'Per-vertex Z values preserved - each vertex follows terrain at its X,Y'
-                });
               } else {
                 // Non-terrain-aligned: adjust geometry origin and position at base height
                 let originalBottomZ = 0;
@@ -870,14 +857,6 @@ const ModelPreview = () => {
                 
                 // Position mesh using the layer's configured zOffset value
                 polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
-                console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh:`, {
-                  terrainBaseHeight: terrainSettings.baseHeight,
-                  layerZOffset: layerZOffset,
-                  layerHeightScaleFactor: layerHeightScaleFactor,
-                  finalPosition: polygonMesh.position.z,
-                  heightScale: polygonMesh.scale.z,
-                  calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}, scale.z = ${layerHeightScaleFactor}`
-                });
               }
               polygonMesh.castShadow = renderingMode === 'quality';
               polygonMesh.receiveShadow = renderingMode === 'quality';
@@ -926,12 +905,6 @@ const ModelPreview = () => {
             // Per-vertex terrain alignment: vertices already have correct Z positions
             // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
             polygonMesh.position.z = layerZOffset;
-            console.log(`🏗️ Terrain-aligned ${vtDataset.label} mesh:`, {
-              alignVerticesToTerrain: true,
-              layerZOffset: layerZOffset,
-              finalPosition: polygonMesh.position.z,
-              note: 'Per-vertex Z values preserved'
-            });
           } else {
             // Non-terrain-aligned: adjust geometry origin and position at base height
             let originalBottomZ = 0;
@@ -946,12 +919,6 @@ const ModelPreview = () => {
             
             // Position mesh using the layer's configured zOffset value
             polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
-            console.log(`🏗️ Positioned ${vtDataset.label} mesh:`, {
-              terrainBaseHeight: terrainSettings.baseHeight,
-              layerZOffset: layerZOffset,
-              finalPosition: polygonMesh.position.z,
-              calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}`
-            });
           }
           polygonMesh.castShadow = renderingMode === 'quality';
           polygonMesh.receiveShadow = renderingMode === 'quality';
