@@ -1,5 +1,6 @@
 use crate::bbox_filter::polygon_intersects_bbox;
 use crate::extrude;
+use crate::console_log;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 // Sequential processing for WASM compatibility
@@ -18,6 +19,8 @@ const BUILDING_SUBMERGE_OFFSET: f64 = 0.01;
 const MIN_HEIGHT: f64 = 0.01; // Avoid zero or negative height for robust geometry
 const MAX_HEIGHT: f64 = 500.0;
 const MIN_CLEARANCE: f64 = 0.1; // Minimum clearance above terrain to avoid z-fighting and mesh intersections
+// Scale factor to make vertical exaggeration values more visible (must match terrain_mesh_gen.rs)
+const EXAGGERATION_SCALE_FACTOR: f64 = 5.0;
 
 // Helper function to decode base64 string to f32 vector
 fn decode_base64_to_f32_vec(base64_data: &str) -> Result<Vec<f32>, String> {
@@ -123,6 +126,8 @@ pub struct VtDataSet {
     pub align_vertices_to_terrain: Option<bool>,
     #[serde(rename = "applyMedianHeight")]
     pub apply_median_height: Option<bool>,
+    #[serde(rename = "addTerrainDifferenceToHeight")]
+    pub add_terrain_difference_to_height: Option<bool>,
     pub filter: Option<serde_json::Value>,
 }
 
@@ -216,28 +221,26 @@ fn sample_terrain_mesh_height_at_point(
 ) -> f64 {
     // Replicate the EXACT same algorithm used in terrain_mesh_gen.rs
     // Convert mesh coordinates to normalized terrain grid coordinates (0.0 to 1.0)
+    // Mesh coordinates range from -100 to +100 (TERRAIN_SIZE = 200)
     let half_size = TERRAIN_SIZE / 2.0;
-    let normalized_x = (mesh_x + half_size) / TERRAIN_SIZE;
-    let normalized_y = (mesh_y + half_size) / TERRAIN_SIZE;
+    let normalized_x = ((mesh_x + half_size) / TERRAIN_SIZE).clamp(0.0, 1.0);
+    let normalized_y = ((mesh_y + half_size) / TERRAIN_SIZE).clamp(0.0, 1.0);
 
-    // Sample elevation using the same function as terrain mesh generation
+    // Sample elevation using bilinear interpolation from the grid
     let elevation = sample_elevation_from_grid(normalized_x, normalized_y, elevation_grid, grid_size);
 
-    // Apply the EXACT same scaling as terrain_mesh_gen.rs lines 65-68
+    // Apply the EXACT same scaling as terrain_mesh_gen.rs
     let elevation_range = f64::max(1.0, max_elevation - min_elevation);
     let normalized_elevation = ((elevation - min_elevation) / elevation_range).clamp(0.0, 1.0);
-    let elevation_variation = normalized_elevation * vertical_exaggeration;
+    let scaled_exaggeration = vertical_exaggeration * EXAGGERATION_SCALE_FACTOR;
+    let elevation_variation = normalized_elevation * scaled_exaggeration;
 
-    // Use the EXACT same formula as terrain_mesh_gen.rs line 68
+    // Calculate final terrain height: base + elevation variation
     let new_z = terrain_base_height + elevation_variation;
 
     // Apply the same minimum constraint as terrain mesh generation
-    const MIN_TERRAIN_THICKNESS: f64 = 0.1; // Same as terrain_mesh_gen.rs
-    if new_z < MIN_TERRAIN_THICKNESS {
-        MIN_TERRAIN_THICKNESS
-    } else {
-        new_z
-    }
+    const MIN_TERRAIN_THICKNESS: f64 = 0.3;
+    new_z.max(MIN_TERRAIN_THICKNESS)
 }
 
 // Helper function to sample elevation from grid (same logic as terrain mesh generation)
@@ -320,11 +323,12 @@ fn sample_terrain_elevation_at_point(
 
     let elevation = v0 * (1.0 - dy) + v1 * dy;
 
-    // Apply the same scaling as terrain generation (must match terrain.rs exactly)
+    // Apply the same scaling as terrain generation (must match terrain_mesh_gen.rs exactly)
     let elevation_range = f64::max(1.0, max_elevation - min_elevation);
     let normalized_elevation = (elevation - min_elevation) / elevation_range;
     let base_box_height = terrain_base_height; // Use terrain base height as box height (no magic numbers)
-    let elevation_variation = normalized_elevation * vertical_exaggeration; // Direct application like terrain.rs
+    let scaled_exaggeration = vertical_exaggeration * EXAGGERATION_SCALE_FACTOR;
+    let elevation_variation = normalized_elevation * scaled_exaggeration; // Apply scale factor like terrain.rs
 
 
     // Calculate final terrain height
@@ -335,6 +339,52 @@ fn sample_terrain_elevation_at_point(
 
 
     safe_height
+}
+
+/// Sample raw elevation (in meters) at a geographic point WITHOUT vertical exaggeration.
+/// Used for computing elevation differences for building height adjustments.
+fn sample_raw_elevation_at_point(
+    lng: f64,
+    lat: f64,
+    elevation_grid: &[Vec<f64>],
+    grid_size: &GridSize,
+    bbox: &[f64],
+) -> f64 {
+    let min_lng = bbox[0];
+    let min_lat = bbox[1];
+    let max_lng = bbox[2];
+    let max_lat = bbox[3];
+
+    // Normalize coordinates to 0-1 range within the grid
+    let nx = (lng - min_lng) / (max_lng - min_lng);
+    let ny = (lat - min_lat) / (max_lat - min_lat);
+
+    // Convert to grid indices
+    let grid_width = grid_size.width as usize;
+    let grid_height = grid_size.height as usize;
+
+    let x = (nx * (grid_width as f64 - 1.0)).clamp(0.0, (grid_width as f64) - 1.001);
+    let y = (ny * (grid_height as f64 - 1.0)).clamp(0.0, (grid_height as f64) - 1.001);
+
+    let x0 = x.floor() as usize;
+    let y0 = y.floor() as usize;
+    let x1 = (x0 + 1).min(grid_width - 1);
+    let y1 = (y0 + 1).min(grid_height - 1);
+
+    let dx = x - x0 as f64;
+    let dy = y - y0 as f64;
+
+    // Bilinear interpolation of elevation values (raw meters)
+    let v00 = elevation_grid[y0][x0];
+    let v10 = elevation_grid[y0][x1];
+    let v01 = elevation_grid[y1][x0];
+    let v11 = elevation_grid[y1][x1];
+
+    let v0 = v00 * (1.0 - dx) + v10 * dx;
+    let v1 = v01 * (1.0 - dx) + v11 * dx;
+
+    // Return raw elevation in meters (no exaggeration applied)
+    v0 * (1.0 - dy) + v1 * dy
 }
 
 // Sample elevation from processed elevation grid (no additional scaling needed)
@@ -1048,8 +1098,9 @@ fn create_extruded_shape(
         }
     };
 
-    // Apply z_offset to the vertices
-    if z_offset != 0.0 {
+    // Apply z_offset to the vertices ONLY if NOT using per-vertex terrain alignment
+    // When align_vertices_to_terrain is true, we'll handle Z positioning per-vertex later
+    if z_offset != 0.0 && !align_vertices_to_terrain {
         // Get position array from extruded_js
         let position_js = js_sys::Reflect::get(&extruded_js, &JsValue::from_str("position"))
             .unwrap_or(JsValue::null());
@@ -1125,133 +1176,182 @@ fn create_extruded_shape(
         uv_array.copy_to(&mut uvs);
     }
 
-    // Apply terrain mesh-based alignment if enabled
+    // Apply per-vertex terrain alignment if enabled
+    // This aligns each vertex's Z coordinate to the terrain height at that specific X,Y position
     if align_vertices_to_terrain {
-        // Try to decode terrain mesh data from base64
-        let terrain_vertices = if let Some(base64_data) = terrain_vertices_base64 {
-            if !base64_data.is_empty() {
-                decode_base64_to_f32_vec(base64_data).unwrap_or_default()
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
+        // Only log once per layer to avoid spam (use a simple heuristic based on vertex count)
+        static mut DEBUG_LOG_COUNT: u32 = 0;
+        let should_log = unsafe { 
+            DEBUG_LOG_COUNT += 1;
+            DEBUG_LOG_COUNT <= 3  // Only log first 3 geometries
         };
+        
+        if should_log {
+            console_log!("[TERRAIN ALIGN] align_vertices_to_terrain is TRUE, geometry #{}", unsafe { DEBUG_LOG_COUNT });
+        }
+        // Check if we have elevation data for proper terrain alignment
+        let has_elevation_data = elevation_grid.is_some() 
+            && grid_size.is_some() 
+            && bbox.is_some()
+            && min_elevation.is_some()
+            && max_elevation.is_some()
+            && vertical_exaggeration.is_some()
+            && terrain_base_height.is_some();
 
-        if !terrain_vertices.is_empty() && terrain_vertices.len() >= 9 {
-            // Calculate layer geometry dimensions for alignment
-            let mut layer_min_z = f32::INFINITY;
-            let mut layer_max_z = f32::NEG_INFINITY;
+        if should_log {
+            console_log!("[TERRAIN ALIGN] has_elevation_data: {}, grid: {}, size: {}, bbox: {}, min: {}, max: {}, exag: {}, base: {}",
+                has_elevation_data, 
+                elevation_grid.is_some(),
+                grid_size.is_some(),
+                bbox.is_some(),
+                min_elevation.is_some(),
+                max_elevation.is_some(),
+                vertical_exaggeration.is_some(),
+                terrain_base_height.is_some());
+        }
 
-            for i in (0..vertices.len()).step_by(3) {
-                let z = vertices[i + 2];
-                layer_min_z = layer_min_z.min(z);
-                layer_max_z = layer_max_z.max(z);
-            }
+        if has_elevation_data {
+            let elev_grid = elevation_grid.unwrap();
+            let g_size = grid_size.unwrap();
+            let b_box = bbox.unwrap();
+            let min_elev = min_elevation.unwrap();
+            let max_elev = max_elevation.unwrap();
+            let vert_exag = vertical_exaggeration.unwrap();
+            let base_height = terrain_base_height.unwrap();
 
-            let geometry_height = layer_max_z - layer_min_z;
-
-            // Use direct terrain mesh vertex sampling for top surface measurement
-            for i in (0..vertices.len()).step_by(3) {
-                let x = vertices[i] as f64;
-                let y = vertices[i + 1] as f64;
-                let current_z = vertices[i + 2];
-
-                // Calculate height ratio within the geometry (0.0 = bottom, 1.0 = top)
-                let height_ratio = if geometry_height > 0.001 {
-                    ((current_z - layer_min_z) / geometry_height) as f64
-                } else {
-                    0.0
-                };
-
-                // Find the highest terrain vertex near this coordinate
-                let mut max_terrain_height = f64::NEG_INFINITY;
-                let search_radius = 5.0; // Search within 5 units radius
-
-                for terrain_i in (0..terrain_vertices.len()).step_by(3) {
-                    let terrain_x = terrain_vertices[terrain_i] as f64;
-                    let terrain_y = terrain_vertices[terrain_i + 1] as f64;
-                    let terrain_z = terrain_vertices[terrain_i + 2] as f64;
-
-                    // Calculate distance in XY plane
-                    let dx = terrain_x - x;
-                    let dy = terrain_y - y;
-                    let distance = (dx * dx + dy * dy).sqrt();
-
-                    // If within search radius, check if this is the highest point
-                    if distance <= search_radius {
-                        max_terrain_height = max_terrain_height.max(terrain_z);
+            // Debug: Check actual elevation grid variation (only compute if logging)
+            if should_log {
+                let mut grid_min = f64::INFINITY;
+                let mut grid_max = f64::NEG_INFINITY;
+                for row in elev_grid.iter() {
+                    for &val in row.iter() {
+                        grid_min = grid_min.min(val);
+                        grid_max = grid_max.max(val);
                     }
                 }
+                
+                // Debug: log elevation data info
+                console_log!("[TERRAIN ALIGN] Grid size: {}x{}, min_elev: {:.2}, max_elev: {:.2}, vert_exag: {:.2}, base_height: {:.2}", 
+                    g_size.width, g_size.height, min_elev, max_elev, vert_exag, base_height);
+                console_log!("[TERRAIN ALIGN] Actual grid values range: {:.2} to {:.2}", grid_min, grid_max);
+            }
 
-                // If no terrain vertices found nearby, use closest vertex method as fallback
-                if max_terrain_height == f64::NEG_INFINITY {
-                    let mut closest_terrain_height = 0.0f64;
-                    let mut closest_distance = f64::INFINITY;
+            // Find the original geometry's min and max Z to determine the extrusion height
+            let mut original_min_z = f32::INFINITY;
+            let mut original_max_z = f32::NEG_INFINITY;
+            for i in (0..vertices.len()).step_by(3) {
+                let z = vertices[i + 2];
+                original_min_z = original_min_z.min(z);
+                original_max_z = original_max_z.max(z);
+            }
+            let extrusion_height = (original_max_z - original_min_z) as f64;
 
-                    for terrain_i in (0..terrain_vertices.len()).step_by(3) {
-                        let terrain_x = terrain_vertices[terrain_i] as f64;
-                        let terrain_y = terrain_vertices[terrain_i + 1] as f64;
-                        let terrain_z = terrain_vertices[terrain_i + 2] as f64;
+            // Process EVERY vertex individually - sample terrain at each vertex's X,Y position
+            let vertex_count = vertices.len() / 3;
+            
+            // Debug: sample a few vertices to verify terrain heights vary
+            let mut debug_samples: Vec<(f64, f64, f64)> = Vec::new();
+            
+            for vertex_idx in 0..vertex_count {
+                let base_idx = vertex_idx * 3;
+                
+                // Get this vertex's X, Y position in mesh coordinates
+                let mesh_x = vertices[base_idx] as f64;
+                let mesh_y = vertices[base_idx + 1] as f64;
+                let current_z = vertices[base_idx + 2];
 
-                        let dx = terrain_x - x;
-                        let dy = terrain_y - y;
-                        let distance = (dx * dx + dy * dy).sqrt();
+                // Sample the terrain height at THIS SPECIFIC X,Y position
+                let terrain_height_at_this_point = sample_terrain_mesh_height_at_point(
+                    mesh_x,
+                    mesh_y,
+                    elev_grid,
+                    g_size,
+                    b_box,
+                    min_elev,
+                    max_elev,
+                    vert_exag,
+                    base_height,
+                );
 
-                        if distance < closest_distance {
-                            closest_distance = distance;
-                            closest_terrain_height = terrain_z;
+                // Collect debug samples for first few vertices
+                if debug_samples.len() < 5 {
+                    debug_samples.push((mesh_x, mesh_y, terrain_height_at_this_point));
+                }
+
+                // Determine if this is a bottom or top vertex based on original Z
+                // Bottom vertices are at original_min_z (typically 0 from extrusion)
+                // Top vertices are at original_max_z (extrusion height)
+                let is_bottom_vertex = (current_z - original_min_z).abs() < 0.1;
+                
+                // Set the new Z for this vertex based on terrain at THIS position
+                if is_bottom_vertex {
+                    // Bottom vertex: align to terrain surface at this X,Y + small clearance
+                    vertices[base_idx + 2] = (terrain_height_at_this_point + MIN_CLEARANCE) as f32;
+                } else {
+                    // Top vertex: terrain height at this X,Y + clearance + extrusion height
+                    vertices[base_idx + 2] = (terrain_height_at_this_point + MIN_CLEARANCE + extrusion_height) as f32;
+                }
+            }
+            
+            // Log debug samples (only for first few geometries)
+            if should_log && !debug_samples.is_empty() {
+                console_log!("[TERRAIN ALIGN] Vertex X range in samples: {:.2} to {:.2}", 
+                    debug_samples.iter().map(|(x,_,_)| *x).fold(f64::INFINITY, f64::min),
+                    debug_samples.iter().map(|(x,_,_)| *x).fold(f64::NEG_INFINITY, f64::max));
+                console_log!("[TERRAIN ALIGN] Vertex Y range in samples: {:.2} to {:.2}", 
+                    debug_samples.iter().map(|(_,y,_)| *y).fold(f64::INFINITY, f64::min),
+                    debug_samples.iter().map(|(_,y,_)| *y).fold(f64::NEG_INFINITY, f64::max));
+                console_log!("[TERRAIN ALIGN] Terrain height range in samples: {:.4} to {:.4}", 
+                    debug_samples.iter().map(|(_,_,h)| *h).fold(f64::INFINITY, f64::min),
+                    debug_samples.iter().map(|(_,_,h)| *h).fold(f64::NEG_INFINITY, f64::max));
+                for (i, (x, y, h)) in debug_samples.iter().enumerate() {
+                    console_log!("[TERRAIN ALIGN] Sample {}: mesh({:.2}, {:.2}) -> terrain_height: {:.4}", i, x, y, h);
+                }
+                
+                // Log ACTUAL final vertex Z values to verify alignment
+                let mut final_z_min = f32::INFINITY;
+                let mut final_z_max = f32::NEG_INFINITY;
+                let mut bottom_z_values: Vec<f32> = Vec::new();
+                let mut top_z_values: Vec<f32> = Vec::new();
+                for i in (0..vertices.len()).step_by(3) {
+                    let z = vertices[i + 2];
+                    final_z_min = final_z_min.min(z);
+                    final_z_max = final_z_max.max(z);
+                    // Classify as bottom or top based on proximity to min/max
+                    if (z - final_z_min).abs() < 1.0 && bottom_z_values.len() < 10 {
+                        bottom_z_values.push(z);
+                    } else if top_z_values.len() < 10 {
+                        top_z_values.push(z);
+                    }
+                }
+                console_log!("[TERRAIN ALIGN] FINAL vertex Z range: {:.4} to {:.4}", final_z_min, final_z_max);
+                console_log!("[TERRAIN ALIGN] Original extrusion height was: {:.4}", extrusion_height);
+                
+                // Sample a few ACTUAL bottom and top vertices to show variation
+                let mut actual_bottom_samples: Vec<(f64, f64, f32)> = Vec::new();
+                let mut actual_top_samples: Vec<(f64, f64, f32)> = Vec::new();
+                for i in (0..vertices.len().min(60)).step_by(3) {
+                    let x = vertices[i] as f64;
+                    let y = vertices[i + 1] as f64;
+                    let z = vertices[i + 2];
+                    if (z - final_z_min).abs() < (final_z_max - final_z_min) / 2.0 {
+                        if actual_bottom_samples.len() < 5 {
+                            actual_bottom_samples.push((x, y, z));
+                        }
+                    } else {
+                        if actual_top_samples.len() < 5 {
+                            actual_top_samples.push((x, y, z));
                         }
                     }
-                    max_terrain_height = closest_terrain_height;
                 }
-
-                // Apply terrain alignment - only to bottom vertices (height_ratio close to 0)
-                // Top vertices maintain their relative height above the terrain
-                if height_ratio < 0.5 {
-                    // Bottom vertices: align to highest terrain surface with small clearance
-                    vertices[i + 2] = (max_terrain_height + MIN_CLEARANCE) as f32;
-                } else {
-                    // Top vertices: maintain height relative to terrain-aligned bottom
-                    let base_terrain_height = max_terrain_height + MIN_CLEARANCE;
-                    let relative_height = (current_z as f64) - (layer_min_z as f64);
-                    vertices[i + 2] = (base_terrain_height + relative_height) as f32;
+                console_log!("[TERRAIN ALIGN] Bottom vertex samples (should vary per X,Y):");
+                for (i, (x, y, z)) in actual_bottom_samples.iter().enumerate() {
+                    console_log!("  Bottom {}: ({:.2}, {:.2}) -> Z={:.4}", i, x, y, z);
                 }
-            }
-        } else {
-            // Fallback to simple coordinate-based variation if no terrain mesh provided
-
-            // Find the Z range of the layer geometry
-            let mut min_z = f32::INFINITY;
-            let mut max_z = f32::NEG_INFINITY;
-
-            for i in (0..vertices.len()).step_by(3) {
-                let z = vertices[i + 2];
-                min_z = min_z.min(z);
-                max_z = max_z.max(z);
-            }
-
-            let geometry_height = max_z - min_z;
-
-            // Apply basic terrain variation
-            for i in (0..vertices.len()).step_by(3) {
-                let x = vertices[i] as f64;
-                let y = vertices[i + 1] as f64;
-                let current_z = vertices[i + 2];
-
-                // Calculate height ratio within the geometry (0.0 = bottom, 1.0 = top)
-                let height_ratio = if geometry_height > 0.001 {
-                    ((current_z - min_z) / geometry_height) as f64
-                } else {
-                    0.0
-                };
-
-                // Simple terrain variation using coordinate-based undulation
-                let terrain_variation = (x * 0.01).sin() * 2.0 + (y * 0.015).sin() * 1.5;
-
-                // Apply terrain offset only to bottom vertices
-                let terrain_offset = terrain_variation * (1.0 - height_ratio) * 0.1;
-                vertices[i + 2] = (current_z as f64 + terrain_offset) as f32;
+                console_log!("[TERRAIN ALIGN] Top vertex samples (should vary per X,Y):");
+                for (i, (x, y, z)) in actual_top_samples.iter().enumerate() {
+                    console_log!("  Top {}: ({:.2}, {:.2}) -> Z={:.4}", i, x, y, z);
+                }
             }
         }
     }
@@ -1722,7 +1822,11 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
                     // Compute per-polygon terrain extremes for base alignment
                     let mut lowest_terrain_z = f64::INFINITY;
-                    let mut _highest_terrain_z = f64::NEG_INFINITY;
+                    let mut highest_terrain_z = f64::NEG_INFINITY;
+                    // Also track raw elevation values (in meters, before exaggeration) for height adjustment
+                    let mut lowest_raw_elevation = f64::INFINITY;
+                    let mut highest_raw_elevation = f64::NEG_INFINITY;
+                    
                     for pt in &final_points {
                         let tz = sample_terrain_elevation_at_point(
                             pt.x,
@@ -1736,13 +1840,28 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             input.terrain_base_height,
                         );
                         lowest_terrain_z = lowest_terrain_z.min(tz);
-                        _highest_terrain_z = _highest_terrain_z.max(tz);
+                        highest_terrain_z = highest_terrain_z.max(tz);
+                        
+                        // Sample raw elevation (without exaggeration) for height adjustment
+                        let raw_elev = sample_raw_elevation_at_point(
+                            pt.x,
+                            pt.y,
+                            &input.elevation_grid,
+                            &input.grid_size,
+                            &input.bbox,
+                        );
+                        lowest_raw_elevation = lowest_raw_elevation.min(raw_elev);
+                        highest_raw_elevation = highest_raw_elevation.max(raw_elev);
                     }
                     // Optionally use dataset-wide extremes
                     if use_same_z_offset {
                         lowest_terrain_z = dataset_lowest_z;
-                        _highest_terrain_z = dataset_highest_z;
+                        highest_terrain_z = dataset_highest_z;
                     }
+                    
+                    // Calculate raw elevation difference (in meters, before exaggeration)
+                    // This is the actual terrain slope that the building sits on
+                    let raw_elevation_difference = (highest_raw_elevation - lowest_raw_elevation).max(0.0);
                     // Base z offset: position bottom face above terrain surface with clearance
                     // Add clearance to prevent mesh intersections with terrain (required for 3D printing)
                     let user_z_offset = input.vt_data_set.z_offset.unwrap_or(0.0);
@@ -1785,15 +1904,24 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     // Calculate scaling factor from meters to terrain units
                     let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
 
-                    // Scale height and terrain parameters consistently
+                    // Scale height for extrusion (building heights need scaling)
                     height *= meters_to_units;
-                    let scaled_vertical_exaggeration =
-                        input.vertical_exaggeration * meters_to_units;
-                    let scaled_terrain_base_height = input.terrain_base_height * meters_to_units;
+                    
+                    // Optionally add terrain elevation difference to height (useful for buildings on slopes)
+                    // This ensures buildings extend from the lowest terrain point to maintain consistent roof height
+                    // We use raw_elevation_difference (in meters) scaled to terrain units, NOT the exaggerated terrain Z
+                    if input.vt_data_set.add_terrain_difference_to_height.unwrap_or(false) {
+                        // Scale the raw elevation difference (meters) to terrain units
+                        let scaled_elevation_diff = raw_elevation_difference * meters_to_units;
+                        height += scaled_elevation_diff;
+                    }
 
                     // Final clamp in terrain units
                     height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
 
+                    // For terrain alignment, pass RAW (unscaled) vertical_exaggeration and terrain_base_height
+                    // The sample_terrain_mesh_height_at_point function will apply EXAGGERATION_SCALE_FACTOR
+                    // to match exactly what terrain_mesh_gen.rs does
                     let geometry = create_extruded_shape(
                         &final_points,
                         height,
@@ -1805,8 +1933,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         Some(&input.bbox),
                         Some(input.min_elevation),
                         Some(input.max_elevation),
-                        Some(scaled_vertical_exaggeration),
-                        Some(scaled_terrain_base_height),
+                        Some(input.vertical_exaggeration),  // RAW value, not scaled by meters_to_units
+                        Some(input.terrain_base_height),    // RAW value, not scaled by meters_to_units
                         Some(&input.vt_data_set.source_layer),
                         Some(&input.terrain_vertices_base64),
                         Some(&input.terrain_indices_base64),
@@ -1835,6 +1963,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
     if all_geometries.is_empty() {
         return Ok(serde_json::to_string(&Vec::<BufferGeometry>::new()).unwrap());
+    }
+
+    // Check if this layer uses per-vertex terrain alignment
+    let uses_terrain_alignment = input.vt_data_set.align_vertices_to_terrain.unwrap_or(false);
+
+    // IMPORTANT: Skip geometry merging for terrain-aligned layers!
+    // The merge_geometries_by_layer function uses union_via_footprints which re-extrudes
+    // geometries with uniform Z values, destroying the per-vertex terrain alignment.
+    if uses_terrain_alignment {
+        // For terrain-aligned layers, return geometries as-is without merging
+        // Each geometry preserves its per-vertex Z values from terrain alignment
+        match serde_json::to_string(&all_geometries) {
+            Ok(json) => return Ok(json),
+            Err(e) => return Err(format!("Failed to serialize output: {}", e)),
+        }
     }
 
     let tolerance = if input.vt_data_set.source_layer == "transportation" {

@@ -5,8 +5,9 @@ members = [
 ]
 
 [patch.crates-io]
-csgrs = { path = "vendor/csgrs" }
-geo-buf = { path = "vendor/geo-buf" }
+# csgrs = { path = "vendor/csgrs" }
+# geo-buf = { path = "vendor/geo-buf" }
+# home = { path = "vendor/home" }
 
 [profile.release]
 opt-level = 3

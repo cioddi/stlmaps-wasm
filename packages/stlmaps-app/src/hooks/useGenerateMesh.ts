@@ -359,6 +359,7 @@ class ParallelLayerProcessor {
           zOffset: layer.zOffset ?? null,
           alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
           applyMedianHeight: layer.applyMedianHeight ?? null,
+          addTerrainDifferenceToHeight: layer.addTerrainDifferenceToHeight ?? null,
           csgClipping: layer.useCsgClipping ?? null,
           filter: layer.filter ?? null,
           geometryDebugMode: useDebugMode
@@ -708,6 +709,7 @@ export function useGenerateMesh() {
           zOffset: layer.zOffset,
           alignVerticesToTerrain: layer.alignVerticesToTerrain,
           applyMedianHeight: layer.applyMedianHeight,
+          addTerrainDifferenceToHeight: layer.addTerrainDifferenceToHeight,
           filter: layer.filter
         }))
       };

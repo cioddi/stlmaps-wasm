@@ -821,19 +821,9 @@ const ModelPreview = () => {
               // Set color after material creation (exactly like live updates)
               polygonMaterial.color = baseColor.clone();
               
-              // Adjust geometry origin to bottom for proper scaling
-              let originalBottomZ = 0;
-              if (!individualGeometry.boundingBox) {
-                individualGeometry.computeBoundingBox();
-              }
-              if (individualGeometry.boundingBox) {
-                originalBottomZ = individualGeometry.boundingBox.min.z;
-                
-                // Translate geometry so bottom is at origin (z=0)
-                individualGeometry.translate(0, 0, -originalBottomZ);
-                
-              }
-
+              // Check if this layer has per-vertex terrain alignment
+              const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
+              
               // Create mesh
               const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
               
@@ -844,16 +834,51 @@ const ModelPreview = () => {
               // Apply height scale factor to the mesh
               polygonMesh.scale.z = layerHeightScaleFactor;
               
-              // Position mesh using the layer's configured zOffset value
-              polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
-              console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh:`, {
-                terrainBaseHeight: terrainSettings.baseHeight,
-                layerZOffset: layerZOffset,
-                layerHeightScaleFactor: layerHeightScaleFactor,
-                finalPosition: polygonMesh.position.z,
-                heightScale: polygonMesh.scale.z,
-                calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}, scale.z = ${layerHeightScaleFactor}`
-              });
+              if (hasTerrainAlignment) {
+                // Per-vertex terrain alignment: vertices already have correct Z positions
+                // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
+                polygonMesh.position.z = layerZOffset;
+                
+                // Debug: log actual vertex Z range to verify alignment
+                if (!individualGeometry.boundingBox) {
+                  individualGeometry.computeBoundingBox();
+                }
+                const zMin = individualGeometry.boundingBox?.min.z ?? 0;
+                const zMax = individualGeometry.boundingBox?.max.z ?? 0;
+                const vertexCount = individualGeometry.attributes.position?.count ?? 0;
+                console.log(`🏗️ Terrain-aligned ${vtDataset.sourceLayer} mesh:`, {
+                  alignVerticesToTerrain: true,
+                  layerZOffset: layerZOffset,
+                  finalMeshPositionZ: polygonMesh.position.z,
+                  vertexCount,
+                  vertexZMin: zMin.toFixed(2),
+                  vertexZMax: zMax.toFixed(2),
+                  vertexZRange: (zMax - zMin).toFixed(2),
+                  note: 'Per-vertex Z values preserved - each vertex follows terrain at its X,Y'
+                });
+              } else {
+                // Non-terrain-aligned: adjust geometry origin and position at base height
+                let originalBottomZ = 0;
+                if (!individualGeometry.boundingBox) {
+                  individualGeometry.computeBoundingBox();
+                }
+                if (individualGeometry.boundingBox) {
+                  originalBottomZ = individualGeometry.boundingBox.min.z;
+                  // Translate geometry so bottom is at origin (z=0)
+                  individualGeometry.translate(0, 0, -originalBottomZ);
+                }
+                
+                // Position mesh using the layer's configured zOffset value
+                polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
+                console.log(`🏗️ Positioned ${vtDataset.sourceLayer} mesh:`, {
+                  terrainBaseHeight: terrainSettings.baseHeight,
+                  layerZOffset: layerZOffset,
+                  layerHeightScaleFactor: layerHeightScaleFactor,
+                  finalPosition: polygonMesh.position.z,
+                  heightScale: polygonMesh.scale.z,
+                  calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}, scale.z = ${layerHeightScaleFactor}`
+                });
+              }
               polygonMesh.castShadow = renderingMode === 'quality';
               polygonMesh.receiveShadow = renderingMode === 'quality';
               polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
@@ -888,29 +913,46 @@ const ModelPreview = () => {
           // Set color after material creation (exactly like live updates)
           polygonMaterial.color = baseColor.clone();
           
-          // Adjust geometry origin to bottom for proper scaling
-          let originalBottomZ = 0;
-          if (!geometry.boundingBox) {
-            geometry.computeBoundingBox();
-          }
-          if (geometry.boundingBox) {
-            originalBottomZ = geometry.boundingBox.min.z;
-            // Translate geometry so bottom is at origin (z=0)
-            geometry.translate(0, 0, -originalBottomZ);
-          }
-
+          // Check if this layer has per-vertex terrain alignment
+          const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
+          
           // Create mesh
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
           
           // Position mesh using the layer's configured zOffset value
           const layerZOffset = currentLayerConfig?.zOffset || 0;
-          polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
-          console.log(`🏗️ Positioned ${vtDataset.label} mesh:`, {
-            terrainBaseHeight: terrainSettings.baseHeight,
-            layerZOffset: layerZOffset,
-            finalPosition: polygonMesh.position.z,
-            calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}`
-          });
+          
+          if (hasTerrainAlignment) {
+            // Per-vertex terrain alignment: vertices already have correct Z positions
+            // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
+            polygonMesh.position.z = layerZOffset;
+            console.log(`🏗️ Terrain-aligned ${vtDataset.label} mesh:`, {
+              alignVerticesToTerrain: true,
+              layerZOffset: layerZOffset,
+              finalPosition: polygonMesh.position.z,
+              note: 'Per-vertex Z values preserved'
+            });
+          } else {
+            // Non-terrain-aligned: adjust geometry origin and position at base height
+            let originalBottomZ = 0;
+            if (!geometry.boundingBox) {
+              geometry.computeBoundingBox();
+            }
+            if (geometry.boundingBox) {
+              originalBottomZ = geometry.boundingBox.min.z;
+              // Translate geometry so bottom is at origin (z=0)
+              geometry.translate(0, 0, -originalBottomZ);
+            }
+            
+            // Position mesh using the layer's configured zOffset value
+            polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
+            console.log(`🏗️ Positioned ${vtDataset.label} mesh:`, {
+              terrainBaseHeight: terrainSettings.baseHeight,
+              layerZOffset: layerZOffset,
+              finalPosition: polygonMesh.position.z,
+              calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${polygonMesh.position.z}`
+            });
+          }
           polygonMesh.castShadow = renderingMode === 'quality';
           polygonMesh.receiveShadow = renderingMode === 'quality';
           

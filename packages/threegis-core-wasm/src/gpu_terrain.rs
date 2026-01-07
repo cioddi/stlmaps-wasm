@@ -663,7 +663,8 @@ impl GpuTerrainProcessor {
             grid_height: source_height as u32,
             target_width: target_width as u32,
             target_height: target_height as u32,
-            vertical_exaggeration: params.vertical_exaggeration as f32,
+            // Apply scale factor to make exaggeration values more visible (15x multiplier)
+            vertical_exaggeration: (params.vertical_exaggeration * 15.0) as f32,
             terrain_base_height: params.terrain_base_height as f32,
             min_elevation: elevation_data.min_elevation as f32,
             max_elevation: elevation_data.max_elevation as f32,

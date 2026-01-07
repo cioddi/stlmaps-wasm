@@ -1,0 +1,9 @@
+[package]
+name = "home"
+version = "0.5.50"
+edition = "2021"
+rust-version = "1.70.0"
+description = "Dummy home crate for Wasm compatibility"
+license = "MIT"
+
+[dependencies]

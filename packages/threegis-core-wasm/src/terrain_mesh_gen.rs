@@ -8,6 +8,9 @@ const MESH_SIZE_METERS: f32 = 200.0;
 const LIGHT_BROWN: [f32; 3] = [0.82, 0.71, 0.55];
 const DARK_BROWN: [f32; 3] = [0.66, 0.48, 0.30];
 const BOTTOM_SHADE_FACTOR: f32 = 0.6;
+// Scale factor to make vertical exaggeration values more visible
+// User value of 1 will result in ~15 units of max elevation variation
+const EXAGGERATION_SCALE_FACTOR: f64 = 5.0;
 
 /// Apply elevation data to mesh positions
 fn apply_elevation_to_positions(
@@ -63,7 +66,8 @@ fn apply_elevation_to_positions(
 
             let elevation = sample_elevation(normalized_x, normalized_y);
             let normalized_elevation = ((elevation - elevation_data.min_elevation) / elevation_range).clamp(0.0, 1.0);
-            let elevation_variation = (normalized_elevation * params.vertical_exaggeration) as f32;
+            let scaled_exaggeration = params.vertical_exaggeration * EXAGGERATION_SCALE_FACTOR;
+            let elevation_variation = (normalized_elevation * scaled_exaggeration) as f32;
 
             let mut new_z = params.terrain_base_height as f32 + elevation_variation;
             if new_z < MIN_TERRAIN_THICKNESS {
@@ -88,11 +92,11 @@ fn generate_colors_from_positions(
     let mut colors = Vec::new();
     let base_height = 0.0f32;
     let terrain_base_height_f32 = params.terrain_base_height as f32;
-    let exaggeration = params.vertical_exaggeration.max(1e-6) as f32;
+    let scaled_exaggeration = (params.vertical_exaggeration * EXAGGERATION_SCALE_FACTOR).max(1e-6) as f32;
 
     for vertex in positions.chunks_exact(3) {
         let z = vertex[2];
-        let normalized = ((z - terrain_base_height_f32) / exaggeration).clamp(0.0, 1.0);
+        let normalized = ((z - terrain_base_height_f32) / scaled_exaggeration).clamp(0.0, 1.0);
         let inv_norm = 1.0 - normalized;
         let r = LIGHT_BROWN[0] * inv_norm + DARK_BROWN[0] * normalized;
         let g = LIGHT_BROWN[1] * inv_norm + DARK_BROWN[1] * normalized;

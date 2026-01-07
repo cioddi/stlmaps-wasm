@@ -300,13 +300,13 @@ const LayerList: React.FC = () => {
               onChange={(_, newValue) => setTerrainSettings({
                 verticalExaggeration: newValue as number
               })}
-              min={0.01}
-              max={5.0}
-              step={0.01}
+              min={0.1}
+              max={10.0}
+              step={0.1}
               marks={[
-                { value: 0.01, label: "Min" },
-                { value: 2.5, label: "Med" },
-                { value: 5.0, label: "Max" },
+                { value: 0.1, label: "0.1" },
+                { value: 5, label: "5" },
+                { value: 10, label: "10" },
               ]}
             />
             

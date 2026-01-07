@@ -1,6 +1,8 @@
 use crate::cache_keys::make_inner_key_from_filter;
-use geo::algorithm::buffer::Buffer;
-use geo::{Coord, LineString};
+// use geo::algorithm::buffer::Buffer;
+// use geo::Buffer;
+// use geo::prelude::*;
+use cavalier_contours::polyline::{Polyline, PlineSource, PlineSourceMut, PlineVertex};
 use js_sys::Date;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
@@ -257,39 +259,55 @@ pub fn buffer_line_string_direct(coordinates: &[f64], dist: f64) -> String {
     }
     let dist = dist.abs();
 
-    // Convert flat coordinate array to LineString
+    // Convert flat coordinate array to CavalierContours Polyline
     if coordinates.len() % 2 != 0 {
         return "[]".to_string();
     }
 
-    // Convert coordinates for better performance
-    let coords: Vec<Coord> = coordinates
-        .chunks_exact(2)
-        .map(|chunk| Coord {
-            x: chunk[0],
-            y: chunk[1],
-        })
-        .collect();
+    let mut ply = Polyline::new();
+    for chunk in coordinates.chunks_exact(2) {
+        ply.add_vertex(PlineVertex::new(chunk[0], chunk[1], 0.0));
+    }
+    ply.set_is_closed(false);
 
-    let linestring = LineString::new(coords);
-    let buffered = linestring.buffer(dist);
+    // Generate offsets
+    // We offset by +dist and -dist to create the "sides" of the buffer
+    let pos_offsets = ply.parallel_offset(dist);
+    let neg_offsets = ply.parallel_offset(-dist);
 
-    // Serialize result as simple coordinate array
-    if buffered.0.is_empty() {
+    if pos_offsets.is_empty() || neg_offsets.is_empty() {
         return "[]".to_string();
     }
 
-    // Convert to coordinate array format
-    let coords_array: Vec<Vec<Vec<f64>>> = buffered
-        .0
-        .into_iter()
-        .map(|poly| {
-            // Only take exterior ring for simplicity
-            poly.exterior().coords().map(|c| vec![c.x, c.y]).collect()
-        })
-        .collect();
+    // For a simple buffer of a single line, we expect one offset line on each side.
+    // We take the first one from each side.
+    let side1 = &pos_offsets[0];
+    let side2 = &neg_offsets[0];
 
-    serde_json::to_string(&coords_array).unwrap_or_else(|_| "[]".to_string())
+    let mut buffer_coords = Vec::new();
+    
+    // Side 1
+    for i in 0..side1.vertex_count() {
+        let v = side1.at(i);
+        buffer_coords.push(vec![v.x, v.y]);
+    }
+    
+    // Side 2 (reversed)
+    for i in (0..side2.vertex_count()).rev() {
+        let v = side2.at(i);
+        buffer_coords.push(vec![v.x, v.y]);
+    }
+    
+    // Close the polygon
+    if !buffer_coords.is_empty() {
+        let first = buffer_coords[0].clone();
+        buffer_coords.push(first);
+    }
+
+    // Wrap in array for consistency with previous output format (Vec<Vec<Vec<f64>>>)
+    let result = vec![buffer_coords];
+
+    serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
 }
 
 // Legacy buffer function for backward compatibility - uses direct coordinate processing

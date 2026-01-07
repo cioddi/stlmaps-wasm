@@ -1,8 +1,9 @@
 use crate::polygon_geometry::BufferGeometry;
 use csgrs::float_types::Real;
-use csgrs::polygon::Polygon as CsgPolygon;
-use csgrs::vertex::Vertex as CsgVertex;
-use csgrs::CSG;
+use csgrs::mesh::polygon::Polygon as CsgPolygon;
+use csgrs::mesh::vertex::Vertex as CsgVertex;
+use csgrs::mesh::Mesh as CSG;
+use csgrs::traits::CSG as _;
 #[cfg(target_arch = "wasm32")]
 use geo::{BooleanOps, LineString, MultiPolygon, Polygon};
 #[cfg(target_arch = "wasm32")]
@@ -643,7 +644,7 @@ fn buffer_geometry_to_csg(geometry: &BufferGeometry) -> Option<CSG<()>> {
         return None;
     }
 
-    Some(CSG::from_polygons(&polygons))
+    Some(CSG::from_polygons(&polygons, None))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -763,7 +764,7 @@ fn csg_to_buffer_geometry(csg: &CSG<()>) -> Option<BufferGeometry> {
     let mut indices = Vec::new();
 
     for polygon in &csg.polygons {
-        for tri in polygon.tessellate() {
+        for tri in polygon.triangulate() {
             for vertex in tri.iter() {
                 vertices.push(vertex.pos.x as f32);
                 vertices.push(vertex.pos.y as f32);

@@ -38,6 +38,7 @@ export interface VtDataSet {
   zOffset: number;
   alignVerticesToTerrain: boolean;
   applyMedianHeight?: boolean;
+  addTerrainDifferenceToHeight?: boolean; // Add terrain slope difference to building height
   useCsgClipping: boolean;
   order?: number; // Layer rendering/processing order
   geometryDebugMode?: boolean;
@@ -292,6 +293,7 @@ const defaultLayers: VtDataSet[] = [
     zOffset: -0.01,
     alignVerticesToTerrain: false,
     applyMedianHeight: false,
+    addTerrainDifferenceToHeight: true, // Add terrain slope to building height for consistent roofs
     useCsgClipping: false,
     order: 6
   }
@@ -318,7 +320,7 @@ export const useAppStore = create<AppState>()(
     // Terrain configuration
     terrainSettings: {
       enabled: true,
-      verticalExaggeration: 2,
+      verticalExaggeration: 1,
       baseHeight: 5,
       color: "#db7329",
       simpleMesh: false
