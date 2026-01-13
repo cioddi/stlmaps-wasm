@@ -236,44 +236,49 @@ fn create_manifold_terrain_mesh(
 
     // Add side faces using the same manifold triangle method as buildings
     // Now using layered vertex structure for proper manifold edges
+    // IMPORTANT: All side walls must have consistent outward-facing normals
     for y in 0..height_segments {
-        // Left side wall (x = 0)
+        // Left side wall (x = 0) - faces LEFT (-X direction)
         let bottom_curr = (y * grid_width) as u32;
         let bottom_next = ((y + 1) * grid_width) as u32;
         let top_curr = bottom_curr + total_vertices_per_layer as u32;
         let top_next = bottom_next + total_vertices_per_layer as u32;
 
-        push_triangle(&mut indices, top_curr, bottom_curr, top_next);
-        push_triangle(&mut indices, bottom_curr, bottom_next, top_next);
+        // Winding: looking from outside (left), CCW should be: bottom_curr, top_curr, bottom_next
+        push_triangle(&mut indices, bottom_curr, top_curr, bottom_next);
+        push_triangle(&mut indices, top_curr, top_next, bottom_next);
 
-        // Right side wall (x = width_segments)
+        // Right side wall (x = width_segments) - faces RIGHT (+X direction)
         let bottom_curr = (y * grid_width + width_segments) as u32;
         let bottom_next = ((y + 1) * grid_width + width_segments) as u32;
         let top_curr = bottom_curr + total_vertices_per_layer as u32;
         let top_next = bottom_next + total_vertices_per_layer as u32;
 
-        push_triangle(&mut indices, top_curr, top_next, bottom_curr);
-        push_triangle(&mut indices, bottom_curr, top_next, bottom_next);
+        // Winding: looking from outside (right), CCW should be: bottom_next, top_next, bottom_curr
+        push_triangle(&mut indices, bottom_next, top_next, bottom_curr);
+        push_triangle(&mut indices, top_next, top_curr, bottom_curr);
     }
 
     for x in 0..width_segments {
-        // Front side wall (y = 0)
+        // Front side wall (y = 0) - faces FRONT (-Y direction)
         let bottom_curr = x as u32;
         let bottom_next = (x + 1) as u32;
         let top_curr = bottom_curr + total_vertices_per_layer as u32;
         let top_next = bottom_next + total_vertices_per_layer as u32;
 
-        push_triangle(&mut indices, top_curr, top_next, bottom_curr);
-        push_triangle(&mut indices, bottom_curr, top_next, bottom_next);
+        // Winding: looking from outside (front), CCW should be: bottom_next, top_next, bottom_curr
+        push_triangle(&mut indices, bottom_next, top_next, bottom_curr);
+        push_triangle(&mut indices, top_next, top_curr, bottom_curr);
 
-        // Back side wall (y = height_segments)
+        // Back side wall (y = height_segments) - faces BACK (+Y direction)
         let bottom_curr = (height_segments * grid_width + x) as u32;
         let bottom_next = (height_segments * grid_width + x + 1) as u32;
         let top_curr = bottom_curr + total_vertices_per_layer as u32;
         let top_next = bottom_next + total_vertices_per_layer as u32;
 
-        push_triangle(&mut indices, top_curr, bottom_curr, top_next);
-        push_triangle(&mut indices, bottom_curr, bottom_next, top_next);
+        // Winding: looking from outside (back), CCW should be: bottom_curr, top_curr, bottom_next
+        push_triangle(&mut indices, bottom_curr, top_curr, bottom_next);
+        push_triangle(&mut indices, top_curr, top_next, bottom_next);
     }
 
     (positions, indices)

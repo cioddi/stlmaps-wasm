@@ -20,8 +20,8 @@ const MIN_CLEARANCE: f64 = 0.1; // Minimum clearance above terrain to avoid z-fi
 // Scale factor to make vertical exaggeration values more visible (must match terrain_mesh_gen.rs)
 const EXAGGERATION_SCALE_FACTOR: f64 = 5.0;
 // Maximum edge length for subdivision (ensures terrain-aligned geometries follow terrain properly)
-// TERRAIN_SIZE is 200.0, so 5.0 means roughly 40 segments across the full terrain
-const MAX_EDGE_LENGTH: f64 = 5.0;
+// TERRAIN_SIZE is 200.0, terrain has ~255 segments (~0.78 units/segment), so 0.5 gives ~400 segments for even better terrain alignment
+const MAX_EDGE_LENGTH: f64 = 0.5;
 
 // Helper function to decode base64 string to f32 vector
 fn decode_base64_to_f32_vec(base64_data: &str) -> Result<Vec<f32>, String> {
@@ -314,6 +314,135 @@ fn subdivide_polygon_edges(points: &[Vector2], max_length: f64) -> Vec<Vector2> 
     }
     
     result
+}
+
+/// Subdivide a 3D triangular mesh by splitting triangles whose edges exceed max_length.
+/// This adds interior vertices to ensure proper terrain alignment for large surfaces.
+/// Recursively subdivides until all edges are below max_edge_length.
+/// Returns (new_vertices, new_indices).
+fn subdivide_triangular_mesh_3d(
+    vertices: &[f32],
+    indices: &[u32],
+    max_edge_length: f64,
+) -> (Vec<f32>, Vec<u32>) {
+    if indices.is_empty() || vertices.is_empty() {
+        return (vertices.to_vec(), indices.to_vec());
+    }
+
+    let mut current_vertices = vertices.to_vec();
+    let mut current_indices = indices.to_vec();
+    
+    // Recursively subdivide until all edges are small enough
+    // Limit iterations to prevent infinite loops
+    let max_iterations = 5;
+    for _iteration in 0..max_iterations {
+        let mut needs_subdivision = false;
+        let mut new_vertices = current_vertices.clone();
+        let mut new_indices = Vec::new();
+        
+        // Process each triangle
+        for tri in current_indices.chunks(3) {
+            if tri.len() != 3 {
+                continue;
+            }
+
+            let i0 = tri[0] as usize;
+            let i1 = tri[1] as usize;
+            let i2 = tri[2] as usize;
+
+            // Get triangle vertices (as indices into vertex array)
+            let idx0 = i0 * 3;
+            let idx1 = i1 * 3;
+            let idx2 = i2 * 3;
+
+            if idx0 + 2 >= current_vertices.len() || idx1 + 2 >= current_vertices.len() || idx2 + 2 >= current_vertices.len() {
+                continue;
+            }
+
+            // Extract vertex positions
+            let v0 = (current_vertices[idx0] as f64, current_vertices[idx0 + 1] as f64, current_vertices[idx0 + 2] as f64);
+            let v1 = (current_vertices[idx1] as f64, current_vertices[idx1 + 1] as f64, current_vertices[idx1 + 2] as f64);
+            let v2 = (current_vertices[idx2] as f64, current_vertices[idx2 + 1] as f64, current_vertices[idx2 + 2] as f64);
+
+            // Calculate edge lengths (in XY plane for consistency with 2D subdivision)
+            let dx01 = v1.0 - v0.0;
+            let dy01 = v1.1 - v0.1;
+            let len01 = (dx01 * dx01 + dy01 * dy01).sqrt();
+
+            let dx12 = v2.0 - v1.0;
+            let dy12 = v2.1 - v1.1;
+            let len12 = (dx12 * dx12 + dy12 * dy12).sqrt();
+
+            let dx20 = v0.0 - v2.0;
+            let dy20 = v0.1 - v2.1;
+            let len20 = (dx20 * dx20 + dy20 * dy20).sqrt();
+
+            let max_len = len01.max(len12).max(len20);
+
+            // If all edges are short enough, keep the triangle as-is
+            if max_len <= max_edge_length {
+                new_indices.push(tri[0]);
+                new_indices.push(tri[1]);
+                new_indices.push(tri[2]);
+                continue;
+            }
+
+            // Need to subdivide this triangle
+            needs_subdivision = true;
+
+            // Find midpoints of all three edges
+            let mid01 = ((v0.0 + v1.0) / 2.0, (v0.1 + v1.1) / 2.0, (v0.2 + v1.2) / 2.0);
+            let mid12 = ((v1.0 + v2.0) / 2.0, (v1.1 + v2.1) / 2.0, (v1.2 + v2.2) / 2.0);
+            let mid20 = ((v2.0 + v0.0) / 2.0, (v2.1 + v0.1) / 2.0, (v2.2 + v0.2) / 2.0);
+
+            // Add midpoint vertices to the vertex array
+            let mid01_idx = (new_vertices.len() / 3) as u32;
+            new_vertices.push(mid01.0 as f32);
+            new_vertices.push(mid01.1 as f32);
+            new_vertices.push(mid01.2 as f32);
+
+            let mid12_idx = (new_vertices.len() / 3) as u32;
+            new_vertices.push(mid12.0 as f32);
+            new_vertices.push(mid12.1 as f32);
+            new_vertices.push(mid12.2 as f32);
+
+            let mid20_idx = (new_vertices.len() / 3) as u32;
+            new_vertices.push(mid20.0 as f32);
+            new_vertices.push(mid20.1 as f32);
+            new_vertices.push(mid20.2 as f32);
+
+            // Create 4 new triangles from the subdivided triangle
+            // Triangle 0: v0, mid01, mid20
+            new_indices.push(tri[0]);
+            new_indices.push(mid01_idx);
+            new_indices.push(mid20_idx);
+
+            // Triangle 1: mid01, v1, mid12
+            new_indices.push(mid01_idx);
+            new_indices.push(tri[1]);
+            new_indices.push(mid12_idx);
+
+            // Triangle 2: mid20, mid12, v2
+            new_indices.push(mid20_idx);
+            new_indices.push(mid12_idx);
+            new_indices.push(tri[2]);
+
+            // Triangle 3: mid01, mid12, mid20 (center triangle)
+            new_indices.push(mid01_idx);
+            new_indices.push(mid12_idx);
+            new_indices.push(mid20_idx);
+        }
+
+        current_vertices = new_vertices;
+        current_indices = new_indices;
+
+        // If no subdivision occurred this iteration, we're done
+        if !needs_subdivision {
+            break;
+        }
+    }
+
+    (current_vertices, current_indices)
 }
 
 /// Clip a polygon against a plane using Sutherland-Hodgman algorithm
@@ -1732,6 +1861,14 @@ fn create_extruded_shape(
         let uv_array = Float32Array::from(uv_js);
         uvs = vec![0.0; uv_array.length() as usize];
         uv_array.copy_to(&mut uvs);
+    }
+
+    // IMPORTANT: Subdivide the 3D mesh BEFORE terrain alignment if enabled
+    // This adds interior vertices throughout the surface, not just on edges
+    // This ensures large polygons have enough points to follow terrain variations
+    if align_vertices_to_terrain && !vertices.is_empty() && !indices.is_empty() {
+        let max_edge_for_mesh = MAX_EDGE_LENGTH; // Use the same constant as edge subdivision
+        (vertices, indices) = subdivide_triangular_mesh_3d(&vertices, &indices, max_edge_for_mesh);
     }
 
     // Apply per-vertex terrain alignment if enabled
