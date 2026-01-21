@@ -243,6 +243,9 @@ pub use gpu_polygon::{init_gpu_polygon_processor, buffer_linestring_gpu, clip_po
 pub use gpu_terrain::{init_gpu_terrain_processor, generate_terrain_mesh_gpu};
 pub use elevation::check_gpu_support;
 
+// Re-export 3MF export functions
+pub use export_3mf::{generate_3mf_model_xml, generate_3mf_content_types_xml, generate_3mf_rels_xml};
+
 // Example of a simple function that will be exposed to JavaScript
 #[wasm_bindgen]
 pub fn add(a: i32, b: i32) -> i32 {

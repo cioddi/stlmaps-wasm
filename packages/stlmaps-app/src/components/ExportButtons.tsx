@@ -148,19 +148,35 @@ const ExportButtons: React.FC = () => {
       currentScene.updateMatrixWorld(true);
 
       const meshesToExport: THREE.Mesh[] = [];
-      currentScene.traverse((object) => {
+      
+      // Use iterative traversal to avoid stack overflow from circular references
+      const objectsToCheck: THREE.Object3D[] = [currentScene];
+      const visitedObjects = new Set<THREE.Object3D>();
+      
+      while (objectsToCheck.length > 0) {
+        const object = objectsToCheck.pop()!;
+        
+        // Skip if already visited
+        if (visitedObjects.has(object)) continue;
+        visitedObjects.add(object);
+        
+        // Add children to check queue
+        for (const child of object.children) {
+          objectsToCheck.push(child);
+        }
+        
         if (object instanceof THREE.Mesh) {
           const geometry = object.geometry;
           const positionAttribute = geometry?.attributes?.position as THREE.BufferAttribute | undefined;
           if (!object.visible || !geometry || !positionAttribute || positionAttribute.count === 0) {
-            return;
+            continue;
           }
           if (object.name === 'terrain' && !terrainSettings.enabled) {
-            return;
+            continue;
           }
           meshesToExport.push(object);
         }
-      });
+      }
 
       if (meshesToExport.length > 0) {
         const extractMaterialColor = (material: THREE.Material | THREE.Material[] | undefined): THREE.Color => {
@@ -593,7 +609,22 @@ const ExportButtons: React.FC = () => {
       const meshes: any[] = [];
 
       // Extract individual objects from the positioned GLB scene
-      scene.traverse((object) => {
+      // Use iterative approach instead of recursive traverse to avoid stack overflow
+      const objectsToProcess: THREE.Object3D[] = [scene];
+      const visitedObjects = new Set<THREE.Object3D>();
+      
+      while (objectsToProcess.length > 0) {
+        const object = objectsToProcess.pop()!;
+        
+        // Skip if already processed
+        if (visitedObjects.has(object)) continue;
+        visitedObjects.add(object);
+        
+        // Add children to process queue
+        for (const child of object.children) {
+          objectsToProcess.push(child);
+        }
+        
         if (object instanceof THREE.Mesh && object.geometry) {
           
           
@@ -608,12 +639,13 @@ const ExportButtons: React.FC = () => {
           if (!positions) return;
 
           // Log Z position range for debugging
-          const zValues = [];
+          let minZ = Infinity;
+          let maxZ = -Infinity;
           for (let i = 2; i < positions.length; i += 3) {
-            zValues.push(positions[i]);
+            const z = positions[i];
+            if (z < minZ) minZ = z;
+            if (z > maxZ) maxZ = z;
           }
-          const minZ = Math.min(...zValues);
-          const maxZ = Math.max(...zValues);
           
 
           // Sample first few vertices to see actual coordinates
@@ -659,12 +691,13 @@ const ExportButtons: React.FC = () => {
           
 
           // Check transformed Z range
-          const transformedZ = [];
+          let transformedMinZ = Infinity;
+          let transformedMaxZ = -Infinity;
           for (let i = 2; i < transformedVertices.length; i += 3) {
-            transformedZ.push(transformedVertices[i]);
+            const z = transformedVertices[i];
+            if (z < transformedMinZ) transformedMinZ = z;
+            if (z > transformedMaxZ) transformedMaxZ = z;
           }
-          const transformedMinZ = Math.min(...transformedZ);
-          const transformedMaxZ = Math.max(...transformedZ);
           
 
           const convertedVertices = transformedVertices;
@@ -677,7 +710,7 @@ const ExportButtons: React.FC = () => {
             transform: null // No additional transform needed
           });
         }
-      });
+      }
 
       if (meshes.length === 0) {
         
@@ -751,7 +784,7 @@ const ExportButtons: React.FC = () => {
       
       setLoading(prev => ({ ...prev, threemf: false }));
     } catch (error) {
-      
+      console.error('❌ 3MF Export Error:', error);
       setLoading(prev => ({ ...prev, threemf: false }));
     }
   };
