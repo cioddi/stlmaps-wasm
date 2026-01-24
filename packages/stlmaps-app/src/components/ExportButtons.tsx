@@ -1,15 +1,15 @@
 import { useState, useEffect } from "react";
-import { 
-  Button, 
-  Box, 
-  Dialog, 
-  DialogTitle, 
-  DialogContent, 
-  DialogActions, 
-  Typography, 
-  Paper, 
-  Grid2 as Grid, 
-  Chip, 
+import {
+  Button,
+  Box,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Typography,
+  Paper,
+  Grid2 as Grid,
+  Chip,
   useTheme,
   IconButton,
   useMediaQuery
@@ -19,6 +19,7 @@ import { useAppStore } from "../stores/useAppStore";
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { getWasmModule } from "@threegis/core";
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import ModelTrainingIcon from '@mui/icons-material/ModelTraining';
@@ -38,20 +39,20 @@ const ExportButtons: React.FC = () => {
   const { geometryDataSets, vtLayers, terrainSettings, sceneGetter: getCurrentScene } = useAppStore();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  
+
   // State for dialog
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
-  
+
   // Downloads are now handled immediately in export functions
-  
+
   // State for loading indicators
-  const [loading, setLoading] = useState<{obj: boolean, stl: boolean, gltf: boolean, threemf: boolean}>({
+  const [loading, setLoading] = useState<{ obj: boolean, stl: boolean, gltf: boolean, threemf: boolean }>({
     obj: false,
     stl: false,
     gltf: false,
     threemf: false
   });
-  
+
   // Define export formats with their metadata
   const exportFormats: ExportFormat[] = [
     {
@@ -89,21 +90,21 @@ const ExportButtons: React.FC = () => {
   // Helper function to validate and fix geometry indices
   const validateGeometry = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => {
     if (!geometry) return geometry;
-    
+
     // Create a clone to avoid modifying the original
     const validatedGeometry = geometry.clone();
-    
+
     // If no position attribute, we can't validate
     if (!validatedGeometry.attributes.position) return validatedGeometry;
-    
+
     const positionCount = validatedGeometry.attributes.position.count;
-    
+
     // Check if we have an index buffer that needs validation
     if (validatedGeometry.index) {
       const indices = validatedGeometry.index.array;
       let maxIndex = 0;
       let hasInvalidIndex = false;
-      
+
       // Check for out-of-bounds indices
       for (let i = 0; i < indices.length; i++) {
         maxIndex = Math.max(maxIndex, indices[i]);
@@ -112,30 +113,30 @@ const ExportButtons: React.FC = () => {
           break;
         }
       }
-      
+
       // If indices are out of bounds, remove them and let Three.js create valid ones
       if (hasInvalidIndex || maxIndex >= positionCount) {
         validatedGeometry.setIndex(null);
       }
     }
-    
+
     // Ensure all attribute arrays have the same count
     const attributeNames = Object.keys(validatedGeometry.attributes);
     for (const name of attributeNames) {
       if (name === 'position') continue; // Skip position as it's our reference
-      
+
       const attribute = validatedGeometry.attributes[name];
       if (attribute.count !== positionCount) {
-        
+
         // Remove problematic attributes
         validatedGeometry.deleteAttribute(name);
       }
     }
-    
+
     // PRESERVE MANIFOLD: Keep indexed geometry to maintain manifold topology
     // toNonIndexed() destroys manifold property by duplicating vertices
     // Indexed geometry is actually better for manifold preservation
-    
+
     return validatedGeometry;
   };
 
@@ -148,23 +149,23 @@ const ExportButtons: React.FC = () => {
       currentScene.updateMatrixWorld(true);
 
       const meshesToExport: THREE.Mesh[] = [];
-      
+
       // Use iterative traversal to avoid stack overflow from circular references
       const objectsToCheck: THREE.Object3D[] = [currentScene];
       const visitedObjects = new Set<THREE.Object3D>();
-      
+
       while (objectsToCheck.length > 0) {
         const object = objectsToCheck.pop()!;
-        
+
         // Skip if already visited
         if (visitedObjects.has(object)) continue;
         visitedObjects.add(object);
-        
+
         // Add children to check queue
         for (const child of object.children) {
           objectsToCheck.push(child);
         }
-        
+
         if (object instanceof THREE.Mesh) {
           const geometry = object.geometry;
           const positionAttribute = geometry?.attributes?.position as THREE.BufferAttribute | undefined;
@@ -254,15 +255,15 @@ const ExportButtons: React.FC = () => {
           // MANIFOLD PRESERVATION: Avoid transformations that break topology
           let preparedGeometry: THREE.BufferGeometry;
 
+          // Clone geometry and apply world matrix to bake world coordinates into vertices
+          // This ensures all transforms (position, rotation, scale from preview) are preserved
+          const clonedGeometry = originalMesh.geometry.clone();
+          clonedGeometry.applyMatrix4(originalMesh.matrixWorld);
+
           if (validateGeometries) {
-            // Only minimal validation when needed - avoid toNonIndexed()
-            const clonedGeometry = originalMesh.geometry.clone();
-            clonedGeometry.applyMatrix4(originalMesh.matrixWorld);
             preparedGeometry = validateGeometry(clonedGeometry);
           } else {
-            // PRESERVE MANIFOLD: Use original geometry directly without cloning/transforming
-            // Apply world matrix to mesh instead of geometry to preserve topology
-            preparedGeometry = originalMesh.geometry;
+            preparedGeometry = clonedGeometry;
           }
 
           const usesVertexColors = !!preparedGeometry.getAttribute('color');
@@ -278,20 +279,17 @@ const ExportButtons: React.FC = () => {
           const exportMesh = new THREE.Mesh(preparedGeometry, exportMaterial);
           exportMesh.name = originalMesh.name;
 
-          // Apply transformations to mesh instead of geometry to preserve topology
-          if (!validateGeometries) {
-            exportMesh.applyMatrix4(originalMesh.matrixWorld);
-          }
+          // No additional transform needed - geometry already has world coordinates baked in
 
           exportScene.add(exportMesh);
         });
 
-        
-        
+
+
         return exportScene;
       }
 
-      
+
     }
 
     // Helper to check if geometry is valid for export
@@ -305,7 +303,7 @@ const ExportButtons: React.FC = () => {
       );
     };
 
-    
+
     console.log("Export context values:", {
       terrainBaseHeight: terrainSettings.baseHeight,
       terrainEnabled: terrainSettings.enabled,
@@ -343,7 +341,7 @@ const ExportButtons: React.FC = () => {
 
     // Add polygon geometries (exactly like ModelPreview positioning)
     if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
-      geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
+      geometryDataSets.polygonGeometries.forEach(({ geometry, ...vtDataset }) => {
         if (!geometry) return;
 
         // Look up current layer configuration
@@ -353,22 +351,23 @@ const ExportButtons: React.FC = () => {
         if (!isCurrentlyEnabled) return; // Skip disabled layers
 
         // Handle container geometries with individual parts
+        // Merge all individual geometries into a single geometry for the layer
         if (geometry.userData?.isContainer && geometry.userData?.individualGeometries) {
           const individualGeometries = geometry.userData.individualGeometries as THREE.BufferGeometry[];
 
-          individualGeometries.forEach((individualGeometry, index) => {
+          const layerColor = currentLayerConfig?.color || "#81ecec";
+          const baseColor = new THREE.Color(layerColor);
+          const layerZOffset = currentLayerConfig?.zOffset || 0;
+          const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
+          const finalZPosition = terrainSettings.baseHeight + layerZOffset;
+
+          // Process all individual geometries and prepare them for merging
+          const processedGeometries: THREE.BufferGeometry[] = [];
+
+          individualGeometries.forEach((individualGeometry) => {
             if (!individualGeometry.attributes.position || individualGeometry.attributes.position.count === 0) {
               return;
             }
-
-            const layerColor = currentLayerConfig?.color || "#81ecec";
-            const baseColor = new THREE.Color(layerColor);
-
-            const polygonMaterial = new THREE.MeshLambertMaterial({
-              flatShading: true,
-              side: THREE.DoubleSide
-            });
-            polygonMaterial.color = baseColor.clone();
 
             // Clone geometry to avoid modifying original
             const clonedGeometry = validateGeometries ? validateGeometry(individualGeometry.clone()) : individualGeometry.clone();
@@ -382,21 +381,48 @@ const ExportButtons: React.FC = () => {
               clonedGeometry.translate(0, 0, -originalBottomZ);
             }
 
-            const polygonMesh = new THREE.Mesh(clonedGeometry, polygonMaterial);
-
-            // Apply transforms directly to geometry vertices for export compatibility
-            const layerZOffset = currentLayerConfig?.zOffset || 0;
-            const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
-
             // Apply height scaling to geometry
             clonedGeometry.scale(1, 1, layerHeightScaleFactor);
 
             // Apply z-positioning to geometry
-            const finalZPosition = terrainSettings.baseHeight + layerZOffset;
             clonedGeometry.translate(0, 0, finalZPosition);
 
-            console.log(`🏗️ EXPORT Individual mesh positioning (applied to geometry):`, {
+            // Ensure geometry has indices for merging
+            if (!clonedGeometry.index) {
+              // Create indices for non-indexed geometry
+              const positionCount = clonedGeometry.attributes.position.count;
+              const indices = new Uint32Array(positionCount);
+              for (let i = 0; i < positionCount; i++) {
+                indices[i] = i;
+              }
+              clonedGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+            }
+
+            processedGeometries.push(clonedGeometry);
+          });
+
+          // Merge all processed geometries into one if there are any
+          if (processedGeometries.length > 0) {
+            let mergedGeometry: THREE.BufferGeometry;
+
+            if (processedGeometries.length === 1) {
+              mergedGeometry = processedGeometries[0];
+            } else {
+              // Merge all geometries into one
+              mergedGeometry = BufferGeometryUtils.mergeGeometries(processedGeometries, false);
+            }
+
+            const polygonMaterial = new THREE.MeshLambertMaterial({
+              flatShading: true,
+              side: THREE.DoubleSide
+            });
+            polygonMaterial.color = baseColor.clone();
+
+            const polygonMesh = new THREE.Mesh(mergedGeometry, polygonMaterial);
+
+            console.log(`🏗️ EXPORT Merged layer geometry:`, {
               sourceLayer: vtDataset.sourceLayer,
+              individualCount: processedGeometries.length,
               terrainBaseHeight: terrainSettings.baseHeight,
               layerZOffset: layerZOffset,
               layerHeightScaleFactor: layerHeightScaleFactor,
@@ -404,14 +430,14 @@ const ExportButtons: React.FC = () => {
               calculation: `${terrainSettings.baseHeight} + ${layerZOffset} = ${finalZPosition}`
             });
 
-            polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
+            polygonMesh.name = vtDataset.sourceLayer;
             polygonMesh.userData = {
               sourceLayer: vtDataset.sourceLayer,
               label: vtDataset.label || vtDataset.sourceLayer
             };
 
             exportScene.add(polygonMesh);
-          });
+          }
         } else if (isValidGeometry(geometry)) {
           // Single geometry processing (like ModelPreview)
           const layerColor = currentLayerConfig?.color || "#81ecec";
@@ -468,26 +494,26 @@ const ExportButtons: React.FC = () => {
       });
     }
 
-    
+
     return exportScene;
   };
 
-  
+
   const generateOBJFile = (): void => {
     if (!geometryDataSets.terrainGeometry) return;
-    
+
     try {
       // Create scene without validation to preserve manifold geometry
       const scene = createExportScene(false);
-      
+
       // Create OBJ exporter and export the scene
       const exporter = new OBJExporter();
       const objString = exporter.parse(scene);
-      
+
       // Create downloadable Blob and URL
       const blob = new Blob([objString], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
-      
+
       // Trigger immediate download
       const a = document.createElement('a');
       a.href = url;
@@ -499,29 +525,29 @@ const ExportButtons: React.FC = () => {
       // Clean up URL
       URL.revokeObjectURL(url);
 
-      
+
     } catch (error) {
-      
+
     } finally {
       setLoading(prev => ({ ...prev, obj: false }));
     }
   };
-  
+
   const generateSTLFile = (): void => {
     if (!geometryDataSets.terrainGeometry) return;
-    
+
     try {
       // Create scene without validation to preserve manifold geometry
       const scene = createExportScene(false);
-      
+
       // Create STL exporter and export the scene (binary format for smaller file size)
       const exporter = new STLExporter();
       const stlString = exporter.parse(scene, { binary: true });
-      
+
       // Create downloadable Blob and URL
       const blob = new Blob([stlString], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
-      
+
       // Trigger immediate download
       const a = document.createElement('a');
       a.href = url;
@@ -533,21 +559,21 @@ const ExportButtons: React.FC = () => {
       // Clean up URL
       URL.revokeObjectURL(url);
 
-      
+
     } catch (error) {
-      
+
     } finally {
       setLoading(prev => ({ ...prev, stl: false }));
     }
   };
-  
+
   const generateGLTFFile = (): void => {
     if (!geometryDataSets.terrainGeometry) return;
-    
+
     try {
       // Create scene without validation to preserve manifold geometry
       const scene = createExportScene(false);
-      
+
       // Create GLTF exporter with binary option for better compatibility
       const exporter = new GLTFExporter();
       exporter.parse(
@@ -555,14 +581,14 @@ const ExportButtons: React.FC = () => {
         (gltf) => {
           // Create downloadable Blob with appropriate type
           let blob;
-          
+
           // Check if the export is binary (GLB) or JSON (GLTF)
           if (gltf instanceof ArrayBuffer) {
             blob = new Blob([gltf], { type: 'application/octet-stream' });
           } else {
             blob = new Blob([JSON.stringify(gltf)], { type: 'model/gltf+json' });
           }
-          
+
           const url = URL.createObjectURL(blob);
 
           // Trigger immediate download
@@ -576,16 +602,16 @@ const ExportButtons: React.FC = () => {
           // Clean up URL
           URL.revokeObjectURL(url);
 
-          
+
 
           // Update loading state when complete
           setLoading(prev => ({ ...prev, gltf: false }));
         },
         (error) => {
-          
+
           setLoading(prev => ({ ...prev, gltf: false }));
         },
-        { 
+        {
           binary: true, // Use binary GLB format for better compatibility
           onlyVisible: true,
           truncateDrawRange: true, // Ensure proper buffer lengths
@@ -593,132 +619,150 @@ const ExportButtons: React.FC = () => {
         }
       );
     } catch (error) {
-      
+
       setLoading(prev => ({ ...prev, gltf: false }));
     }
   };
 
   const generate3MFFile = async (): Promise<void> => {
     if (!geometryDataSets.terrainGeometry) return;
-    
+
     try {
       setLoading(prev => ({ ...prev, threemf: true }));
-      
+
       // Use GLB scene but extract individual objects for 3MF
       const scene = createExportScene(false);
-      const meshes: any[] = [];
+
+      // Group meshes by layer name (sourceLayer) to merge them into one object per layer
+      const meshesByLayer = new Map<string, THREE.BufferGeometry[]>();
 
       // Extract individual objects from the positioned GLB scene
       // Use iterative approach instead of recursive traverse to avoid stack overflow
       const objectsToProcess: THREE.Object3D[] = [scene];
       const visitedObjects = new Set<THREE.Object3D>();
-      
+
       while (objectsToProcess.length > 0) {
         const object = objectsToProcess.pop()!;
-        
+
         // Skip if already processed
         if (visitedObjects.has(object)) continue;
         visitedObjects.add(object);
-        
+
         // Add children to process queue
         for (const child of object.children) {
           objectsToProcess.push(child);
         }
-        
-        if (object instanceof THREE.Mesh && object.geometry) {
-          
-          
 
+        if (object instanceof THREE.Mesh && object.geometry) {
           const geometry = object.geometry;
 
           // Extract vertices from positioned geometry (already correctly transformed by createExportScene)
           const positionAttribute = geometry.attributes.position;
-          if (!positionAttribute) return;
+          if (!positionAttribute) continue;
 
           const positions = positionAttribute.array;
-          if (!positions) return;
+          if (!positions || positions.length === 0) continue;
 
-          // Log Z position range for debugging
-          let minZ = Infinity;
-          let maxZ = -Infinity;
-          for (let i = 2; i < positions.length; i += 3) {
-            const z = positions[i];
-            if (z < minZ) minZ = z;
-            if (z > maxZ) maxZ = z;
-          }
-          
+          // Determine layer name - use sourceLayer from userData, or extract base name from mesh name
+          let layerName = object.userData?.sourceLayer || object.name || 'mesh';
 
-          // Sample first few vertices to see actual coordinates
-          
-          for (let i = 0; i < Math.min(15, positions.length); i += 3) {
-            
+          // If the name contains an underscore followed by a number (e.g., "roads_0", "roads_1"), 
+          // extract just the base layer name
+          const underscoreMatch = layerName.match(/^(.+)_\d+$/);
+          if (underscoreMatch) {
+            layerName = underscoreMatch[1];
           }
 
-          // Extract indices
-          let indices: number[] = [];
-          if (geometry.index) {
-            indices = Array.from(geometry.index.array);
-          } else {
-            // Generate sequential indices for non-indexed geometry
-            for (let i = 0; i < positions.length / 3; i++) {
-              indices.push(i);
+          // Clone the geometry for merging and apply world transform to preserve positions
+          const clonedGeometry = geometry.clone();
+          //object.updateMatrixWorld(true);
+          //clonedGeometry.applyMatrix4(object.matrixWorld);
+
+          // Ensure geometry has indices for merging
+          if (!clonedGeometry.index) {
+            const positionCount = clonedGeometry.attributes.position.count;
+            const indices = new Uint32Array(positionCount);
+            for (let i = 0; i < positionCount; i++) {
+              indices[i] = i;
             }
+            clonedGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
           }
 
-          // Extract colors if available
-          let colors: number[] | null = null;
-          if (geometry.attributes.color) {
-            const colorArray = geometry.attributes.color.array;
-            colors = [];
-            for (let i = 0; i < colorArray.length; i++) {
-              colors.push(colorArray[i]);
-            }
+          // Add to layer group
+          if (!meshesByLayer.has(layerName)) {
+            meshesByLayer.set(layerName, []);
           }
-
-          // Apply object transforms to vertices manually (in case createExportScene didn't bake them in)
-          const transformedVertices = [];
-          for (let i = 0; i < positions.length; i += 3) {
-            // Apply object scale and position
-            const x = positions[i] * object.scale.x + object.position.x;
-            const y = positions[i + 1] * object.scale.y + object.position.y;
-            const z = positions[i + 2] * object.scale.z + object.position.z;
-
-            transformedVertices.push(x, y, z);
-          }
-
-          
-          
-          
-
-          // Check transformed Z range
-          let transformedMinZ = Infinity;
-          let transformedMaxZ = -Infinity;
-          for (let i = 2; i < transformedVertices.length; i += 3) {
-            const z = transformedVertices[i];
-            if (z < transformedMinZ) transformedMinZ = z;
-            if (z > transformedMaxZ) transformedMaxZ = z;
-          }
-          
-
-          const convertedVertices = transformedVertices;
-
-          meshes.push({
-            name: object.name || 'mesh',
-            vertices: convertedVertices, // Use coordinate-converted vertices
-            indices: indices,
-            colors: colors,
-            transform: null // No additional transform needed
-          });
+          meshesByLayer.get(layerName)!.push(clonedGeometry);
         }
       }
 
+      // Now merge geometries for each layer and create mesh data
+      const meshes: any[] = [];
+
+      meshesByLayer.forEach((geometries, layerName) => {
+        let mergedGeometry: THREE.BufferGeometry;
+
+        if (geometries.length === 1) {
+          mergedGeometry = geometries[0];
+        } else if (geometries.length > 1) {
+          // Merge all geometries for this layer into one
+          mergedGeometry = BufferGeometryUtils.mergeGeometries(geometries, false);
+        } else {
+          return; // Skip empty layers
+        }
+
+        const positionAttribute = mergedGeometry.attributes.position;
+        if (!positionAttribute) return;
+
+        const positions = positionAttribute.array;
+        if (!positions || positions.length === 0) return;
+
+        // Extract indices
+        let indices: number[] = [];
+        if (mergedGeometry.index) {
+          indices = Array.from(mergedGeometry.index.array);
+        } else {
+          // Generate sequential indices for non-indexed geometry
+          for (let i = 0; i < positions.length / 3; i++) {
+            indices.push(i);
+          }
+        }
+
+        // Extract colors if available
+        let colors: number[] | null = null;
+        if (mergedGeometry.attributes.color) {
+          const colorArray = mergedGeometry.attributes.color.array;
+          colors = [];
+          for (let i = 0; i < colorArray.length; i++) {
+            colors.push(colorArray[i]);
+          }
+        }
+
+        // Copy vertices
+        const vertices: number[] = [];
+        for (let i = 0; i < positions.length; i++) {
+          vertices.push(positions[i]);
+        }
+
+        console.log(`🏗️ 3MF Export: Merged layer "${layerName}" - ${geometries.length} geometries into one object`);
+
+        meshes.push({
+          name: layerName,
+          vertices: vertices,
+          indices: indices,
+          colors: colors,
+          transform: null // No additional transform needed
+        });
+      });
+
       if (meshes.length === 0) {
-        
         setLoading(prev => ({ ...prev, threemf: false }));
         return;
       }
 
-      
+      console.log(`🏗️ 3MF Export: Total ${meshes.length} merged layer objects:`, meshes.map(m => m.name));
+
+
 
       // Prepare data for WASM 3MF export with individual meshes and transforms
       const modelData = {
@@ -726,37 +770,37 @@ const ExportButtons: React.FC = () => {
         title: "STLMaps 3D Model",
         description: "3D terrain model generated by STLMaps"
       };
-      
+
       // Generate 3MF files using WASM
       const wasmModule = getWasmModule();
       if (!wasmModule?.generate_3mf_model_xml) {
         throw new Error("3MF export not available in WASM module");
       }
-      
+
       // Generate XML files using WASM
       const modelXml = wasmModule.generate_3mf_model_xml(JSON.stringify(modelData));
       const contentTypesXml = wasmModule.generate_3mf_content_types_xml();
       const relsXml = wasmModule.generate_3mf_rels_xml();
-      
+
       // Create ZIP file using JSZip (we need to add this dependency)
       // For now, we'll create a simple 3MF file with just the model XML
       // In production, you'd want to use JSZip to create proper 3MF structure
-      
+
       // Import JSZip dynamically
       const JSZip = (await import('jszip')).default;
-      
+
       // Create proper 3MF ZIP structure
       const zip = new JSZip();
-      
+
       // Add required folders and files
       zip.file("[Content_Types].xml", contentTypesXml);
-      
+
       const relsFolder = zip.folder("_rels");
       relsFolder!.file(".rels", relsXml);
-      
+
       const threeDFolder = zip.folder("3D");
       threeDFolder!.file("3dmodel.model", modelXml);
-      
+
       // Generate ZIP as blob
       const zipBlob = await zip.generateAsync({
         type: "blob",
@@ -766,7 +810,7 @@ const ExportButtons: React.FC = () => {
         },
         mimeType: "model/3mf"
       });
-      
+
       const blob = zipBlob;
       const url = URL.createObjectURL(blob);
 
@@ -781,7 +825,7 @@ const ExportButtons: React.FC = () => {
       // Clean up URL
       URL.revokeObjectURL(url);
 
-      
+
       setLoading(prev => ({ ...prev, threemf: false }));
     } catch (error) {
       console.error('❌ 3MF Export Error:', error);
@@ -830,7 +874,7 @@ const ExportButtons: React.FC = () => {
 
   // Get handler and loading state for a specific format
   const getFormatData = (formatId: string) => {
-    switch(formatId) {
+    switch (formatId) {
       case 'obj':
         return {
           isLoading: loading.obj,
@@ -852,23 +896,23 @@ const ExportButtons: React.FC = () => {
           handler: handle3MFExport,
         };
       default:
-        return { isLoading: false, handler: () => {} };
+        return { isLoading: false, handler: () => { } };
     }
   };
 
   return (
     <>
-            <IconButton 
+      <IconButton
         onClick={handleOpenDialog}
         disabled={isDisabled}
-            color="secondary">
-              <FileDownloadIcon />
-            </IconButton>
-      
-      <Dialog 
-        open={dialogOpen} 
-        onClose={handleCloseDialog} 
-        maxWidth="md" 
+        color="secondary">
+        <FileDownloadIcon />
+      </IconButton>
+
+      <Dialog
+        open={dialogOpen}
+        onClose={handleCloseDialog}
+        maxWidth="md"
         fullWidth
         fullScreen={isMobile}
         sx={{ zIndex: 10000 }}
@@ -879,10 +923,10 @@ const ExportButtons: React.FC = () => {
           }
         }}
       >
-        <DialogTitle 
-          sx={{ 
+        <DialogTitle
+          sx={{
             background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-            color: 'white', 
+            color: 'white',
             padding: isMobile ? 2 : 3,
             display: 'flex',
             alignItems: 'center',
@@ -898,9 +942,9 @@ const ExportButtons: React.FC = () => {
               width: "100%",
             }}
           >
-            <ThreeDRotationIcon sx={{ mr: 1 }} /> 
-            <Typography 
-              variant={isMobile ? "h6" : "h5"} 
+            <ThreeDRotationIcon sx={{ mr: 1 }} />
+            <Typography
+              variant={isMobile ? "h6" : "h5"}
               component="div"
               sx={{ fontWeight: "bold" }}
             >
@@ -908,15 +952,15 @@ const ExportButtons: React.FC = () => {
             </Typography>
           </Box>
         </DialogTitle>
-        
+
         <DialogContent sx={{ p: isMobile ? 2 : 3 }}>
-          
+
           <Grid container spacing={isMobile ? 2 : 3}>
             {exportFormats.map((format) => {
               const { isLoading, handler } = getFormatData(format.id);
               return (
                 <Grid size={{ xs: 12, sm: 6 }} key={format.id}>
-                  <Paper 
+                  <Paper
                     elevation={2}
                     sx={{
                       p: isMobile ? 2 : 3,
@@ -932,13 +976,13 @@ const ExportButtons: React.FC = () => {
                       }
                     }}
                   >
-                    
+
                     <Box flex={1} sx={{ width: '100%' }}>
                       <Box display="flex" alignItems="center" mb={0.5} flexWrap={isMobile ? "wrap" : "nowrap"}>
                         <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight="bold">
                           {format.name}
                         </Typography>
-                        <Chip 
+                        <Chip
                           label={`.${format.fileExtension}`}
                           size="small"
                           sx={{ ml: 1, mt: isMobile ? 0.5 : 0 }}
@@ -965,7 +1009,7 @@ const ExportButtons: React.FC = () => {
             })}
           </Grid>
         </DialogContent>
-        
+
         <DialogActions sx={{ p: isMobile ? "12px 16px" : "16px 24px", bgcolor: theme.palette.grey[50] }}>
           <Button variant="outlined" onClick={handleCloseDialog} color="primary">
             Close
