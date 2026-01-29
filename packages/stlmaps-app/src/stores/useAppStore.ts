@@ -102,30 +102,30 @@ interface AppState {
   bboxCenter: [number, number];
   bbox: Feature | null;
   viewMode: ViewMode;
-  
+
   // UI state  
   sidebarOpen: boolean;
   menuOpen: boolean;
   openAttribution: boolean;
   openInfo: boolean;
   openTodoList: boolean;
-  
+
   // Layer configuration
   vtLayers: VtDataSet[];
-  
+
   // Terrain configuration
   terrainSettings: TerrainSettings;
   buildingSettings: BuildingSettings;
   processedTerrainData: ProcessedTerrainData | null;
-  
+
   // Processing state
   isProcessing: boolean;
   processingStatus: string;
-  
+
   // Geometry state
   geometryDataSets: GeometryDataSets;
   configHashes: ConfigHashes;
-  
+
   // Rendering state
   renderingSettings: RenderingSettings;
   debugSettings: DebugSettings;
@@ -133,7 +133,7 @@ interface AppState {
   colorOnlyUpdate: boolean;
   layerColorUpdates: Record<string, THREE.Color | number>;
   sceneGetter: (() => THREE.Scene | null) | null;
-  
+
   // Actions
   setBboxCenter: (center: [number, number]) => void;
   setBbox: (bbox: Feature | null) => void;
@@ -143,7 +143,7 @@ interface AppState {
   setOpenAttribution: (open: boolean) => void;
   setOpenInfo: (open: boolean) => void;
   setOpenTodoList: (open: boolean) => void;
-  
+
   // Layer actions
   setVtLayers: (layers: VtDataSet[]) => void;
   updateVtLayer: (index: number, updates: Partial<VtDataSet>) => void;
@@ -161,21 +161,21 @@ interface AppState {
   setLayerOrder: (index: number, order: number) => void;
   setLayerFilter: (index: number, filter: any) => void;
   reorderLayers: (fromIndex: number, toIndex: number) => void;
-  
+
   // Terrain actions
   setTerrainSettings: (settings: Partial<TerrainSettings>) => void;
   setBuildingSettings: (settings: Partial<BuildingSettings>) => void;
   setProcessedTerrainData: (data: ProcessedTerrainData | null) => void;
-  
+
   // Processing actions
   setIsProcessing: (processing: boolean) => void;
   updateProgress: (status: string) => void;
   resetProcessing: () => void;
-  
+
   // Geometry actions
   setGeometryDataSets: (datasets: GeometryDataSets) => void;
   setConfigHashes: (hashes: ConfigHashes) => void;
-  
+
   // Rendering actions
   setRenderingSettings: (settings: Partial<RenderingSettings>) => void;
   setDebugSettings: (settings: Partial<DebugSettings>) => void;
@@ -183,7 +183,7 @@ interface AppState {
   setColorOnlyUpdate: (update: boolean) => void;
   updateLayerColors: (colors: Record<string, THREE.Color | number>) => void;
   setSceneGetter: (getter: (() => THREE.Scene | null) | null) => void;
-  
+
   // Legacy compatibility
   setHoveredMesh: (mesh: THREE.Object3D | null) => void;
   setMousePosition: (position: { x: number; y: number } | null) => void;
@@ -270,7 +270,8 @@ const defaultLayers: VtDataSet[] = [
       "service",
       "minor",
       "track",
-      "raceway"
+      "raceway",
+      "rail"
     ]
   },
   {
@@ -307,17 +308,17 @@ export const useAppStore = create<AppState>()(
     bboxCenter: [-74.00599999999997, 40.71279999999999],
     bbox: null,
     viewMode: "split",
-    
+
     // UI state
     sidebarOpen: false,
     menuOpen: false,
     openAttribution: false,
     openInfo: false,
     openTodoList: false,
-    
+
     // Layer configuration
     vtLayers: defaultLayers,
-    
+
     // Terrain configuration
     terrainSettings: {
       enabled: true,
@@ -332,11 +333,11 @@ export const useAppStore = create<AppState>()(
       opacity: 1.0
     },
     processedTerrainData: null,
-    
+
     // Processing state
     isProcessing: false,
     processingStatus: "",
-    
+
     // Geometry state
     geometryDataSets: {},
     configHashes: {
@@ -344,7 +345,7 @@ export const useAppStore = create<AppState>()(
       terrainHash: "",
       layerHashes: []
     },
-    
+
     // Rendering state
     renderingSettings: {
       mode: 'performance',
@@ -365,7 +366,7 @@ export const useAppStore = create<AppState>()(
     colorOnlyUpdate: false,
     layerColorUpdates: {},
     sceneGetter: null,
-    
+
     // Actions
     setBboxCenter: (center) => set({ bboxCenter: center }),
     setBbox: (bbox) => set({ bbox }),
@@ -375,11 +376,11 @@ export const useAppStore = create<AppState>()(
     setOpenAttribution: (open) => set({ openAttribution: open }),
     setOpenInfo: (open) => set({ openInfo: open }),
     setOpenTodoList: (open) => set({ openTodoList: open }),
-    
+
     // Layer actions
     setVtLayers: (layers) => set({ vtLayers: layers }),
     updateVtLayer: (index, updates) => set(state => ({
-      vtLayers: state.vtLayers.map((layer, i) => 
+      vtLayers: state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, ...updates } : layer
       )
     })),
@@ -392,7 +393,7 @@ export const useAppStore = create<AppState>()(
       const newVtLayers = state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, color } : layer
       );
-      
+
       // Trigger live color update in 3D preview
       const layer = state.vtLayers[index];
       if (layer) {
@@ -406,7 +407,7 @@ export const useAppStore = create<AppState>()(
           colorOnlyUpdate: true
         };
       }
-      
+
       return { vtLayers: newVtLayers };
     }),
     setLayerExtrusionDepth: (index, depth) => set(state => ({
@@ -423,7 +424,7 @@ export const useAppStore = create<AppState>()(
       const newVtLayers = state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, zOffset: offset } : layer
       );
-      
+
       // Trigger live zOffset update in 3D preview
       const layer = state.vtLayers[index];
       if (layer) {
@@ -436,7 +437,7 @@ export const useAppStore = create<AppState>()(
           colorOnlyUpdate: true
         };
       }
-      
+
       return { vtLayers: newVtLayers };
     }),
     setLayerBufferSize: (index, size) => set(state => ({
@@ -463,7 +464,7 @@ export const useAppStore = create<AppState>()(
       const newVtLayers = state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, heightScaleFactor: factor } : layer
       );
-      
+
       // Trigger live height scale factor update in 3D preview
       const layer = state.vtLayers[index];
       if (layer) {
@@ -476,7 +477,7 @@ export const useAppStore = create<AppState>()(
           colorOnlyUpdate: true
         };
       }
-      
+
       return { vtLayers: newVtLayers };
     }),
     setLayerCsgClipping: (index, enabled) => set(state => ({
@@ -498,7 +499,7 @@ export const useAppStore = create<AppState>()(
       const newLayers = [...state.vtLayers];
       const [removed] = newLayers.splice(fromIndex, 1);
       newLayers.splice(toIndex, 0, removed);
-      
+
       // Update order values to match new positions
       return {
         vtLayers: newLayers.map((layer, i) => ({
@@ -507,22 +508,22 @@ export const useAppStore = create<AppState>()(
         }))
       };
     }),
-    
+
     // Terrain actions
     setTerrainSettings: (settings) => set(state => {
       const newTerrainSettings = { ...state.terrainSettings, ...settings };
       const updates: Record<string, THREE.Color | number> = {};
-      
+
       // Trigger live terrain color update in 3D preview
       if (settings.color) {
         updates.terrain = new THREE.Color(settings.color);
       }
-      
+
       // Trigger live terrain base height update in 3D preview
       if (settings.baseHeight !== undefined) {
         updates.terrainBaseHeight = settings.baseHeight;
       }
-      
+
       return {
         terrainSettings: newTerrainSettings,
         layerColorUpdates: {
@@ -536,22 +537,22 @@ export const useAppStore = create<AppState>()(
       buildingSettings: { ...state.buildingSettings, ...settings }
     })),
     setProcessedTerrainData: (data) => set({ processedTerrainData: data }),
-    
+
     // Processing actions
     setIsProcessing: (processing) => set({ isProcessing: processing }),
-    updateProgress: (status) => set({ 
+    updateProgress: (status) => set({
       isProcessing: true, // Automatically set processing to true when progress is updated
       processingStatus: status
     }),
-    resetProcessing: () => set({ 
-      isProcessing: false, 
+    resetProcessing: () => set({
+      isProcessing: false,
       processingStatus: ""
     }),
-    
+
     // Geometry actions
     setGeometryDataSets: (datasets) => set({ geometryDataSets: datasets }),
     setConfigHashes: (hashes) => set({ configHashes: hashes }),
-    
+
     // Rendering actions
     setRenderingSettings: (settings) => set(state => ({
       renderingSettings: { ...state.renderingSettings, ...settings }
@@ -567,7 +568,7 @@ export const useAppStore = create<AppState>()(
       layerColorUpdates: { ...state.layerColorUpdates, ...colors }
     })),
     setSceneGetter: (getter) => set({ sceneGetter: getter }),
-    
+
     // Legacy compatibility
     setHoveredMesh: (mesh) => set(state => ({
       hoverState: { ...state.hoverState, hoveredMesh: mesh }
@@ -576,10 +577,10 @@ export const useAppStore = create<AppState>()(
       hoverState: { ...state.hoverState, mousePosition: position }
     })),
     clearHover: () => set({
-      hoverState: { 
-        hoveredMesh: null, 
-        hoveredProperties: null, 
-        mousePosition: null 
+      hoverState: {
+        hoveredMesh: null,
+        hoveredProperties: null,
+        mousePosition: null
       }
     }),
     clearColorOnlyUpdate: () => set({ colorOnlyUpdate: false }),

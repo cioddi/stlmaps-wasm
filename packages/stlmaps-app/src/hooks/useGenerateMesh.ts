@@ -319,7 +319,7 @@ class ParallelLayerProcessor {
     const sequentialEstimate = results.reduce((sum, r) => sum + r.processingTimeMs, 0);
     const efficiency = sequentialEstimate > 0 ? Math.min(100, (sequentialEstimate / totalTime) * 100) : 0;
 
-    
+
 
     return results;
   }
@@ -439,7 +439,7 @@ class ParallelLayerProcessor {
           geometryCount: geometries.length
         });
 
-        
+
 
       } catch (error) {
         const processingTime = Date.now() - layerStartTime;
@@ -454,7 +454,7 @@ class ParallelLayerProcessor {
           geometryCount: 0
         });
 
-        
+
       }
     }
 
@@ -533,7 +533,7 @@ export function useGenerateMesh() {
     let zoomLevel = 12;
     while (zoomLevel > 0) {
       const tileCount = calculateTileCount(minLng, minLat, maxLng, maxLat, zoomLevel);
-      if (tileCount <= 4) break;
+      if (tileCount <= 9) break;
       zoomLevel--;
     }
     return zoomLevel;
@@ -656,7 +656,7 @@ export function useGenerateMesh() {
 
       return result;
     } catch (error) {
-      
+
       throw new Error(`Terrain processing failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [processElevationForBbox, terrainSettings, setProcessedTerrainData]);
@@ -718,7 +718,7 @@ export function useGenerateMesh() {
       const processId = await processManager.startProcess(processConfig);
       currentProcessIdRef.current = processId;
 
-      
+
 
       // Initialize layer processor
       const layerProcessor = new ParallelLayerProcessor();
@@ -731,10 +731,12 @@ export function useGenerateMesh() {
       });
 
       // Fetch VT data (shared resource)
+      // Calculate optimal zoom level where max 9 tiles cover the bbox
       const zoomLevel = calculateOptimalZoomLevel(...bboxCoords);
+      console.log(`🗺️ Using zoom level ${zoomLevel} for vector tiles (max 9 tiles)`);
       await fetchVtData({
         bbox: bboxCoords,
-        zoom: 14,
+        zoom: zoomLevel,
         gridSize: { width: 256, height: 256 },
         bboxKey: processId,
       });
@@ -768,7 +770,7 @@ export function useGenerateMesh() {
       });
 
       // Workers will handle their own vector tile fetching
-      
+
 
       // Initialize contexts for layer processing
       await layerProcessor.initializeContexts(vtLayers.length);
@@ -821,7 +823,7 @@ export function useGenerateMesh() {
         message: 'Optimized mesh generation complete!'
       });
 
-      
+
 
       // End performance monitoring and log analysis
       const performanceSession = performanceMonitor.endSession();
@@ -840,7 +842,7 @@ export function useGenerateMesh() {
       };
 
     } catch (error) {
-      
+
 
       // Clean up on error
       if (layerProcessorRef.current) {
@@ -896,7 +898,7 @@ export function useGenerateMesh() {
 
   const startMeshGeneration = useCallback(async () => {
     if (isProcessingMesh) {
-      
+
       await cancelMeshGeneration();
       // Small additional delay after cancellation
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -933,7 +935,7 @@ export function useGenerateMesh() {
           layerHashes: currentLayerHashes,
         });
 
-        
+
         console.log('📊 Performance metrics:', {
           totalTime: result.totalProcessingTimeMs,
           efficiency: `${result.parallelizationEfficiency.toFixed(1)}%`,
@@ -948,7 +950,7 @@ export function useGenerateMesh() {
 
       return result;
     } catch (error) {
-      
+
       throw error;
     }
   }, [
@@ -963,7 +965,7 @@ export function useGenerateMesh() {
 
   const cancelMeshGeneration = useCallback(async () => {
     if (abortControllerRef.current) {
-      
+
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
@@ -1029,7 +1031,7 @@ export function useGenerateMesh() {
       await cancelMeshGeneration();
 
       if (!bbox) {
-        
+
         immediateProcessingRef.current = false;
         return;
       }
@@ -1042,11 +1044,11 @@ export function useGenerateMesh() {
       immediateProcessingRef.current = hadActiveProcess;
 
       const timer = setTimeout(async () => {
-        
+
         try {
           await startMeshGeneration();
         } catch (error) {
-          
+
         } finally {
           // Reset immediate processing flag after starting
           immediateProcessingRef.current = false;

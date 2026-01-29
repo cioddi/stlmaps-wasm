@@ -53,7 +53,7 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
       id: 2,
       title: "Vector Tile Acquisition",
       description:
-        "Downloads all vector tiles from zoom level 14 that intersect with the selected bounding box, providing detailed geographic data.",
+        "Downloads vector tiles at an optimal zoom level (max 9 tiles) that cover the selected bounding box, providing detailed geographic data while keeping data size manageable.",
       icon: <GridOnIcon sx={{ color: theme.palette.primary.main, fontSize: 28 }} />,
       imageSrc: "assets/process_vt2.png",
       imageAlt: "Vector tile downloading process",
@@ -143,24 +143,24 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
       <DialogContent sx={{ py: 3 }}>
         <Paper
           elevation={2}
-          sx={{ mT: 10,p: 3, mb: 4, borderRadius: 2, backgroundColor: theme.palette.background.paper }}
+          sx={{ mT: 10, p: 3, mb: 4, borderRadius: 2, backgroundColor: theme.palette.background.paper }}
         >
           <Typography variant="body1" paragraph>
             This website offers a free tool to generate 3D models of map areas — directly in your browser.
           </Typography>
-          
+
           <Typography variant="body1" paragraph>
-            By dragging or resizing a bounding box over the map, you can define the area of interest. Once selected, the app retrieves elevation data from a raster DEM and downloads up to 9 vector tiles at zoom level 14 that intersect with the area. Using this data, it generates detailed 3D meshes representing buildings, roads, water bodies, parks, and land use features.
+            By dragging or resizing a bounding box over the map, you can define the area of interest. Once selected, the app retrieves elevation data from a raster DEM and downloads vector tiles at an optimal zoom level (selecting a level where at most 9 tiles cover the area). Using this data, it generates detailed 3D meshes representing buildings, roads, water bodies, parks, and land use features.
           </Typography>
-          
+
           <Typography variant="body1" paragraph>
             A layer tree in the left sidebar lets you configure how different layers are rendered, giving you full control over the model's appearance. At the bottom of the page, you'll find a live 3D preview that updates as you adjust the area or settings.
           </Typography>
-          
+
           <Typography variant="body1" paragraph>
             Once the model is generated, you can export it in multiple formats:
           </Typography>
-          
+
           <Box sx={{ pl: 2, mb: 2 }}>
             <Typography variant="body1" component="div">
               • <strong>OBJ</strong>: A widely used format for 3D modeling.
@@ -172,7 +172,7 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
               • <strong>GLB</strong>: A modern, compact format that includes different layers as separate geometries. This allows for color customization in 3D printing slicers, like selecting different colors for buildings, roads, and parks when converting to <strong>3MF</strong> for 3D printing.
             </Typography>
           </Box>
-          
+
           <Typography variant="body1" paragraph>
             For <strong>GLB to 3MF</strong> conversion, we recommend using an online service like <Link href="https://convertio.co/glb-3mf/" target="_blank" rel="noopener noreferrer">Convertio</Link>, which provides a simple way to convert GLB files to the 3MF format for 3D printing.
           </Typography>
@@ -180,14 +180,14 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
           <Typography variant="body1" paragraph>
             The app uses raster & vector-tiles provided by <a href="https://www.wheregroup.com">WhereGroup GmbH</a>.
           </Typography>
-          
+
           <Typography variant="body1" paragraph>
             Everything else is handled locally in your browser.
           </Typography>
         </Paper>
 
         <Divider sx={{ my: 4 }} />
-        
+
         <Typography
           variant="h6"
           component="h2"
@@ -195,7 +195,7 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
         >
           How It Works
         </Typography>
-        
+
         <Grid container spacing={3}>
           {processItems.map((item) => (
             <Grid item xs={12} md={6} key={item.id}>
@@ -229,7 +229,7 @@ const InfoDialog: React.FC<InfoDialogProps> = ({ open, onClose }) => {
                     {item.title}
                   </Typography>
                 </Box>
-                
+
                 <Box sx={{ p: 2 }}>
                   <Box
                     sx={{

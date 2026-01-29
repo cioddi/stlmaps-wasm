@@ -221,11 +221,11 @@ let fetchingProcessId: string | null = null;  // Track which process is currentl
 
 async function initializeWasmInWorker(): Promise<void> {
   try {
-    
+
 
     // Initialize WASM fetch helpers first
     initWorkerWasmFetchHelpers();
-    
+
 
     // Validate WebAssembly support
     if (!WebAssembly) {
@@ -276,7 +276,7 @@ async function initializeWasmInWorker(): Promise<void> {
     }
 
     isInitialized = true;
-    
+
 
   } catch (error) {
     isInitialized = false;
@@ -291,7 +291,7 @@ async function initializeWasmInWorker(): Promise<void> {
 
 async function syncSharedResources(data: ResourceSyncData): Promise<void> {
   try {
-    
+
 
     // Store process ID for future reference
     currentProcessId = data.processId;
@@ -315,10 +315,10 @@ async function syncSharedResources(data: ResourceSyncData): Promise<void> {
       await loadResourcesIntoWasm(data);
     }
 
-    
+
 
   } catch (error) {
-    
+
     throw error;
   }
 }
@@ -331,7 +331,7 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
   try {
     // Load vector tiles into WASM process cache using add_process_feature_data_js
     if ((wasmModule as any).add_process_feature_data_js && data.vectorTiles.length > 0) {
-      
+
 
       // Store vector tiles as JSON data in process cache
       const tileDataForWasm = data.vectorTiles.map(tile => ({
@@ -356,10 +356,10 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
           );
 
           if (success) {
-            
+
           }
         } catch (keyError) {
-          
+
         }
       }
 
@@ -381,7 +381,7 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
             JSON.stringify(tileData)
           );
         } catch (tileError) {
-          
+
         }
       }
     }
@@ -396,20 +396,82 @@ async function loadResourcesIntoWasm(data: ResourceSyncData): Promise<void> {
         );
 
         if (success) {
-          
+
         }
       } catch (elevationError) {
-        
+
       }
     }
 
-    
+
 
   } catch (error) {
-    
+
     // Don't throw here as the worker can still function with fallback methods
   }
 }
+
+// ================================================================================
+// Tile/Zoom Calculation Helpers
+// ================================================================================
+
+/**
+ * Convert lng/lat to tile coordinates
+ */
+const lngLatToTileCoordsWorker = (
+  lng: number,
+  lat: number,
+  zoom: number
+): { x: number; y: number } => {
+  const n = Math.pow(2, zoom);
+  const x = Math.floor(((lng + 180) / 360) * n);
+
+  const latRad = (lat * Math.PI) / 180;
+  const y = Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
+  );
+
+  return { x, y };
+};
+
+/**
+ * Calculate the number of tiles at a given zoom level for a bbox
+ */
+const calculateTileCountWorker = (
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  zoom: number
+): number => {
+  const minTile = lngLatToTileCoordsWorker(minLng, minLat, zoom);
+  const maxTile = lngLatToTileCoordsWorker(maxLng, maxLat, zoom);
+
+  const width = Math.abs(maxTile.x - minTile.x) + 1;
+  const height = Math.abs(maxTile.y - minTile.y) + 1;
+
+  return width * height;
+};
+
+/**
+ * Find the optimal zoom level for a bounding box (where number of tiles is <= maxTiles)
+ */
+const calculateOptimalZoomLevelWorker = (
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+  maxTiles: number = 9
+): number => {
+  // Start from max reasonable zoom and decrease until we get <= maxTiles
+  let zoomLevel = 14;
+  while (zoomLevel > 0) {
+    const tileCount = calculateTileCountWorker(minLng, minLat, maxLng, maxLat, zoomLevel);
+    if (tileCount <= maxTiles) break;
+    zoomLevel--;
+  }
+  return zoomLevel;
+};
 
 // ================================================================================
 // Vector Tile Availability Functions
@@ -465,12 +527,17 @@ async function ensureVectorTilesForProcess(
     fetchingProcessId = processId;
 
     const [west, south, east, north] = bboxCoords;
+
+    // Calculate optimal zoom level where max 9 tiles cover the bbox
+    const zoom = calculateOptimalZoomLevelWorker(west, south, east, north, 9);
+    console.log(`🗺️ Worker using zoom level ${zoom} for vector tiles (max 9 tiles)`);
+
     const fetchInput = {
       min_lng: west,
       min_lat: south,
       max_lng: east,
       max_lat: north,
-      zoom: 14,
+      zoom: zoom,
       grid_width: 256,
       grid_height: 256,
       process_id: processId  // Use original process ID, not unique worker ID
@@ -696,7 +763,7 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
     };
 
   } catch (error) {
-    
+
     throw error;
   }
 }
@@ -747,7 +814,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       case 'cancel':
         if (currentTaskId === id || !id) {
           cancelFlag = true;
-          
+
         }
         break;
 
@@ -757,7 +824,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           try {
             (wasmModule as any).clear_process_cache_js();
           } catch (cleanupError) {
-            
+
           }
         }
 
@@ -771,7 +838,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     }
 
   } catch (error) {
-    
+
 
     postMessage({
       id,
@@ -783,7 +850,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
 // Handle worker errors
 self.onerror = (error) => {
-  
+
 
   if (currentTaskId) {
     postMessage({
@@ -795,4 +862,4 @@ self.onerror = (error) => {
 };
 
 // Export for TypeScript
-export {};
+export { };

@@ -20,8 +20,10 @@ const MIN_CLEARANCE: f64 = 0.1; // Minimum clearance above terrain to avoid z-fi
 // Scale factor to make vertical exaggeration values more visible (must match terrain_mesh_gen.rs)
 const EXAGGERATION_SCALE_FACTOR: f64 = 5.0;
 // Maximum edge length for subdivision (ensures terrain-aligned geometries follow terrain properly)
-// TERRAIN_SIZE is 200.0, terrain has ~255 segments (~0.78 units/segment), so 0.5 gives ~400 segments for even better terrain alignment
-const MAX_EDGE_LENGTH: f64 = 0.5;
+// TERRAIN_SIZE is 200.0, terrain has ~255 segments (~0.78 units/segment)
+// Increased from 0.5 to 2.0 for ~4x faster processing while maintaining acceptable terrain alignment
+const MAX_EDGE_LENGTH: f64 = 2.0;
+
 
 // Helper function to decode base64 string to f32 vector
 fn decode_base64_to_f32_vec(base64_data: &str) -> Result<Vec<f32>, String> {
@@ -1968,7 +1970,7 @@ fn create_extruded_shape(
 
 // Process the polygon geometry input and produce a buffer geometry output
 // Constants for performance optimization
-const MAX_CHUNK_SIZE: usize = 250; // Smaller chunks for better progress and prevent timeouts
+const MAX_CHUNK_SIZE: usize = 500; // Larger chunks for better throughput with faster per-polygon processing
 #[allow(dead_code)]
 const MIN_AREA_THRESHOLD: f64 = 0.0001; // Skip very small polygons for performance
 

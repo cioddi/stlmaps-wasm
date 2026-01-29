@@ -53,32 +53,32 @@ const getBatteryPenalty = (): number => {
  * Improved algorithm that better distinguishes between capable and less capable devices
  */
 const detectDeviceCapabilities = (): 'quality' | 'performance' => {
-  
+
   // Device classification
   const userAgent = navigator.userAgent.toLowerCase();
   const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent);
   const isTablet = /ipad|android(?!.*mobile)/i.test(navigator.userAgent);
   const isDesktop = !isMobile && !isTablet;
-  
+
   // Get device specs
   // @ts-expect-error - navigator.deviceMemory is not in TypeScript defs
   const deviceMemory = navigator.deviceMemory || (isMobile ? 3 : 8); // Better defaults based on device type
   const cpuCores = navigator.hardwareConcurrency || (isMobile ? 4 : 8);
-  
+
   // Screen metrics
   const pixelCount = window.screen.width * window.screen.height;
   const devicePixelRatio = window.devicePixelRatio || 1;
   const effectivePixels = pixelCount * devicePixelRatio;
-  
-  
+
+
   // GPU Performance Assessment
   let gpuCapabilityScore = 0;
   let gpuRenderer = '';
-  
+
   try {
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-    
+
     if (gl) {
       // Get GPU renderer info
       // @ts-expect-error - This property exists on WebGL contexts
@@ -86,7 +86,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
       if (debugInfo) {
         // @ts-expect-error - This constant exists when the extension is available
         gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
-        
+
         // High-end desktop GPUs
         const highEndDesktopGPUs = [
           // NVIDIA
@@ -99,13 +99,13 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
           'rx 6900', 'rx 6800', 'rx 6700', 'rx 6600',
           'rx 5700', 'rx 5600', 'rx 580', 'rx 570'
         ];
-        
+
         // Mid-range desktop GPUs
         const midRangeDesktopGPUs = [
           'gtx 1650', 'gtx 1050', 'gtx 960', 'gtx 950',
           'rx 560', 'rx 550', 'intel iris xe', 'intel arc'
         ];
-        
+
         // Modern mobile GPUs (capable of quality rendering)
         const capableMobileGPUs = [
           // Apple
@@ -120,16 +120,16 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
           // Samsung Xclipse
           'xclipse 940', 'xclipse 920'
         ];
-        
+
         // Lower-end mobile GPUs
         const basicMobileGPUs = [
           'adreno 610', 'adreno 530', 'adreno 520', 'adreno 510',
           'mali-g57', 'mali-g52', 'mali-g51', 'mali-g31',
           'powervr'
         ];
-        
+
         const rendererLower = gpuRenderer.toLowerCase();
-        
+
         // Score based on GPU tier
         if (highEndDesktopGPUs.some(gpu => rendererLower.includes(gpu))) {
           gpuCapabilityScore = 8; // Excellent
@@ -145,7 +145,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
           gpuCapabilityScore = 4; // Unknown/generic
         }
       }
-      
+
       // WebGL capabilities test
       const extensions = gl.getSupportedExtensions() || [];
       const modernExtensions = [
@@ -156,11 +156,11 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
         'WEBGL_depth_texture',
         'EXT_texture_filter_anisotropic'
       ];
-      
+
       const supportedModernExtensions = modernExtensions.filter(ext => extensions.includes(ext));
       const extensionScore = Math.min(supportedModernExtensions.length * 0.3, 2);
       gpuCapabilityScore += extensionScore;
-      
+
       // Performance benchmark (quick test)
       const startTime = performance.now();
       let drawCalls = 0;
@@ -169,22 +169,22 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
         gl.flush();
         drawCalls++;
       }
-      
+
       if (drawCalls > 200) {
         gpuCapabilityScore += 1;
       } else if (drawCalls > 100) {
         gpuCapabilityScore += 0.5;
       }
-      
+
     }
   } catch (e) {
-    
+
     gpuCapabilityScore = isMobile ? 3 : 5; // Conservative fallback
   }
-  
+
   // Calculate total capability score
   let totalScore = 0;
-  
+
   // Base scores by device type
   if (isDesktop) {
     totalScore += 3; // Desktop base advantage
@@ -192,7 +192,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
     totalScore += 1; // Tablets are middle ground
   }
   // Mobile gets no base bonus/penalty - judge by specs
-  
+
   // Memory score (more nuanced)
   if (deviceMemory >= 8) {
     totalScore += 3;
@@ -202,7 +202,7 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
     totalScore += 1;
   }
   // Below 4GB gets no bonus
-  
+
   // CPU score
   if (cpuCores >= 8) {
     totalScore += 2;
@@ -211,21 +211,21 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
   } else if (cpuCores >= 4) {
     totalScore += 0.5;
   }
-  
+
   // GPU score (most important factor)
   totalScore += gpuCapabilityScore;
-  
+
   // Resolution penalty (only for very high resolutions)
   if (effectivePixels > 4000000) { // ~4K territory
     totalScore -= 1;
   } else if (effectivePixels > 8000000) { // 4K+
     totalScore -= 2;
   }
-  
+
   // Battery status penalty (if available)
   const batteryPenalty = getBatteryPenalty();
   totalScore += batteryPenalty;
-  
+
   // Device age estimation (very rough)
   const currentYear = new Date().getFullYear();
   if (userAgent.includes('chrome/')) {
@@ -237,22 +237,22 @@ const detectDeviceCapabilities = (): 'quality' | 'performance' => {
       totalScore -= 1;
     }
   }
-  
-  
+
+
   // Special rule: Non-mobile devices with limited specs always get performance mode
   // This ensures older desktops/laptops with 4 cores and ≤8GB RAM don't get quality mode
   if (!isMobile && cpuCores <= 4 && deviceMemory <= 8) {
-    
+
     return 'performance';
   }
-  
+
   // Decision threshold - adjusted for better balance
   const qualityThreshold = isMobile ? 6 : 7; // Slightly higher bar for desktop
   const useQualityMode = totalScore >= qualityThreshold;
-  
+
   const recommendedMode = useQualityMode ? 'quality' : 'performance';
-  
-  
+
+
   return recommendedMode;
 };
 
@@ -269,11 +269,11 @@ const ModelPreview = () => {
     clearColorOnlyUpdate,
     setSceneGetter
   } = useAppStore();
-  
+
   const setRenderingMode = (mode: 'quality' | 'performance') => {
     setRenderingSettings({ mode });
   };
-  
+
   const setCurrentSceneGetter = (getter: (() => THREE.Scene | null) | null) => {
     setSceneGetter(getter);
   };
@@ -285,10 +285,10 @@ const ModelPreview = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [hasSetInitialMode, setHasSetInitialMode] = useState<boolean>(false);
-  
+
   // Access the current rendering mode
   const renderingMode = renderingSettings.mode;
-  
+
   // Store camera position and target to persist across re-renders
   const [cameraPosition, setCameraPosition] = useState<THREE.Vector3 | null>(null);
   const [cameraTarget, setCameraTarget] = useState<THREE.Vector3 | null>(null);
@@ -296,20 +296,20 @@ const ModelPreview = () => {
   // Resize handler function to update renderer when container size changes
   const handleResize = useCallback(() => {
     if (!containerRef.current || !rendererRef.current || !sceneDataRef.current) return;
-    
+
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
-    
+
     if (width === 0 || height === 0) return;
-    
+
     // Update camera aspect ratio
     const { camera, composer } = sceneDataRef.current;
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    
+
     // Update renderer size
     rendererRef.current.setSize(width, height);
-    
+
     // Update composer size
     composer.setSize(width, height);
   }, []);
@@ -317,36 +317,36 @@ const ModelPreview = () => {
   // Initialize Three.js scene
   const initScene = useCallback(() => {
     // Only initialize if we don't have a renderer yet or if rendering mode has changed
-    const shouldInitialize = !rendererRef.current || 
+    const shouldInitialize = !rendererRef.current ||
       (sceneDataRef.current && sceneDataRef.current.renderingMode !== renderingMode);
-    
+
     if (!containerRef.current || !shouldInitialize) return;
-    
+
     // Clean up existing renderer and scene if they exist
     if (rendererRef.current) {
-      
+
       if (containerRef.current.contains(rendererRef.current.domElement)) {
         containerRef.current.removeChild(rendererRef.current.domElement);
       }
       rendererRef.current.dispose();
       rendererRef.current = null;
-      
+
       if (sceneDataRef.current?.animationFrameId) {
         cancelAnimationFrame(sceneDataRef.current.animationFrameId);
       }
     }
-    
+
     try {
-      
+
       setLoading(true);
-      
+
       const width = containerRef.current.clientWidth;
       const height = containerRef.current.clientHeight;
-      
+
       if (width === 0 || height === 0) {
         throw new Error("Container has zero width or height");
       }
-      
+
       // Setup renderer with settings based on rendering mode
       rendererRef.current = new THREE.WebGLRenderer({
         antialias: renderingMode === 'quality',
@@ -356,13 +356,13 @@ const ModelPreview = () => {
       });
       rendererRef.current.setSize(width, height);
       rendererRef.current.setPixelRatio(
-        renderingMode === 'quality' 
-          ? Math.min(window.devicePixelRatio, 2) 
+        renderingMode === 'quality'
+          ? Math.min(window.devicePixelRatio, 2)
           : Math.min(window.devicePixelRatio, 1)
       );
       rendererRef.current.shadowMap.enabled = renderingMode === 'quality';
-      rendererRef.current.shadowMap.type = renderingMode === 'quality' 
-        ? THREE.PCFSoftShadowMap 
+      rendererRef.current.shadowMap.type = renderingMode === 'quality'
+        ? THREE.PCFSoftShadowMap
         : THREE.BasicShadowMap;
       rendererRef.current.outputColorSpace = THREE.SRGBColorSpace;
       rendererRef.current.toneMapping = renderingMode === 'quality'
@@ -371,13 +371,13 @@ const ModelPreview = () => {
       rendererRef.current.toneMappingExposure = renderingMode === 'quality' ? 0.8 : 1.0;
       rendererRef.current.physicallyCorrectLights = renderingMode === 'quality';
       containerRef.current.appendChild(rendererRef.current.domElement);
-      
+
       // Create scene
       const scene = new THREE.Scene();
-      
+
       // Setup camera
       const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 2000);
-      
+
       // Add orbit controls
       const controls = new OrbitControls(camera, rendererRef.current.domElement);
       controls.enableDamping = true;
@@ -386,12 +386,12 @@ const ModelPreview = () => {
       controls.minDistance = 0.1;
       controls.maxDistance = 500;
       controls.maxPolarAngle = Math.PI * 0.85;
-      
+
       // Create post-processing composer
       const composer = new EffectComposer(rendererRef.current);
       const renderPass = new RenderPass(scene, camera);
       composer.addPass(renderPass);
-      
+
       // Configure post-processing based on rendering mode
       if (renderingMode === 'quality') {
         // Add bloom effect (quality mode only)
@@ -402,7 +402,7 @@ const ModelPreview = () => {
           1.2
         );
         composer.addPass(bloomPass);
-        
+
         // Add ambient occlusion (quality mode only)
         const ssaoPass = new SSAOPass(scene, camera, width, height);
         ssaoPass.kernelRadius = 16;
@@ -410,15 +410,15 @@ const ModelPreview = () => {
         ssaoPass.maxDistance = 0.1;
         composer.addPass(ssaoPass);
       }
-      
+
       // Final output pass
       const outputPass = new OutputPass();
       composer.addPass(outputPass);
-      
+
       // Setup environment map
       const pmremGenerator = new THREE.PMREMGenerator(rendererRef.current);
       pmremGenerator.compileEquirectangularShader();
-      
+
       // Create a default environment map
       const canvas = document.createElement('canvas');
       canvas.width = 2048;
@@ -430,25 +430,25 @@ const ModelPreview = () => {
         gradient.addColorStop(0.4, '#f9d976');
         gradient.addColorStop(0.7, '#c2e9fb');
         gradient.addColorStop(1, '#81d8d0');
-        
+
         context.fillStyle = gradient;
         context.fillRect(0, 0, canvas.width, canvas.height);
       }
-      
+
       const envTexture = new THREE.CanvasTexture(canvas);
       envTexture.mapping = THREE.EquirectangularReflectionMapping;
-      
+
       const envMap = pmremGenerator.fromEquirectangular(envTexture).texture;
       // Remove global environment mapping for matte materials - keep only background
       scene.environment = null; // No global environment reflections
       scene.background = envMap;  // Keep gradient background for aesthetics
-      
+
       pmremGenerator.dispose();
-      
+
       // Add strategic lighting with settings based on rendering mode
       const keyLight = new THREE.DirectionalLight(0xfffbf0, 0.9);
       keyLight.position.set(1, 2, 3);
-      
+
       if (renderingMode === 'quality') {
         // High-quality shadow settings
         keyLight.castShadow = true;
@@ -468,13 +468,13 @@ const ModelPreview = () => {
         keyLight.castShadow = false;
       }
       scene.add(keyLight);
-      
+
       // Only add extra lights in quality mode
       if (renderingMode === 'quality') {
         const rimLight = new THREE.DirectionalLight(0xc4e0ff, 0.3);
         rimLight.position.set(-3, 1, -2);
         scene.add(rimLight);
-        
+
         const sunsetLight = new THREE.DirectionalLight(0xff7e47, 1.8);
         sunsetLight.position.set(-5, 30, 30);
         sunsetLight.castShadow = true;
@@ -489,7 +489,7 @@ const ModelPreview = () => {
         sunsetLight.shadow.bias = -0.0003;
         sunsetLight.shadow.radius = 4;
         scene.add(sunsetLight);
-        
+
         const fillLight = new THREE.DirectionalLight(0xfff0c0, 0.2);
         fillLight.position.set(2, -1, -1);
         scene.add(fillLight);
@@ -499,19 +499,19 @@ const ModelPreview = () => {
         simpleLight.position.set(-5, 10, 7);
         scene.add(simpleLight);
       }
-      
+
       // Always add ambient light but with different intensity
       const ambientLight = new THREE.HemisphereLight(
-        0xffffff, 
-        0xf0f5ff, 
+        0xffffff,
+        0xf0f5ff,
         renderingMode === 'quality' ? 2.7 : 3.5
       );
       scene.add(ambientLight);
-      
+
       // Create a model group for all geometry
       const modelGroup = new THREE.Group();
       scene.add(modelGroup);
-      
+
       // Set camera position
       if (cameraPosition && cameraTarget) {
         camera.position.copy(cameraPosition);
@@ -521,7 +521,7 @@ const ModelPreview = () => {
         controls.target.set(0, 0, 0);
       }
       camera.updateProjectionMatrix();
-      
+
       // Add camera helper buttons
       const buttons: HTMLButtonElement[] = [];
       const addCameraPositionButton = (label: string, position: [number, number, number]) => {
@@ -539,28 +539,28 @@ const ModelPreview = () => {
         button.style.zIndex = '100';
         button.style.fontSize = '12px';
         button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
-        
+
         button.addEventListener('click', () => {
           const [x, y, z] = position;
           camera.position.set(x, y, z);
           controls.target.set(0, 0, 0);
           camera.updateProjectionMatrix();
         });
-        
+
         if (containerRef.current) {
           containerRef.current.appendChild(button);
           buttons.push(button);
         }
-        
+
         return button;
       };
-      
+
       const topButton = addCameraPositionButton('Top', [0, 50, 200]);
       topButton.style.left = '10px';
-      
+
       const frontButton = addCameraPositionButton('Initial', [0, -200, 100]);
       frontButton.style.left = '60px';
-      
+
       // Store all the scene data in the ref
 
 
@@ -577,24 +577,24 @@ const ModelPreview = () => {
 
       // Register scene getter for export functionality
       setCurrentSceneGetter(() => sceneDataRef.current?.scene || null);
-      
+
       // Animation loop
       const animate = () => {
         if (!rendererRef.current || !sceneDataRef.current) return;
-        
+
         const { controls, camera, composer } = sceneDataRef.current;
-        
+
         // Save camera position and target when it changes, with debouncing
         if (controls.target && camera.position) {
           // Store the camera position and target in a ref to avoid state updates during animation
           if (!sceneDataRef.current.savedCameraPosition ||
-              !camera.position.equals(sceneDataRef.current.savedCameraPosition) || 
-              !controls.target.equals(sceneDataRef.current.savedCameraTarget || new THREE.Vector3())) {
-            
+            !camera.position.equals(sceneDataRef.current.savedCameraPosition) ||
+            !controls.target.equals(sceneDataRef.current.savedCameraTarget || new THREE.Vector3())) {
+
             // Store the current position and target in the ref
             sceneDataRef.current.savedCameraPosition = camera.position.clone();
             sceneDataRef.current.savedCameraTarget = controls.target.clone();
-            
+
             // Only update the state occasionally to avoid re-renders
             if (!sceneDataRef.current.cameraUpdateTimeoutId) {
               sceneDataRef.current.cameraUpdateTimeoutId = setTimeout(() => {
@@ -607,42 +607,41 @@ const ModelPreview = () => {
             }
           }
         }
-        
+
         sceneDataRef.current.animationFrameId = requestAnimationFrame(animate);
         controls.update();
-        
+
         // Use the composer for enhanced rendering with post-processing
         composer.render();
       };
-      
+
       // @ts-expect-error Debug camera exposure to global scope
       document.debug_camera = camera; // Expose camera to global scope for debugging
-      
+
       animate();
-      
+
       updateScene();
-      
+
     } catch (setupError) {
-      
+
       setError(
-        `Failed to setup 3D viewer: ${
-          setupError instanceof Error
-            ? setupError.message
-            : String(setupError)
+        `Failed to setup 3D viewer: ${setupError instanceof Error
+          ? setupError.message
+          : String(setupError)
         }`
       );
       setLoading(false);
     }
   }, [renderingMode]); // Only depend on rendering mode, not camera position
-  
+
   // Update scene geometry with latest data
   // Function to update only material colors without recreating geometry
   const updateMaterialColors = useCallback(() => {
     if (!sceneDataRef.current || !Object.keys(layerColorUpdates).length) return;
 
-    
+
     const { modelGroup } = sceneDataRef.current;
-    
+
     modelGroup.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         // Handle layer color updates (support both old and new layer identification)
@@ -659,7 +658,7 @@ const ModelPreview = () => {
             }
           }
         }
-        
+
         // Handle terrain color updates
         if (child.name === 'terrain' && layerColorUpdates.terrain) {
           const terrainColor = layerColorUpdates.terrain;
@@ -688,9 +687,20 @@ const ModelPreview = () => {
 
           if (layerColorUpdates[zOffsetKey] !== undefined) {
             const zOffset = layerColorUpdates[zOffsetKey] as number;
-            // Always position at terrain base height + layer zOffset (no magic numbers)
-            child.position.z = terrainSettings.baseHeight + zOffset;
-            
+
+            // Find the layer config to check if it has terrain alignment
+            const currentLayerConfig = vtLayers.find(
+              layer => layer.label === layerKey2 || layer.sourceLayer === layerKey2
+            );
+            const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
+
+            if (hasTerrainAlignment) {
+              // Terrain-aligned layers: only use zOffset (vertices already positioned on terrain)
+              child.position.z = zOffset;
+            } else {
+              // Non-terrain-aligned layers: position at base height + zOffset
+              child.position.z = terrainSettings.baseHeight + zOffset;
+            }
           }
 
           // Handle height scale factor updates (real-time scaling)
@@ -701,9 +711,9 @@ const ModelPreview = () => {
         }
       }
     });
-    
+
     clearColorOnlyUpdate();
-  }, [layerColorUpdates, clearColorOnlyUpdate, terrainSettings.baseHeight]);
+  }, [layerColorUpdates, clearColorOnlyUpdate, terrainSettings.baseHeight, vtLayers]);
 
   // Debounced version of updateMaterialColors
   const debouncedUpdateMaterialColors = useCallback(() => {
@@ -721,7 +731,7 @@ const ModelPreview = () => {
 
   const updateScene = useCallback(() => {
     if (!sceneDataRef.current || !rendererRef.current) return;
-    
+
     try {
       console.log("Updating model geometry", {
         hasTerrainGeometry: !!geometryDataSets.terrainGeometry,
@@ -729,7 +739,7 @@ const ModelPreview = () => {
         renderingMode
       });
       const { modelGroup } = sceneDataRef.current;
-      
+
       // Clear existing geometry
       while (modelGroup.children.length > 0) {
         const child = modelGroup.children[0];
@@ -745,7 +755,7 @@ const ModelPreview = () => {
           }
         }
       }
-      
+
       console.log("🏔️ Layer positioning debug:", {
         terrainBaseHeight: terrainSettings.baseHeight,
         vtLayers: vtLayers.map(layer => ({
@@ -773,7 +783,7 @@ const ModelPreview = () => {
           const terrainColor = new THREE.Color(terrainSettings.color);
           terrainMaterial.color = terrainColor.clone();
         }
-        
+
         // Apply the material to the terrain mesh
         const geometryMesh = new THREE.Mesh(
           geometryDataSets.terrainGeometry,
@@ -783,31 +793,31 @@ const ModelPreview = () => {
         geometryMesh.position.z = 0; // Terrain geometry always at Z=0
         geometryMesh.castShadow = renderingMode === 'quality';
         geometryMesh.receiveShadow = renderingMode === 'quality';
-        
+
         modelGroup.add(geometryMesh);
       }
-      
+
       // Process polygon geometries
       if (geometryDataSets.polygonGeometries && geometryDataSets.polygonGeometries.length > 0) {
-        geometryDataSets.polygonGeometries.forEach(({geometry, ...vtDataset}) => {
+        geometryDataSets.polygonGeometries.forEach(({ geometry, ...vtDataset }) => {
           if (!geometry) return; // Skip if geometry is undefined
 
           // Look up current layer configuration once (used for enabled state, color, zOffset, etc.)
           const currentLayerConfig = vtLayers.find(layer => layer.label === vtDataset.label);
           const isCurrentlyEnabled = currentLayerConfig?.enabled !== false;
-          
-          
+
+
           // Check if this is a container geometry with individual geometries
           if (geometry.userData?.isContainer && geometry.userData?.individualGeometries) {
-            
+
             // Process each individual geometry as a separate mesh
             const individualGeometries = geometry.userData.individualGeometries as THREE.BufferGeometry[];
-            
+
             individualGeometries.forEach((individualGeometry, index) => {
               if (!individualGeometry.attributes.position || individualGeometry.attributes.position.count === 0) {
                 return; // Skip empty geometries
               }
-              
+
               // Create color for polygon exactly like live updates do
               const layerColor = currentLayerConfig?.color || "#81ecec";
               const baseColor = new THREE.Color(layerColor);
@@ -820,25 +830,25 @@ const ModelPreview = () => {
 
               // Set color after material creation (exactly like live updates)
               polygonMaterial.color = baseColor.clone();
-              
+
               // Check if this layer has per-vertex terrain alignment
               const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
-              
+
               // Create mesh
               const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
-              
+
               // Position mesh using the layer's configured zOffset value
               const layerZOffset = currentLayerConfig?.zOffset || 0;
               const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
-              
+
               // Apply height scale factor to the mesh
               polygonMesh.scale.z = layerHeightScaleFactor;
-              
+
               if (hasTerrainAlignment) {
                 // Per-vertex terrain alignment: vertices already have correct Z positions
                 // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
                 polygonMesh.position.z = layerZOffset;
-                
+
                 // Debug: log actual vertex Z range to verify alignment
                 if (!individualGeometry.boundingBox) {
                   individualGeometry.computeBoundingBox();
@@ -854,30 +864,30 @@ const ModelPreview = () => {
                   // Translate geometry so bottom is at origin (z=0)
                   individualGeometry.translate(0, 0, -originalBottomZ);
                 }
-                
+
                 // Position mesh using the layer's configured zOffset value
                 polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
               }
               polygonMesh.castShadow = renderingMode === 'quality';
               polygonMesh.receiveShadow = renderingMode === 'quality';
               polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
-              
+
               // Control visibility based on current layer enabled state
               polygonMesh.visible = isCurrentlyEnabled;
-              
-              
+
+
               // Set minimal userData needed for layer identification in live updates
               polygonMesh.userData = {
                 sourceLayer: vtDataset.sourceLayer,
                 label: vtDataset.label || vtDataset.sourceLayer
               };
-              
+
               modelGroup.add(polygonMesh);
             });
-            
+
             return; // Skip the original processing for container geometries
           }
-          
+
           // Original processing for non-container geometries
           // Create color for polygon exactly like live updates do
           const layerColor = currentLayerConfig?.color || "#81ecec";
@@ -891,16 +901,16 @@ const ModelPreview = () => {
 
           // Set color after material creation (exactly like live updates)
           polygonMaterial.color = baseColor.clone();
-          
+
           // Check if this layer has per-vertex terrain alignment
           const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
-          
+
           // Create mesh
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
-          
+
           // Position mesh using the layer's configured zOffset value
           const layerZOffset = currentLayerConfig?.zOffset || 0;
-          
+
           if (hasTerrainAlignment) {
             // Per-vertex terrain alignment: vertices already have correct Z positions
             // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
@@ -916,17 +926,17 @@ const ModelPreview = () => {
               // Translate geometry so bottom is at origin (z=0)
               geometry.translate(0, 0, -originalBottomZ);
             }
-            
+
             // Position mesh using the layer's configured zOffset value
             polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
           }
           polygonMesh.castShadow = renderingMode === 'quality';
           polygonMesh.receiveShadow = renderingMode === 'quality';
-          
+
           // Control visibility based on current layer enabled state
           polygonMesh.visible = isCurrentlyEnabled;
-          
-          
+
+
           // Set minimal userData needed for layer identification in live updates
           polygonMesh.userData = {
             sourceLayer: vtDataset.sourceLayer,
@@ -936,27 +946,26 @@ const ModelPreview = () => {
           modelGroup.add(polygonMesh);
         });
       }
-      
+
       setLoading(false);
     } catch (updateError) {
-      
+
       setError(
-        `Failed to update 3D scene: ${
-          updateError instanceof Error
-            ? updateError.message
-            : String(updateError)
+        `Failed to update 3D scene: ${updateError instanceof Error
+          ? updateError.message
+          : String(updateError)
         }`
       );
       setLoading(false);
     }
   }, [geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries, terrainSettings, renderingMode]);
-  
+
   // Update mesh visibility when layer enabled states change (without rebuilding geometry)
   useEffect(() => {
     if (!sceneDataRef.current) return;
-    
+
     const { scene } = sceneDataRef.current;
-    
+
     // Update visibility of existing meshes based on current layer enabled states
     scene.traverse((object) => {
       if (object instanceof THREE.Mesh && (object.userData?.sourceLayer || object.userData?.label)) {
@@ -971,57 +980,57 @@ const ModelPreview = () => {
         object.visible = isCurrentlyEnabled;
       }
     });
-    
+
     // Also handle terrain visibility
     const terrainMesh = scene.getObjectByName('terrain');
     if (terrainMesh) {
       terrainMesh.visible = terrainSettings.enabled;
     }
-    
+
   }, [vtLayers, terrainSettings.enabled]);
-  
+
   // Initialize scene when component mounts
   useEffect(() => {
     if (!containerRef.current) return;
-    
-    
+
+
 
     // Auto-detect and set optimal rendering mode on first mount
     if (!hasSetInitialMode) {
       const detectedMode = detectDeviceCapabilities();
-      
+
       setRenderingMode(detectedMode);
       setHasSetInitialMode(true);
     }
-    
+
     // Clear any existing canvases in the container first
     containerRef.current.querySelectorAll('button').forEach(button => {
-      
+
       button.remove();
     });
     // Clear any existing canvases in the container first
     containerRef.current.querySelectorAll('canvas').forEach(canvas => {
-      
+
       canvas.remove();
     });
-    
+
     initScene();
-    
+
     // Setup resize handler
     const handleResizeWrapper = () => handleResize();
     window.addEventListener('resize', handleResizeWrapper);
-    
+
     // Setup ResizeObserver
     const resizeObserver = new ResizeObserver(handleResizeWrapper);
     resizeObserverRef.current = resizeObserver;
-    
+
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
-    
+
     // Cleanup when component unmounts
     return () => {
-      
+
       window.removeEventListener('resize', handleResizeWrapper);
 
       // Clear debounce timeout
@@ -1035,11 +1044,11 @@ const ModelPreview = () => {
         resizeObserverRef.current.disconnect();
         resizeObserverRef.current = null;
       }
-      
+
       if (sceneDataRef.current?.animationFrameId) {
         cancelAnimationFrame(sceneDataRef.current.animationFrameId);
       }
-      
+
       // Remove buttons
       if (sceneDataRef.current?.buttons) {
         sceneDataRef.current.buttons.forEach(button => {
@@ -1053,7 +1062,7 @@ const ModelPreview = () => {
       // Dispose of ThreeJS resources
       if (sceneDataRef.current) {
         const { scene, modelGroup } = sceneDataRef.current;
-        
+
         // Dispose of all geometries and materials in the model group
         while (modelGroup.children.length > 0) {
           const child = modelGroup.children[0];
@@ -1069,11 +1078,11 @@ const ModelPreview = () => {
             }
           }
         }
-        
+
         scene.clear();
         sceneDataRef.current = null;
       }
-      
+
       if (rendererRef.current) {
         if (containerRef.current && containerRef.current.contains(rendererRef.current.domElement)) {
           containerRef.current.removeChild(rendererRef.current.domElement);
@@ -1083,12 +1092,12 @@ const ModelPreview = () => {
       }
     };
   }, [initScene, handleResize]);
-  
+
   // Update scene when geometry data or rendering mode changes
   // Handle color-only updates (debounced)
   useEffect(() => {
     if (colorOnlyUpdate && sceneDataRef.current?.initialized) {
-      
+
       debouncedUpdateMaterialColors();
     }
   }, [colorOnlyUpdate, debouncedUpdateMaterialColors]);
@@ -1096,7 +1105,7 @@ const ModelPreview = () => {
   // Handle full geometry updates
   useEffect(() => {
     if (sceneDataRef.current?.initialized && !colorOnlyUpdate) {
-      
+
       updateScene();
     }
   }, [updateScene, geometryDataSets.terrainGeometry, geometryDataSets.polygonGeometries, renderingMode]);

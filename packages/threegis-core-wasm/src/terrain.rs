@@ -149,8 +149,10 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
     // 2. Following the same manifold triangulation pattern as building extrusion
     // 3. Systematic edge sharing that ensures each edge appears exactly twice
     //
-    // GPU terrain can still be forced with WASM_GPU_TERRAIN_FORCE environment variable
-    let use_gpu_terrain = std::env::var("WASM_GPU_TERRAIN_FORCE").is_ok();
+    // Use GPU terrain by default for 5-50x speedup, with automatic CPU fallback
+    // GPU terrain may produce slightly different geometry but is much faster
+    let use_gpu_terrain = true;
+
 
     if use_gpu_terrain {
         match crate::gpu_terrain::generate_terrain_mesh_gpu(&elevation_result, &params).await {

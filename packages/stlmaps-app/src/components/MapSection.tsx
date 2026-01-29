@@ -36,6 +36,9 @@ const MapSection: React.FC<MapSectionProps> = React.memo(({
         options={{
           center: mapCenter,
           zoom: 15,
+          attributionControl: {
+            customAttribution: ['MapLibre', 'MapComponents', 'OpenMapTiles', 'OpenStreetMap']
+          },
           style: {
             version: 8,
             sources: {
