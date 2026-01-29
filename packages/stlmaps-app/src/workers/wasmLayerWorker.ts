@@ -464,8 +464,7 @@ const calculateOptimalZoomLevelWorker = (
   maxTiles: number = 9
 ): number => {
   // Start from max reasonable zoom and decrease until we get <= maxTiles
-  // NOTE: Must match useGenerateMesh.ts calculateOptimalZoomLevel (starts at 12)
-  let zoomLevel = 12;
+  let zoomLevel = 14;
   while (zoomLevel > 0) {
     const tileCount = calculateTileCountWorker(minLng, minLat, maxLng, maxLat, zoomLevel);
     if (tileCount <= maxTiles) break;
