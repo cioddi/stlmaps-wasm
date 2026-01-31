@@ -233,6 +233,18 @@ const defaultLayers: VtDataSet[] = [
     order: 3
   },
   {
+    sourceLayer: "water",
+    label: "Water Bodies",
+    enabled: true,
+    color: "#188dfb",
+    bufferSize: 0,
+    extrusionDepth: 2.1,
+    zOffset: -0.02,
+    alignVerticesToTerrain: true,
+    useCsgClipping: false,
+    order: 4
+  },
+  {
     sourceLayer: "transportation",
     label: "Footways",
     enabled: true,
@@ -242,7 +254,7 @@ const defaultLayers: VtDataSet[] = [
     zOffset: -0.02,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
-    order: 4,
+    order: 5,
     filter: [
       "in",
       "subclass",
@@ -259,7 +271,7 @@ const defaultLayers: VtDataSet[] = [
     zOffset: -0.01,
     alignVerticesToTerrain: true,
     useCsgClipping: false,
-    order: 4,
+    order: 5,
     filter: [
       "in",
       "class",
@@ -274,18 +286,6 @@ const defaultLayers: VtDataSet[] = [
       "raceway",
       "rail"
     ]
-  },
-  {
-    sourceLayer: "water",
-    label: "Water Bodies",
-    enabled: true,
-    color: "#188dfb",
-    bufferSize: 0,
-    extrusionDepth: 2.1,
-    zOffset: -0.02,
-    alignVerticesToTerrain: true,
-    useCsgClipping: false,
-    order: 5
   },
   {
     sourceLayer: "building",
