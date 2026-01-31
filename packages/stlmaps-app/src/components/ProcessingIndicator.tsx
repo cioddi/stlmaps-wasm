@@ -109,12 +109,12 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // Get state from the mesh generation hook
+  // Get state from the mesh generation hook (read-only mode to prevent triggering processing)
   const {
     isProcessingMesh,
     processingProgress,
     cancelMeshGeneration,
-  } = useGenerateMesh();
+  } = useGenerateMesh({ enableAutoProcessing: false });
 
   // Don't render if not processing
   if (!isProcessingMesh) {
@@ -129,7 +129,7 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
         pointerEvents: 'auto'
       }}
     >
-      <TechLines sx={{backgroundImage:"linear-gradient(90deg, #42a5f5, #64ffda, #42a5f5)"}} />
+      <TechLines sx={{ backgroundImage: "linear-gradient(90deg, #42a5f5, #64ffda, #42a5f5)" }} />
       <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 1 }}>
         <IconContainer>
           <CodeIcon color="primary" fontSize={"small"} />

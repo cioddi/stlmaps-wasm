@@ -15,8 +15,167 @@ import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { useAppStore } from "../stores/useAppStore";
 
+// Maximum vertices per geometry for mobile devices without OES_element_index_uint
+const MAX_VERTICES_16BIT = 65535;
 
-// Interface for scene data to be stored in ref
+/**
+ * Splits a geometry that exceeds 65,535 vertices into multiple sub-geometries.
+ * This is necessary for mobile devices that don't support the OES_element_index_uint extension.
+ * 
+ * @param geometry - The BufferGeometry to potentially split
+ * @returns An array of geometries (may contain just the original if no split needed)
+ */
+function splitGeometryForMobile(geometry: THREE.BufferGeometry): THREE.BufferGeometry[] {
+  const positionAttribute = geometry.attributes.position;
+  if (!positionAttribute) return [geometry];
+
+  const vertexCount = positionAttribute.count;
+
+  // ALWAYS sanitize geometries for mobile - creates clean buffers with proper 16-bit indices
+  // This fixes buffer corruption issues, not just the 16-bit index limit
+  const needsSplit = vertexCount > MAX_VERTICES_16BIT;
+
+  if (needsSplit) {
+    console.log(`🔧 Splitting geometry with ${vertexCount} vertices for mobile compatibility`);
+  }
+
+  const geometries: THREE.BufferGeometry[] = [];
+  const hasNormals = !!geometry.attributes.normal;
+  const hasColors = !!geometry.attributes.color;
+  const hasUVs = !!geometry.attributes.uv;
+  const hasIndices = !!geometry.index;
+
+  // For indexed geometry, we need to split by faces
+  if (hasIndices) {
+    const indices = geometry.index!.array;
+    const positions = positionAttribute.array as Float32Array;
+    const normals = hasNormals ? (geometry.attributes.normal.array as Float32Array) : null;
+    const colors = hasColors ? (geometry.attributes.color.array as Float32Array) : null;
+
+    // Process triangles in chunks
+    const triangleCount = indices.length / 3;
+    const maxTrianglesPerChunk = Math.floor(MAX_VERTICES_16BIT / 3);
+
+    for (let startTriangle = 0; startTriangle < triangleCount; startTriangle += maxTrianglesPerChunk) {
+      const endTriangle = Math.min(startTriangle + maxTrianglesPerChunk, triangleCount);
+
+      // Build vertex map for this chunk
+      const vertexMap = new Map<number, number>();
+      const newPositions: number[] = [];
+      const newNormals: number[] = [];
+      const newColors: number[] = [];
+      const newIndices: number[] = [];
+
+      for (let t = startTriangle; t < endTriangle; t++) {
+        for (let v = 0; v < 3; v++) {
+          const oldIndex = indices[t * 3 + v];
+
+          if (!vertexMap.has(oldIndex)) {
+            const newIndex = newPositions.length / 3;
+            vertexMap.set(oldIndex, newIndex);
+
+            // Copy position
+            newPositions.push(
+              positions[oldIndex * 3],
+              positions[oldIndex * 3 + 1],
+              positions[oldIndex * 3 + 2]
+            );
+
+            // Copy normal if exists
+            if (normals) {
+              newNormals.push(
+                normals[oldIndex * 3],
+                normals[oldIndex * 3 + 1],
+                normals[oldIndex * 3 + 2]
+              );
+            }
+
+            // Copy color if exists
+            if (colors) {
+              newColors.push(
+                colors[oldIndex * 3],
+                colors[oldIndex * 3 + 1],
+                colors[oldIndex * 3 + 2]
+              );
+            }
+          }
+
+          newIndices.push(vertexMap.get(oldIndex)!);
+        }
+      }
+
+      // Create new geometry for this chunk
+      const chunkGeometry = new THREE.BufferGeometry();
+      chunkGeometry.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3));
+
+      if (newNormals.length > 0) {
+        chunkGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(newNormals, 3));
+      }
+
+      if (newColors.length > 0) {
+        chunkGeometry.setAttribute('color', new THREE.Float32BufferAttribute(newColors, 3));
+      }
+
+      // Use 16-bit indices for mobile compatibility
+      chunkGeometry.setIndex(new THREE.Uint16BufferAttribute(newIndices, 1));
+
+      // Copy userData
+      chunkGeometry.userData = { ...geometry.userData };
+
+      geometries.push(chunkGeometry);
+    }
+  } else {
+    // Non-indexed geometry: split vertices directly
+    const positions = positionAttribute.array as Float32Array;
+    const normals = hasNormals ? (geometry.attributes.normal.array as Float32Array) : null;
+    const colors = hasColors ? (geometry.attributes.color.array as Float32Array) : null;
+
+    // Split by triangles (3 vertices each)
+    const triangleCount = vertexCount / 3;
+    const maxTrianglesPerChunk = Math.floor(MAX_VERTICES_16BIT / 3);
+
+    for (let startTriangle = 0; startTriangle < triangleCount; startTriangle += maxTrianglesPerChunk) {
+      const endTriangle = Math.min(startTriangle + maxTrianglesPerChunk, triangleCount);
+      const startVertex = startTriangle * 3;
+      const endVertex = endTriangle * 3;
+
+      const chunkGeometry = new THREE.BufferGeometry();
+      chunkGeometry.setAttribute('position',
+        new THREE.Float32BufferAttribute(positions.slice(startVertex * 3, endVertex * 3), 3));
+
+      if (normals) {
+        chunkGeometry.setAttribute('normal',
+          new THREE.Float32BufferAttribute(normals.slice(startVertex * 3, endVertex * 3), 3));
+      }
+
+      if (colors) {
+        chunkGeometry.setAttribute('color',
+          new THREE.Float32BufferAttribute(colors.slice(startVertex * 3, endVertex * 3), 3));
+      }
+
+      // Copy userData
+      chunkGeometry.userData = { ...geometry.userData };
+
+      geometries.push(chunkGeometry);
+    }
+  }
+
+  console.log(`✅ Split into ${geometries.length} sub-geometries`);
+  return geometries;
+}
+
+/**
+ * Checks if the WebGL context supports 32-bit indices
+ */
+function checkUint32IndexSupport(gl: WebGLRenderingContext | WebGL2RenderingContext): boolean {
+  // WebGL2 always supports 32-bit indices
+  if (gl instanceof WebGL2RenderingContext) {
+    return true;
+  }
+  // WebGL1 requires the OES_element_index_uint extension
+  const ext = gl.getExtension('OES_element_index_uint');
+  return !!ext;
+}// Interface for scene data to be stored in ref
 interface SceneData {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -771,30 +930,33 @@ const ModelPreview = () => {
           vertexCount: geometryDataSets.terrainGeometry.attributes?.position?.count || 0,
           valid: !!geometryDataSets.terrainGeometry.attributes?.position?.count
         });
-        // Create terrain material exactly like live updates do
-        const terrainMaterial = new THREE.MeshLambertMaterial({
-          vertexColors: terrainSettings.color ? false : true,
-          flatShading: true,
-          side: THREE.DoubleSide
+
+        // Split terrain geometry for mobile devices with 16-bit index limitation
+        const terrainGeometries = splitGeometryForMobile(geometryDataSets.terrainGeometry);
+
+        terrainGeometries.forEach((terrainGeo, index) => {
+          // Create terrain material exactly like live updates do
+          const terrainMaterial = new THREE.MeshLambertMaterial({
+            vertexColors: terrainSettings.color ? false : true,
+            flatShading: true,
+            side: THREE.DoubleSide
+          });
+
+          // Set color after material creation (exactly like live updates)
+          if (terrainSettings.color) {
+            const terrainColor = new THREE.Color(terrainSettings.color);
+            terrainMaterial.color = terrainColor.clone();
+          }
+
+          // Apply the material to the terrain mesh
+          const geometryMesh = new THREE.Mesh(terrainGeo, terrainMaterial);
+          geometryMesh.name = terrainGeometries.length > 1 ? `terrain_${index}` : 'terrain';
+          geometryMesh.position.z = 0; // Terrain geometry always at Z=0
+          geometryMesh.castShadow = renderingMode === 'quality';
+          geometryMesh.receiveShadow = renderingMode === 'quality';
+
+          modelGroup.add(geometryMesh);
         });
-
-        // Set color after material creation (exactly like live updates)
-        if (terrainSettings.color) {
-          const terrainColor = new THREE.Color(terrainSettings.color);
-          terrainMaterial.color = terrainColor.clone();
-        }
-
-        // Apply the material to the terrain mesh
-        const geometryMesh = new THREE.Mesh(
-          geometryDataSets.terrainGeometry,
-          terrainMaterial
-        );
-        geometryMesh.name = 'terrain'; // Identify this as terrain mesh
-        geometryMesh.position.z = 0; // Terrain geometry always at Z=0
-        geometryMesh.castShadow = renderingMode === 'quality';
-        geometryMesh.receiveShadow = renderingMode === 'quality';
-
-        modelGroup.add(geometryMesh);
       }
 
       // Process polygon geometries
@@ -818,72 +980,77 @@ const ModelPreview = () => {
                 return; // Skip empty geometries
               }
 
-              // Create color for polygon exactly like live updates do
-              const layerColor = currentLayerConfig?.color || "#81ecec";
-              const baseColor = new THREE.Color(layerColor);
+              // Split for mobile compatibility (in case any individual geometry is large)
+              const splitGeoms = splitGeometryForMobile(individualGeometry);
 
-              // Use simple Lambert material like performance mode - it works perfectly
-              const polygonMaterial = new THREE.MeshLambertMaterial({
-                flatShading: true,
-                side: THREE.DoubleSide
-              });
+              splitGeoms.forEach((splitGeom, splitIndex) => {
+                // Create color for polygon exactly like live updates do
+                const layerColor = currentLayerConfig?.color || "#81ecec";
+                const baseColor = new THREE.Color(layerColor);
 
-              // Set color after material creation (exactly like live updates)
-              polygonMaterial.color = baseColor.clone();
+                // Use simple Lambert material like performance mode - it works perfectly
+                const polygonMaterial = new THREE.MeshLambertMaterial({
+                  flatShading: true,
+                  side: THREE.DoubleSide
+                });
 
-              // Check if this layer has per-vertex terrain alignment
-              const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
+                // Set color after material creation (exactly like live updates)
+                polygonMaterial.color = baseColor.clone();
 
-              // Create mesh
-              const polygonMesh = new THREE.Mesh(individualGeometry, polygonMaterial);
+                // Check if this layer has per-vertex terrain alignment
+                const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
 
-              // Position mesh using the layer's configured zOffset value
-              const layerZOffset = currentLayerConfig?.zOffset || 0;
-              const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
-
-              // Apply height scale factor to the mesh
-              polygonMesh.scale.z = layerHeightScaleFactor;
-
-              if (hasTerrainAlignment) {
-                // Per-vertex terrain alignment: vertices already have correct Z positions
-                // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
-                polygonMesh.position.z = layerZOffset;
-
-                // Debug: log actual vertex Z range to verify alignment
-                if (!individualGeometry.boundingBox) {
-                  individualGeometry.computeBoundingBox();
-                }
-              } else {
-                // Non-terrain-aligned: adjust geometry origin and position at base height
-                let originalBottomZ = 0;
-                if (!individualGeometry.boundingBox) {
-                  individualGeometry.computeBoundingBox();
-                }
-                if (individualGeometry.boundingBox) {
-                  originalBottomZ = individualGeometry.boundingBox.min.z;
-                  // Translate geometry so bottom is at origin (z=0)
-                  individualGeometry.translate(0, 0, -originalBottomZ);
-                }
+                // Create mesh
+                const polygonMesh = new THREE.Mesh(splitGeom, polygonMaterial);
 
                 // Position mesh using the layer's configured zOffset value
-                polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
-              }
-              polygonMesh.castShadow = renderingMode === 'quality';
-              polygonMesh.receiveShadow = renderingMode === 'quality';
-              polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
+                const layerZOffset = currentLayerConfig?.zOffset || 0;
+                const layerHeightScaleFactor = currentLayerConfig?.heightScaleFactor || 1;
 
-              // Control visibility based on current layer enabled state
-              polygonMesh.visible = isCurrentlyEnabled;
+                // Apply height scale factor to the mesh
+                polygonMesh.scale.z = layerHeightScaleFactor;
+
+                if (hasTerrainAlignment) {
+                  // Per-vertex terrain alignment: vertices already have correct Z positions
+                  // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
+                  polygonMesh.position.z = layerZOffset;
+
+                  // Debug: log actual vertex Z range to verify alignment
+                  if (!splitGeom.boundingBox) {
+                    splitGeom.computeBoundingBox();
+                  }
+                } else {
+                  // Non-terrain-aligned: adjust geometry origin and position at base height
+                  let originalBottomZ = 0;
+                  if (!splitGeom.boundingBox) {
+                    splitGeom.computeBoundingBox();
+                  }
+                  if (splitGeom.boundingBox) {
+                    originalBottomZ = splitGeom.boundingBox.min.z;
+                    // Translate geometry so bottom is at origin (z=0)
+                    splitGeom.translate(0, 0, -originalBottomZ);
+                  }
+
+                  // Position mesh using the layer's configured zOffset value
+                  polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
+                }
+                polygonMesh.castShadow = renderingMode === 'quality';
+                polygonMesh.receiveShadow = renderingMode === 'quality';
+                polygonMesh.name = `${vtDataset.sourceLayer}_${index}`;
+
+                // Control visibility based on current layer enabled state
+                polygonMesh.visible = isCurrentlyEnabled;
 
 
-              // Set minimal userData needed for layer identification in live updates
-              polygonMesh.userData = {
-                sourceLayer: vtDataset.sourceLayer,
-                label: vtDataset.label || vtDataset.sourceLayer
-              };
+                // Set minimal userData needed for layer identification in live updates
+                polygonMesh.userData = {
+                  sourceLayer: vtDataset.sourceLayer,
+                  label: vtDataset.label || vtDataset.sourceLayer
+                };
 
-              modelGroup.add(polygonMesh);
-            });
+                modelGroup.add(polygonMesh);
+              }); // End of splitGeoms.forEach
+            }); // End of individualGeometries.forEach
 
             return; // Skip the original processing for container geometries
           }

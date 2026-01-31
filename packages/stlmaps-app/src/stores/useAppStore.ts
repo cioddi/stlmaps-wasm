@@ -121,6 +121,7 @@ interface AppState {
   // Processing state
   isProcessing: boolean;
   processingStatus: string;
+  processingPercentage: number;
 
   // Geometry state
   geometryDataSets: GeometryDataSets;
@@ -169,7 +170,7 @@ interface AppState {
 
   // Processing actions
   setIsProcessing: (processing: boolean) => void;
-  updateProgress: (status: string) => void;
+  updateProgress: (status: string, percentage?: number) => void;
   resetProcessing: () => void;
 
   // Geometry actions
@@ -337,6 +338,7 @@ export const useAppStore = create<AppState>()(
     // Processing state
     isProcessing: false,
     processingStatus: "",
+    processingPercentage: 0,
 
     // Geometry state
     geometryDataSets: {},
@@ -540,13 +542,15 @@ export const useAppStore = create<AppState>()(
 
     // Processing actions
     setIsProcessing: (processing) => set({ isProcessing: processing }),
-    updateProgress: (status) => set({
-      isProcessing: true, // Automatically set processing to true when progress is updated
-      processingStatus: status
-    }),
+    updateProgress: (status, percentage) => set((state) => ({
+      isProcessing: true,
+      processingStatus: status,
+      processingPercentage: percentage !== undefined ? percentage : state.processingPercentage
+    })),
     resetProcessing: () => set({
       isProcessing: false,
-      processingStatus: ""
+      processingStatus: "",
+      processingPercentage: 0
     }),
 
     // Geometry actions

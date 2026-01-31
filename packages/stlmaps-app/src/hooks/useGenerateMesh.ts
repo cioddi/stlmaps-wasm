@@ -480,7 +480,13 @@ class ParallelLayerProcessor {
 // Main Optimized Hook Implementation
 // ================================================================================
 
-export function useGenerateMesh() {
+interface UseGenerateMeshOptions {
+  enableAutoProcessing?: boolean;
+}
+
+export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
+  const { enableAutoProcessing = true } = options;
+
   // ================================================================================
   // State Management
   // ================================================================================
@@ -498,6 +504,17 @@ export function useGenerateMesh() {
   const layerProcessorRef = useRef<ParallelLayerProcessor | null>(null);
   const currentProcessIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Track the last successfully processed config to prevent duplicate processing
+  const lastProcessedConfigRef = useRef<string | null>(null);
+
+  // Get store's updateProgress function early so we can use it in the wrapper
+  const storeUpdateProgress = useAppStore.getState().updateProgress;
+
+  // Wrapper function that updates both local state and store (for shared visibility)
+  const setProgressWithSync = useCallback((progress: ProcessingProgress) => {
+    setProcessingProgress(progress);
+    storeUpdateProgress(progress.message, progress.percentage);
+  }, [storeUpdateProgress]);
 
   // Get WASM-related hooks
   const { isInitialized: isWasmInitialized } = useWasm();
@@ -518,6 +535,10 @@ export function useGenerateMesh() {
     configHashes,
     setConfigHashes,
     setProcessedTerrainData,
+    // Processing state from store (for shared visibility)
+    isProcessing: isProcessingFromStore,
+    processingStatus,
+    processingPercentage,
   } = useAppStore();
 
   // ================================================================================
@@ -679,9 +700,11 @@ export function useGenerateMesh() {
     // Start performance monitoring
     const performanceSessionId = performanceMonitor.startSession(vtLayers.length);
 
-    // Initialize processing state
+    // Initialize processing state (both local and store for shared visibility)
     setIsProcessingMesh(true);
-    setProcessingProgress({
+    setIsProcessing(true);
+    updateProgress('Initializing optimized mesh generation...', 0);
+    setProgressWithSync({
       stage: 'initializing',
       percentage: 0,
       message: 'Initializing optimized mesh generation...'
@@ -724,7 +747,7 @@ export function useGenerateMesh() {
       const layerProcessor = new ParallelLayerProcessor();
       layerProcessorRef.current = layerProcessor;
 
-      setProcessingProgress({
+      setProgressWithSync({
         stage: 'initializing',
         percentage: 2,
         message: 'Fetching vector tile data...'
@@ -751,7 +774,7 @@ export function useGenerateMesh() {
       const terrainResult = await processTerrainOptimized(
         bboxCoords,
         processId,
-        setProcessingProgress
+        setProgressWithSync
       );
       const terrainEndTime = performance.now();
 
@@ -763,7 +786,7 @@ export function useGenerateMesh() {
         throw new Error('Operation was cancelled');
       }
 
-      setProcessingProgress({
+      setProgressWithSync({
         stage: 'initializing',
         percentage: 25,
         message: 'Preparing parallel processing...'
@@ -793,7 +816,7 @@ export function useGenerateMesh() {
         },
         terrainSettings,
         debugSettings,
-        setProcessingProgress
+        setProgressWithSync
       );
 
       // Check for cancellation before finalizing
@@ -801,7 +824,7 @@ export function useGenerateMesh() {
         throw new Error('Operation was cancelled');
       }
 
-      setProcessingProgress({
+      setProgressWithSync({
         stage: 'finalizing',
         percentage: 90,
         message: 'Finalizing optimized mesh generation...'
@@ -817,7 +840,7 @@ export function useGenerateMesh() {
       const parallelTime = Math.max(...layerResults.map(r => r.processingTimeMs));
       const efficiency = sequentialTime > 0 ? Math.min(100, (sequentialTime / parallelTime) * 100) : 0;
 
-      setProcessingProgress({
+      setProgressWithSync({
         stage: 'complete',
         percentage: 100,
         message: 'Optimized mesh generation complete!'
@@ -851,7 +874,7 @@ export function useGenerateMesh() {
 
       const totalTime = Date.now() - startTime;
 
-      setProcessingProgress({
+      setProgressWithSync({
         stage: 'error',
         percentage: 0,
         message: `Error: ${error instanceof Error ? error.message : String(error)}`
@@ -866,8 +889,10 @@ export function useGenerateMesh() {
         error: error instanceof Error ? error : new Error(String(error))
       };
     } finally {
-      // Ensure processing state is always properly reset
+      // Ensure processing state is always properly reset (both local and store)
       setIsProcessingMesh(false);
+      resetProcessing(); // This resets store state including isProcessing: false
+      // Only update local state here - store is handled by resetProcessing
       setProcessingProgress({
         stage: 'initializing',
         percentage: 0,
@@ -989,6 +1014,7 @@ export function useGenerateMesh() {
 
     // Ensure processing state is properly reset
     setIsProcessingMesh(false);
+    resetProcessing(); // Reset store state
     setProcessingProgress({
       stage: 'initializing',
       percentage: 0,
@@ -1015,6 +1041,11 @@ export function useGenerateMesh() {
   const immediateProcessingRef = useRef(false);
 
   useEffect(() => {
+    // Skip auto-processing if disabled (used by ProcessingIndicator to only read state)
+    if (!enableAutoProcessing) {
+      return;
+    }
+
     console.log("useGenerateMeshOptimized dependencies changed:", {
       hasBbox: !!bbox,
       terrainEnabled: terrainSettings?.enabled,
@@ -1064,6 +1095,7 @@ export function useGenerateMesh() {
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [
+    enableAutoProcessing,
     bbox,
     geometryOnlyLayersHash,
     geometryOnlyTerrainHash
@@ -1094,9 +1126,14 @@ export function useGenerateMesh() {
   // ================================================================================
 
   return {
-    // State
-    isProcessingMesh,
-    processingProgress,
+    // State (uses store state for shared visibility)
+    isProcessingMesh: isProcessingMesh || isProcessingFromStore,
+    processingProgress: {
+      ...processingProgress,
+      // Use store percentage if available
+      percentage: processingPercentage || processingProgress.percentage,
+      message: processingStatus || processingProgress.message
+    },
 
     // Actions
     startMeshGeneration,
