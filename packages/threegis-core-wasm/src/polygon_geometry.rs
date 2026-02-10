@@ -1062,59 +1062,18 @@ fn clip_polygon_to_bbox_2d(
         return Vec::new();
     }
 
-    // Simple containment check - if all points are outside the bbox, return empty
-    let bbox_min_x = mesh_bbox_coords[0];
-    let bbox_min_y = mesh_bbox_coords[1];
-    let bbox_max_x = mesh_bbox_coords[2];
-    let bbox_max_y = mesh_bbox_coords[3];
-
-    let mut all_points_outside = true;
-    for point in unique_shape_points {
-        if point.x >= bbox_min_x
-            && point.x <= bbox_max_x
-            && point.y >= bbox_min_y
-            && point.y <= bbox_max_y
-        {
-            all_points_outside = false;
-            break;
-        }
+    // Use robust polygon-bbox intersection check for early rejection
+    let polygon_coords: Vec<Vec<f64>> = unique_shape_points.iter().map(|p| vec![p.x, p.y]).collect();
+    if !crate::bbox_filter::polygon_intersects_bbox(&polygon_coords, mesh_bbox_coords) {
+        return Vec::new();
     }
 
-    if all_points_outside {
-        // Do a more detailed check - see if any edges intersect the bbox
-        let mut has_intersection = false;
-        for i in 0..unique_shape_points.len() {
-            let j = (i + 1) % unique_shape_points.len();
-            let p1 = unique_shape_points[i];
-            let p2 = unique_shape_points[j];
-
-            // Line segment intersects with any of the four bbox edges?
-            if (p1.x < bbox_min_x && p2.x > bbox_min_x)
-                || (p1.x > bbox_min_x && p2.x < bbox_min_x)
-                || (p1.x < bbox_max_x && p2.x > bbox_max_x)
-                || (p1.x > bbox_max_x && p2.x < bbox_max_x)
-                || (p1.y < bbox_min_y && p2.y > bbox_min_y)
-                || (p1.y > bbox_min_y && p2.y < bbox_min_y)
-                || (p1.y < bbox_max_y && p2.y > bbox_max_y)
-                || (p1.y > bbox_max_y && p2.y < bbox_max_y)
-            {
-                has_intersection = true;
-                break;
-            }
-        }
-
-        if !has_intersection {
-            return Vec::new(); // Completely outside
-        }
-    }
-
-    // Since CSG is removed, use simple clipping directly
+    // Ensure counter-clockwise winding for Sutherland-Hodgman
     let mut ccw_points = unique_shape_points.to_vec();
     if is_clockwise(&ccw_points) {
         ccw_points.reverse();
     }
 
-    // Use simple clipping instead of CSG
     return simple_clip_polygon(&ccw_points, mesh_bbox_coords);
 }
 
@@ -1208,10 +1167,8 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
     // Clean up the clipped points and ensure they form a valid polygon
     let cleaned = clean_polygon_footprint(&clipped);
 
-    // If we still don't have enough points, but the original polygon intersects the bbox,
-    // create a minimal representation
-    if cleaned.len() < 3 && clipped.len() > 0 {
-        // Check if the bbox is completely inside the polygon
+    // If clipping yielded fewer than 3 points, check if the bbox is fully inside the polygon
+    if cleaned.len() < 3 {
         let bbox_corners = vec![
             Vector2 { x: min_x, y: min_y },
             Vector2 { x: max_x, y: min_y },
@@ -1219,7 +1176,6 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
             Vector2 { x: min_x, y: max_y },
         ];
 
-        // Use ray casting to check if bbox corners are inside the polygon
         let mut inside_corners = Vec::new();
         for corner in &bbox_corners {
             if is_point_inside_polygon(*corner, points) {
@@ -1228,26 +1184,11 @@ fn simple_clip_polygon(points: &[Vector2], bbox: &[f64; 4]) -> Vec<Vector2> {
         }
 
         if inside_corners.len() >= 3 {
-            // The bbox is (mostly) inside the polygon
             return inside_corners;
         }
 
-        // Fallback: create a minimal triangle if we have any valid points
-        if clipped.len() >= 1 {
-            let mut fallback = clipped.clone();
-
-            // Ensure we have at least 3 points for a valid polygon
-            while fallback.len() < 3 && fallback.len() > 0 {
-                let last_point = fallback[fallback.len() - 1];
-                let epsilon = 0.001;
-                fallback.push(Vector2 {
-                    x: (last_point.x + epsilon).clamp(min_x, max_x),
-                    y: (last_point.y + epsilon).clamp(min_y, max_y),
-                });
-            }
-
-            return clean_polygon_footprint(&fallback);
-        }
+        // If we still can't form a polygon, return empty instead of degenerate geometry
+        return Vec::new();
     }
 
     cleaned
@@ -1263,6 +1204,11 @@ fn compute_intersection(
     let dx = p2.x - p1.x;
     let dy = p2.y - p1.y;
 
+    // Use relaxed t-range with epsilon tolerance to handle floating-point
+    // precision at bbox edges. In Sutherland-Hodgman, when one vertex is inside
+    // and the other outside, the intersection must exist on the segment.
+    let t_eps = 1e-6;
+
     match edge_type {
         0 | 1 => {
             // Left or Right edge (vertical)
@@ -1270,10 +1216,11 @@ fn compute_intersection(
                 return None; // Line is parallel to clip edge
             }
             let t = (clip_value - p1.x) / dx;
-            if t >= 0.0 && t <= 1.0 {
+            if t >= -t_eps && t <= 1.0 + t_eps {
+                let t_clamped = t.clamp(0.0, 1.0);
                 Some(Vector2 {
                     x: clip_value,
-                    y: p1.y + t * dy,
+                    y: p1.y + t_clamped * dy,
                 })
             } else {
                 None
@@ -1285,9 +1232,10 @@ fn compute_intersection(
                 return None; // Line is parallel to clip edge
             }
             let t = (clip_value - p1.y) / dy;
-            if t >= 0.0 && t <= 1.0 {
+            if t >= -t_eps && t <= 1.0 + t_eps {
+                let t_clamped = t.clamp(0.0, 1.0);
                 Some(Vector2 {
-                    x: p1.x + t * dx,
+                    x: p1.x + t_clamped * dx,
                     y: clip_value,
                 })
             } else {
