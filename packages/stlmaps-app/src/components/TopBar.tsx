@@ -20,6 +20,7 @@ import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import CitySearch from "./CitySearch";
 import ExportButtons from "./ExportButtons";
 import ProcessingIndicator from "./ProcessingIndicator";
+import ShareButton from "./ShareButton";
 
 // View mode types
 export type ViewMode = "split" | "map" | "model";
@@ -125,6 +126,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {/* Desktop buttons */}
           {!isMobile && (
             <>
+              <ShareButton color="secondary" />
               <Tooltip title="About">
                 <IconButton
                   color="secondary"

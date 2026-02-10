@@ -4,7 +4,7 @@ import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 
 interface BboxToCenterButtonProps {
   mapId?: string;
-  bboxSelectorRef: React.RefObject<{ updateBbox: () => void }>;
+  bboxSelectorRef: React.RefObject<{ updateBbox: () => void } | null>;
 }
 
 const BboxToCenterButton: React.FC<BboxToCenterButtonProps> = ({ bboxSelectorRef }) => {
@@ -42,9 +42,9 @@ const BboxToCenterButton: React.FC<BboxToCenterButtonProps> = ({ bboxSelectorRef
         style={buttonStyle}
         onClick={handleClick}
         variant="contained"
-        
+
       >
-<CenterFocusStrongIcon />
+        <CenterFocusStrongIcon />
       </Button>
     </Tooltip>
   );

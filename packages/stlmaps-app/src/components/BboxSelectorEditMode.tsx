@@ -30,6 +30,7 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
+    if (!mapHook.map?.map) return;
     mapHook.map.map.setPitch(0);
     const _maxPitch = mapHook.map.map.getMaxPitch();
     mapHook.map.map.setMaxPitch(0);
@@ -37,9 +38,11 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
       initializedRef.current = false;
       maplibreMarkerRef.current?.remove();
       containerRef.current?.remove();
-      mapHook.map?.map.setMaxPitch(_maxPitch);
+      if (_maxPitch !== undefined) {
+        mapHook.map?.map?.setMaxPitch(_maxPitch);
+      }
     };
-  }, []);
+  }, [mapHook.map]);
 
   // Initialize the component when the map is available
   useEffect(() => {
@@ -111,7 +114,7 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
       // Apply dimensions directly (only once)
       targetRef.current.style.width = width + "px";
       targetRef.current.style.height = height + "px";
-      
+
       // Update moveable after dimensions are set
       moveableRef.current?.updateRect();
     }
@@ -197,61 +200,61 @@ const BboxSelectorEditMode: React.FC<BboxSelectorEditModeProps> = ({
           container={null}
           origin={true}
           keepRatio={true}
-        /* draggable */
-        draggable={true}
-        onDragStart={(e) => {
-          // Stop propagation of mouse events to prevent map dragging
-          if (e.inputEvent) {
-            e.inputEvent.stopPropagation();
-            e.inputEvent.preventDefault();
-          }
+          /* draggable */
+          draggable={true}
+          onDragStart={(e) => {
+            // Stop propagation of mouse events to prevent map dragging
+            if (e.inputEvent) {
+              e.inputEvent.stopPropagation();
+              e.inputEvent.preventDefault();
+            }
 
-          // Store initial offset for use during drag
-          if (
-            e.inputEvent instanceof MouseEvent &&
-            targetRef.current &&
-            containerRef.current
-          ) {
-            // Get the current element dimensions and position
-            const targetRect = targetRef.current.getBoundingClientRect();
+            // Store initial offset for use during drag
+            if (
+              e.inputEvent instanceof MouseEvent &&
+              targetRef.current &&
+              containerRef.current
+            ) {
+              // Get the current element dimensions and position
+              const targetRect = targetRef.current.getBoundingClientRect();
 
-            // Store offsets as data attributes on the container
-            containerRef.current.dataset.offsetX = String(
-              e.inputEvent.clientX - targetRect.left - targetRect.width / 2
-            );
-            containerRef.current.dataset.offsetY = String(
-              e.inputEvent.clientY - targetRect.top - targetRect.height / 2
-            );
-          }
-        }}
-        onDrag={(e) => {
-          // Apply transform during drag
-          e.target.style.transform = e.transform;
-        }}
-        onDragEnd={() => {
-          // Important: Do not reset the transform here as we need it for positioning
-          // Let the updateBbox function handle all positioning calculations
-          updateBbox();
-        }}
-        /* scalable */
-        scalable={options.fixedScale ? false : true}
-        onScaleStart={(e) => {
-          // Stop propagation of mouse events to prevent map interactions
-          if (e.inputEvent) {
-            e.inputEvent.stopPropagation();
-            e.inputEvent.preventDefault();
-          }
-        }}
-        onScale={(e) => {
-          e.target.style.transform = e.drag.transform;
-        }}
-        onScaleEnd={() => {
-          updateBbox();
-        }}
-        /* rotatable */
-        rotatable={false}
-        edge={true}
-        controlPadding={20}
+              // Store offsets as data attributes on the container
+              containerRef.current.dataset.offsetX = String(
+                e.inputEvent.clientX - targetRect.left - targetRect.width / 2
+              );
+              containerRef.current.dataset.offsetY = String(
+                e.inputEvent.clientY - targetRect.top - targetRect.height / 2
+              );
+            }
+          }}
+          onDrag={(e) => {
+            // Apply transform during drag
+            e.target.style.transform = e.transform;
+          }}
+          onDragEnd={() => {
+            // Important: Do not reset the transform here as we need it for positioning
+            // Let the updateBbox function handle all positioning calculations
+            updateBbox();
+          }}
+          /* scalable */
+          scalable={options.fixedScale ? false : true}
+          onScaleStart={(e) => {
+            // Stop propagation of mouse events to prevent map interactions
+            if (e.inputEvent) {
+              e.inputEvent.stopPropagation();
+              e.inputEvent.preventDefault();
+            }
+          }}
+          onScale={(e) => {
+            e.target.style.transform = e.drag.transform;
+          }}
+          onScaleEnd={() => {
+            updateBbox();
+          }}
+          /* rotatable */
+          rotatable={false}
+          edge={true}
+          controlPadding={20}
         />
       )}
     </>,

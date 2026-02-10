@@ -160,7 +160,7 @@ function splitGeometryForMobile(geometry: THREE.BufferGeometry): THREE.BufferGeo
     }
   }
 
-  console.log(`✅ Split into ${geometries.length} sub-geometries`);
+  // console.log(`✅ Split into ${geometries.length} sub-geometries`);
   return geometries;
 }
 

@@ -485,6 +485,7 @@ interface UseGenerateMeshOptions {
 }
 
 export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
+  /* useGenerateMesh hook handles auto-generation */
   const { enableAutoProcessing = true } = options;
 
   // ================================================================================
@@ -1046,6 +1047,11 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
       return;
     }
 
+    // Wait for WASM initialization
+    if (!isWasmInitialized) {
+      return;
+    }
+
     console.log("useGenerateMeshOptimized dependencies changed:", {
       hasBbox: !!bbox,
       terrainEnabled: terrainSettings?.enabled,
@@ -1062,7 +1068,6 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
       await cancelMeshGeneration();
 
       if (!bbox) {
-
         immediateProcessingRef.current = false;
         return;
       }
@@ -1075,11 +1080,10 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
       immediateProcessingRef.current = hadActiveProcess;
 
       const timer = setTimeout(async () => {
-
         try {
           await startMeshGeneration();
         } catch (error) {
-
+          console.error("Auto-generation failed:", error);
         } finally {
           // Reset immediate processing flag after starting
           immediateProcessingRef.current = false;
@@ -1098,7 +1102,8 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
     enableAutoProcessing,
     bbox,
     geometryOnlyLayersHash,
-    geometryOnlyTerrainHash
+    geometryOnlyTerrainHash,
+    isWasmInitialized
   ]);
 
   // ================================================================================

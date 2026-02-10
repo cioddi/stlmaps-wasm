@@ -2140,8 +2140,10 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
 
                             // Get height from layer config
                             let height = input.vt_data_set.extrusion_depth.unwrap_or(0.3);
-                            let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
-                            let scaled_height = (height * meters_to_units).clamp(MIN_HEIGHT, MAX_HEIGHT);
+                            // Use FIXED scaling for extrusion to maintain constant visual height regardless of map size
+                            // TERRAIN_SIZE (200.0) / 1000.0 meters = 0.2 units per meter
+                            let fixed_meters_to_units = 0.2; 
+                            let scaled_height = (height * fixed_meters_to_units).clamp(MIN_HEIGHT, MAX_HEIGHT);
 
                             // Create geometry directly from quad strip mesh
                             let mut geometry = create_extruded_shape_from_quad_strip(
@@ -2611,10 +2613,13 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     };
 
                     // Calculate scaling factor from meters to terrain units
-                    let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
+                    // For extrusion height, we use a FIXED scale to ensure constant visual size
+                    // instead of physical size which becomes invisible at large scales
+                    // let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
+                    let fixed_meters_to_units = 0.2; // 200.0 / 1000.0
 
                     // Scale height for extrusion (building heights need scaling)
-                    height *= meters_to_units;
+                    height *= fixed_meters_to_units;
                     
                     // ALWAYS add per-polygon terrain Z difference to height for buildings on slopes
                     // This ensures buildings extend from the lowest terrain point up past the highest
@@ -2679,12 +2684,17 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // Check if this layer uses per-vertex terrain alignment
     let uses_terrain_alignment = input.vt_data_set.align_vertices_to_terrain.unwrap_or(false);
 
-    // IMPORTANT: Skip geometry merging for terrain-aligned layers!
-    // The merge_geometries_by_layer function uses union_via_footprints which re-extrudes
-    // geometries with uniform Z values, destroying the per-vertex terrain alignment.
-    if uses_terrain_alignment {
-        // For terrain-aligned layers, return geometries as-is without merging
-        // Each geometry preserves its per-vertex Z values from terrain alignment
+    // Check if this is the water layer - water should NOT be merged
+    // because disjoint water bodies (Hudson River, East River) can incorrectly
+    // merge into a single rectangle when their tile-clipped edges are unioned
+    let is_water_layer = input.vt_data_set.source_layer == "water";
+
+    // IMPORTANT: Skip geometry merging for terrain-aligned layers and water!
+    // - Terrain-aligned: merge_geometries_by_layer uses union_via_footprints which re-extrudes
+    //   geometries with uniform Z values, destroying the per-vertex terrain alignment.
+    // - Water: union of tile-edge-clipped polygons creates rectangles covering land areas
+    if uses_terrain_alignment || is_water_layer {
+        // Return geometries as-is without merging
         match serde_json::to_string(&all_geometries) {
             Ok(json) => return Ok(json),
             Err(e) => return Err(format!("Failed to serialize output: {}", e)),

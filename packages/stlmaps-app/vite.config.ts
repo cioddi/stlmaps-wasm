@@ -12,6 +12,10 @@ export default defineConfig({
     wasm(),
     topLevelAwait(),
   ],
+  optimizeDeps: {
+    // Exclude local packages from pre-bundling to ensure all exports are available
+    exclude: ['@threegis/core', '@threegis/core-wasm'],
+  },
   build: {
     rollupOptions: {
       output: {

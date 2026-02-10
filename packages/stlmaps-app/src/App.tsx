@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useMemo } from "react";
 import {
   CssBaseline,
   Box,
@@ -7,7 +7,6 @@ import {
   useMediaQuery,
   useTheme,
   Drawer,
-  Paper,
   Typography,
 } from "@mui/material";
 import { useAppStore } from "./stores/useAppStore";
@@ -24,18 +23,21 @@ import ModelSection from "./components/ModelSection";
 import { useWasm } from "@threegis/core";
 import DynamicVectorLayers from "./components/DynamicVectorLayers";
 import { MlOrderLayers } from "@mapcomponents/react-maplibre";
+import { useUrlState } from "./hooks/useUrlState";
 
 const mapCenter: [number, number] = [-74.00599999999997, 40.71279999999999];
 const SIDEBAR_WIDTH = 340;
 
 const App: React.FC = () => {
+  const { isInitialized: urlStateInitialized } = useUrlState();
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const bboxSelectorRef = useRef<{ updateBbox: () => void } | null>(null);
-  
+  const bboxSelectorRef = useRef<{ updateBbox: () => void; setBbox: (geojson: import('geojson').Feature) => void; getBbox: () => import('geojson').Feature | undefined } | null>(null);
+
   // Use the WebAssembly hook
   const { isInitialized, error } = useWasm();
-  
+
   // Get all state from unified Zustand store
   const {
     bboxCenter,
@@ -55,7 +57,7 @@ const App: React.FC = () => {
     openTodoList,
     setOpenTodoList,
   } = useAppStore();
-  
+
   // Close sidebar by default on mobile devices
   useEffect(() => {
     setSidebarOpen(!isMobile);
@@ -67,7 +69,7 @@ const App: React.FC = () => {
       // WASM ready
     }
   }, [isInitialized]);
-  
+
   // Log any WASM initialization errors
   useEffect(() => {
     if (error) {
@@ -80,11 +82,11 @@ const App: React.FC = () => {
   const handleCitySelect = (city: { coordinates: [number, number] } | null) => {
     if (city) {
       // City selected
-      
+
       // Clear any existing bbox first to ensure React detects the change
       setBbox(null);
       setBboxCenter(city.coordinates);
-      
+
       // Wait for map animation to complete, then update bbox
       setTimeout(() => {
         if (bboxSelectorRef.current) {
@@ -101,9 +103,36 @@ const App: React.FC = () => {
       }, 500);
     }
   };
-  
+
+
+  // Calculate initial bounds if bbox exists on load - ONLY ONCE
+  const [initialBounds, setInitialBounds] = React.useState<[number, number, number, number] | undefined>(undefined);
+  const initialBoundsSet = useRef(false);
+
+  useEffect(() => {
+    // Only calculate if URL state is initialized, we have a polygon bbox, and haven't set it yet
+    if (urlStateInitialized && bbox && bbox.geometry.type === 'Polygon' && !initialBoundsSet.current) {
+      const coords = bbox.geometry.coordinates[0];
+      if (coords && coords.length > 0) {
+        let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+        coords.forEach(([lng, lat]) => {
+          minLng = Math.min(minLng, lng);
+          minLat = Math.min(minLat, lat);
+          maxLng = Math.max(maxLng, lng);
+          maxLat = Math.max(maxLat, lat);
+        });
+
+        // Return bounds in [minLng, minLat, maxLng, maxLat] format
+        if (isFinite(minLng) && isFinite(minLat) && isFinite(maxLng) && isFinite(maxLat)) {
+          setInitialBounds([minLng, minLat, maxLng, maxLat]);
+          initialBoundsSet.current = true;
+        }
+      }
+    }
+  }, [urlStateInitialized, bbox]);
+
   const handleViewModeChange = (
-    event: React.MouseEvent<HTMLElement>,
+    _event: React.MouseEvent<HTMLElement>,
     newMode: ViewMode | null,
   ) => {
     if (newMode !== null) {
@@ -118,11 +147,19 @@ const App: React.FC = () => {
   const modelDisplay = viewMode === "map" ? "none" : "flex";
   const showDivider = viewMode === "split";
 
+  if (!urlStateInitialized) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Typography>Loading configuration...</Typography>
+      </Box>
+    );
+  }
+
   return (<>
-    <MlOrderLayers layerIds={['controls-order-layer','data-order-layer']} />
+    <MlOrderLayers layerIds={['controls-order-layer', 'data-order-layer']} />
     <Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <CssBaseline />
-      <TopBar 
+      <TopBar
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
         onOpenAttribution={() => setOpenAttribution(true)}
@@ -158,7 +195,7 @@ const App: React.FC = () => {
         }}
       >
         <Toolbar /> {/* Spacing below AppBar */}
-        <Sidebar bboxCenter={bboxCenter} />
+        <Sidebar />
       </Drawer>
 
       {/* Main Content */}
@@ -175,11 +212,12 @@ const App: React.FC = () => {
       >
         <Toolbar /> {/* Spacing below AppBar */}
         {/* Map - Top Half */}
-        <MapSection 
-          mapCenter={mapCenter}
+        <MapSection
+          mapCenter={bboxCenter || mapCenter}
           flex={mapFlex}
           display={mapDisplay}
           bboxSelectorRef={bboxSelectorRef}
+          initialBounds={initialBounds}
         />
         <DynamicVectorLayers />
         {showDivider && <Divider />}
@@ -207,6 +245,7 @@ const App: React.FC = () => {
     <GenerateMeshButton />
     <BboxSelector
       ref={bboxSelectorRef}
+      initialGeojson={bbox}
       options={{
         scale: [1, 1],
         rotate: 0,
@@ -216,27 +255,27 @@ const App: React.FC = () => {
       onChange={(geojson) => {
         // BboxSelector onChange triggered
         // New bbox geojson received
-        
+
         // Validate bbox geometry before setting
-        if (geojson && geojson.geometry && geojson.geometry.coordinates) {
+        if (geojson && geojson.geometry && geojson.geometry.type === 'Polygon') {
           const coords = geojson.geometry.coordinates[0];
           if (coords && coords.length >= 5) {
             const [topLeftLng, topLeftLat] = coords[0];
             const [topRightLng, topRightLat] = coords[1];
             const [bottomRightLng, bottomRightLat] = coords[2];
             const [bottomLeftLng, bottomLeftLat] = coords[3];
-            
+
             // Bbox bounds calculated
-            
+
             // Check for invalid coordinates
             const allCoords = [topLeftLng, topLeftLat, topRightLng, topRightLat, bottomRightLng, bottomRightLat, bottomLeftLng, bottomLeftLat];
             const hasInvalidCoords = allCoords.some(coord => !Number.isFinite(coord));
-            
+
             if (hasInvalidCoords) {
               // Invalid bbox coordinates detected
               return;
             }
-            
+
             setBbox(geojson);
             // Bbox updated successfully
           } else {

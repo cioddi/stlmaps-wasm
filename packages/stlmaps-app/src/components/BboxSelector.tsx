@@ -40,6 +40,11 @@ type Props = {
       | BboxSelectorOptions
   ) => void;
   onChange?: (geojson: Feature) => void;
+  /**
+   * Initial GeoJSON Feature to use for the bbox (e.g., from URL config).
+   * If provided, this will be used instead of creating a bbox from the map viewport.
+   */
+  initialGeojson?: Feature | null;
 };
 
 /**
@@ -51,27 +56,50 @@ const BboxSelector = forwardRef((props: Props, ref) => {
   });
   const [mode, setMode] = useState<"view" | "edit">("view");
   const modeRef = useRef<"view" | "edit">("view");
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
-    null
-  );
   const [bbox, setBbox] = useState<Feature | undefined>(undefined);
+  // Track whether the last bbox update was from internal editing (vs external prop)
+  const isInternalUpdateRef = useRef(false);
+  // Track the last prop geometry string to detect external changes
+  const lastPropGeometryRef = useRef<string | null>(null);
 
-  function onChangeDebounced(bbox: Feature, debounceMs = 1000) {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    const timer = setTimeout(() => {
-      props.onChange?.(bbox);
-    }, debounceMs);
-    setDebounceTimer(timer);
-  }
-
+  // Call onChange immediately when bbox changes from internal edits (drag/resize)
+  // This ensures the store is updated before any viewport changes can occur
   useEffect(() => {
-    if (bbox) {
-      onChangeDebounced(bbox);
+    if (bbox && isInternalUpdateRef.current) {
+      props.onChange?.(bbox);
+      isInternalUpdateRef.current = false; // Reset after notifying
     }
   }, [bbox]);
 
+  // Sync internal state with external prop (e.g. from shift buttons)
+  // Only update if the prop geometry actually changed from what we last saw
+  useEffect(() => {
+    if (props.initialGeojson) {
+      const propGeometryStr = JSON.stringify(props.initialGeojson.geometry);
+
+      // Only sync if this is a genuinely new external change
+      if (propGeometryStr !== lastPropGeometryRef.current) {
+        lastPropGeometryRef.current = propGeometryStr;
+
+        // Check if different from current bbox
+        const currentGeometryStr = bbox ? JSON.stringify(bbox.geometry) : null;
+        if (propGeometryStr !== currentGeometryStr) {
+          // This is an external update, don't trigger onChange
+          isInternalUpdateRef.current = false;
+          setBbox(props.initialGeojson);
+        }
+      }
+    }
+  }, [props.initialGeojson]);
+
   useEffect(() => {
     if (!mapHook.map || bbox) return;
+
+    // If initialGeojson is provided, use it instead of creating a new bbox
+    if (props.initialGeojson) {
+      setBbox(props.initialGeojson);
+      return;
+    }
 
     mapHook.map.map.dragRotate.disable();
     mapHook.map.map.touchZoomRotate.disableRotation();
@@ -131,31 +159,31 @@ const BboxSelector = forwardRef((props: Props, ref) => {
       },
     } as Feature;
     setBbox(_geoJson);
-  }, [mapHook.map]);
+  }, [mapHook.map, props.initialGeojson]);
 
   const handleBboxClick = (e?: any) => {
     // Ensure we're in view mode before switching
     if (modeRef.current !== "view") {
-      
+
       return;
     }
-    
-    
-    
+
+
+
     // Prevent event bubbling to avoid map interactions
     if (e && e.originalEvent) {
       e.originalEvent.stopPropagation();
       e.originalEvent.preventDefault();
     }
-    
+
     // Immediately update mode to prevent double-clicks
     modeRef.current = "edit";
     setMode("edit");
-    
+
     // Set up exit conditions immediately but with proper guards
     if (mapHook.map) {
       const exitToView = () => {
-        
+
         if (modeRef.current === "edit") {
           modeRef.current = "view";
           setMode("view");
@@ -166,7 +194,7 @@ const BboxSelector = forwardRef((props: Props, ref) => {
       Promise.resolve().then(() => {
         if (modeRef.current === "edit" && mapHook.map) {
           mapHook.map.map.once("dragstart", exitToView);
-          mapHook.map.map.once("rotatestart", exitToView);  
+          mapHook.map.map.once("rotatestart", exitToView);
           mapHook.map.map.once("zoomstart", exitToView);
         }
       });
@@ -174,6 +202,7 @@ const BboxSelector = forwardRef((props: Props, ref) => {
   };
 
   const handleBboxUpdate = (updatedBbox: Feature) => {
+    isInternalUpdateRef.current = true; // Mark as internal edit
     setBbox(updatedBbox);
   };
 
@@ -221,6 +250,12 @@ const BboxSelector = forwardRef((props: Props, ref) => {
 
   // Expose methods through ref
   useImperativeHandle(ref, () => ({
+    // Set bbox to a specific GeoJSON Feature (used for loading from URL config)
+    setBbox: (geojson: Feature) => {
+      setBbox(geojson);
+    },
+    // Get the current bbox
+    getBbox: () => bbox,
     updateBbox: () => {
       // Create a new bbox based on the current map center
       if (!mapHook.map) return;
@@ -280,7 +315,8 @@ const BboxSelector = forwardRef((props: Props, ref) => {
         },
       } as Feature;
 
-      // Update the bbox state
+      // Update the bbox state (mark as internal so onChange fires)
+      isInternalUpdateRef.current = true;
       setBbox(updatedGeoJson);
     },
   }));
