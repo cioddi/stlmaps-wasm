@@ -158,6 +158,8 @@ const BboxSelector = forwardRef((props: Props, ref) => {
         description: "click to edit",
       },
     } as Feature;
+    // Mark as internal so onChange fires and the store receives the initial bbox
+    isInternalUpdateRef.current = true;
     setBbox(_geoJson);
   }, [mapHook.map, props.initialGeojson]);
 

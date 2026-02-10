@@ -78,7 +78,7 @@ const BboxShiftButtons: React.FC = () => {
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2, mb: 1 }}>
             <Typography variant="caption" sx={{ mb: 1, color: 'text.secondary' }}>
-                Result Selection Navigation
+                Bbox shift navigation
             </Typography>
 
             {/* Grid Layout for D-Pad feel */}

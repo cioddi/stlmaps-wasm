@@ -2613,13 +2613,10 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     };
 
                     // Calculate scaling factor from meters to terrain units
-                    // For extrusion height, we use a FIXED scale to ensure constant visual size
-                    // instead of physical size which becomes invisible at large scales
-                    // let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
-                    let fixed_meters_to_units = 0.2; // 200.0 / 1000.0
+                    let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
 
                     // Scale height for extrusion (building heights need scaling)
-                    height *= fixed_meters_to_units;
+                    height *= meters_to_units;
                     
                     // ALWAYS add per-polygon terrain Z difference to height for buildings on slopes
                     // This ensures buildings extend from the lowest terrain point up past the highest
