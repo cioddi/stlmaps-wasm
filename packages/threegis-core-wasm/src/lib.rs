@@ -710,10 +710,7 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
 
         result_array.set(i as u32, obj.into());
     }
-    let typed_time = js_sys::Date::now() - typed_start;
-    let total_time = js_sys::Date::now() - wrapper_start;
-    web_sys::console::log_1(&format!("⏱️ [wrapper] typed_array_build: {:.0}ms, total_wrapper: {:.0}ms", 
-        typed_time, total_time).into());
+    // Logging removed to fix compilation error (undefined start times)
 
     Ok(result_array.into())
 }

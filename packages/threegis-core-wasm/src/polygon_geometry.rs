@@ -1985,7 +1985,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         }
     }
 
-    let _total_polygons = input.polygons.len();
+    let total_polygons = input.polygons.len();
     let use_same_z_offset = input.use_same_z_offset;
 
     // Implement chunked processing to prevent timeouts on large datasets

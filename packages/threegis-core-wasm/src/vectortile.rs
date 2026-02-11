@@ -1122,32 +1122,29 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
                 .into_iter()
                 .filter(|geom| {
-                    let (
-                        effective_min_lng,
-                        effective_max_lng,
-                        effective_min_lat,
-                        effective_max_lat,
-                    ) = if geom.r#type.as_ref().map_or(false, |t| t == "LineString") {
-                        // Use buffered bbox for LineStrings (roads)
-                        (
+                    // Determine effective bbox based on geometry type
+                    // LineStrings get a buffer to handle thickness/continuity
+                    let is_line = geom.r#type.as_ref().map_or(false, |t| t == "LineString");
+                    let bbox_buffer = 0.001; // ~100m buffer
+
+                    let check_bbox = if is_line {
+                        [
                             min_lng - bbox_buffer,
-                            max_lng + bbox_buffer,
                             min_lat - bbox_buffer,
+                            max_lng + bbox_buffer,
                             max_lat + bbox_buffer,
-                        )
+                        ]
                     } else {
-                        // Use strict bbox for Polygons (buildings)
-                        (min_lng, max_lng, min_lat, max_lat)
+                        [min_lng, min_lat, max_lng, max_lat]
                     };
 
-                    geom.geometry.iter().any(|coord| {
-                        let lon = coord[0];
-                        let lat = coord[1];
-                        lon >= effective_min_lng
-                            && lon <= effective_max_lng
-                            && lat >= effective_min_lat
-                            && lat <= effective_max_lat
-                    })
+                    // Use robust intersection check for both Polygons and LineStrings
+                    // This correctly handles:
+                    // 1. Points inside bbox
+                    // 2. Edges crossing bbox
+                    // 3. Polygon completely containing bbox (no points inside)
+                    // 4. Bbox completely containing polygon
+                    crate::bbox_filter::polygon_intersects_bbox(&geom.geometry, &check_bbox)
                 })
                 .collect();
 
