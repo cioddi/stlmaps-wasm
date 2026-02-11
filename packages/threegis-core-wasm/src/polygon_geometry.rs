@@ -1929,9 +1929,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
     };
 
-    // Early exit for very large datasets - implement chunked processing
-    let total_polygons = input.polygons.len();
-    // Skip logging to improve performance for large datasets
     // Compute dataset terrain extremes by sampling the elevation grid
     const SAMPLE_COUNT: usize = 10;
     let mut dataset_lowest_z = f64::INFINITY;
@@ -1998,7 +1995,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // Process polygons in chunks to prevent timeouts
 
     for (chunk_index, chunk) in input.polygons.chunks(MAX_CHUNK_SIZE).enumerate() {
-        // Remove per-chunk logging to improve performance
+        let chunk_perf_start = js_sys::Date::now();
 
         let chunk_start = chunk_index * MAX_CHUNK_SIZE;
         let geometries_result: Result<Vec<_>, String> = chunk
@@ -2616,6 +2613,10 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         let chunk_valid_geometries: Vec<BufferGeometry> =
             chunk_geometries.into_iter().filter_map(|opt| opt).collect();
 
+        let chunk_time = js_sys::Date::now() - chunk_perf_start;
+        web_sys::console::log_1(&format!("⏱️ [{}] Chunk {}/{}: {:.0}ms, {} valid geometries", 
+            input.vt_data_set.source_layer, chunk_index + 1, chunk_count, chunk_time, chunk_valid_geometries.len()).into());
+
         // Add chunk geometries to the overall collection
         all_geometries.extend(chunk_valid_geometries);
     }
@@ -2633,12 +2634,15 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // because disjoint water bodies (Hudson River, East River) can incorrectly
     // merge into a single rectangle when their tile-clipped edges are unioned
     let is_water_layer = input.vt_data_set.source_layer == "water";
+    // Building layer should also skip expensive CSG merge (O(N^2))
+    let is_building_layer = input.vt_data_set.source_layer == "building";
 
-    // IMPORTANT: Skip geometry merging for terrain-aligned layers and water!
+    // IMPORTANT: Skip geometry merging for terrain-aligned layers, water, and buildings!
     // - Terrain-aligned: merge_geometries_by_layer uses union_via_footprints which re-extrudes
     //   geometries with uniform Z values, destroying the per-vertex terrain alignment.
     // - Water: union of tile-edge-clipped polygons creates rectangles covering land areas
-    if uses_terrain_alignment || is_water_layer {
+    // - Buildings: CSG merge is extremely expensive (O(N^2)) for dense urban areas causing stalls
+    if uses_terrain_alignment || is_water_layer || is_building_layer {
         // Return geometries as-is without merging
         match serde_json::to_string(&all_geometries) {
             Ok(json) => return Ok(json),

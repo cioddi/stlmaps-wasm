@@ -126,11 +126,16 @@ class ParallelLayerProcessor {
     });
 
     try {
-      // Check if any layers require terrain alignment (must be sequential)
+      // Check if any layers require terrain alignment
       const hasTerrainAlignment = layers.some(layer => layer.alignVerticesToTerrain);
 
       if (hasTerrainAlignment) {
-        // Sequential processing due to terrain alignment
+        // Sequential processing when terrain alignment is active.
+        // Each worker independently calls fetch_vector_tiles, which makes
+        // HTTP requests to the tile server. With parallel processing, all
+        // workers fire simultaneously, creating massive HTTP connection
+        // contention (browser limits ~6 connections per domain). Sequential
+        // processing avoids this by processing one layer at a time.
         return await this.processLayersSequentially(
           layers,
           bboxCoords,
@@ -142,7 +147,7 @@ class ParallelLayerProcessor {
           abortControllers
         );
       } else {
-        // Parallel processing enabled
+        // Parallel processing when no terrain alignment needed
         return await this.processLayersParallel(
           layers,
           bboxCoords,
@@ -194,6 +199,7 @@ class ParallelLayerProcessor {
           zOffset: layer.zOffset ?? null,
           alignVerticesToTerrain: layer.alignVerticesToTerrain ?? null,
           applyMedianHeight: layer.applyMedianHeight ?? null,
+          addTerrainDifferenceToHeight: layer.addTerrainDifferenceToHeight ?? null,
           csgClipping: layer.useCsgClipping ?? null,
           filter: layer.filter ?? null,
           geometryDebugMode: useDebugMode
@@ -335,6 +341,11 @@ class ParallelLayerProcessor {
     abortControllers: Map<string, AbortController>
   ): Promise<LayerProcessingResult[]> {
     const results: LayerProcessingResult[] = [];
+
+    // Sequential layers naturally reuse the same worker context since
+    // each layer awaits completion before the next starts. This means
+    // fetch_vector_tiles is called once (first layer) and subsequent
+    // layers find the cached tiles in that WASM instance.
 
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
@@ -751,18 +762,18 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
       setProgressWithSync({
         stage: 'initializing',
         percentage: 2,
-        message: 'Fetching vector tile data...'
+        message: 'Preparing processing...'
       });
 
-      // Fetch VT data (shared resource)
-      // Calculate optimal zoom level where max 9 tiles cover the bbox
-      const zoomLevel = calculateOptimalZoomLevel(...bboxCoords);
-      console.log(`🗺️ Using zoom level ${zoomLevel} for vector tiles (max 9 tiles)`);
+      // Pre-fetch vector tiles on the main thread to warm the browser HTTP cache.
+      // Workers will independently fetch tiles in their own WASM instances, but
+      // the responses will already be in the browser cache from this call.
+      const optimalZoom = calculateOptimalZoomLevel(...bboxCoords);
       await fetchVtData({
         bbox: bboxCoords,
-        zoom: zoomLevel,
+        zoom: optimalZoom,
         gridSize: { width: 256, height: 256 },
-        bboxKey: processId,
+        bboxKey: processId
       });
 
       // Check for cancellation
@@ -1041,6 +1052,14 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
   // Track if we should use immediate processing (when interrupting an active process)
   const immediateProcessingRef = useRef(false);
 
+  // Use refs to avoid stale closures in the auto-processing effect.
+  // These callbacks change when their dependencies change, but the effect
+  // shouldn't re-run just because a callback ref changed.
+  const startMeshGenerationRef = useRef(startMeshGeneration);
+  startMeshGenerationRef.current = startMeshGeneration;
+  const cancelMeshGenerationRef = useRef(cancelMeshGeneration);
+  cancelMeshGenerationRef.current = cancelMeshGeneration;
+
   useEffect(() => {
     // Skip auto-processing if disabled (used by ProcessingIndicator to only read state)
     if (!enableAutoProcessing) {
@@ -1065,7 +1084,7 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
     // Handle async cancellation
     const handleBboxChange = async () => {
       // Cancel any existing operation and clear timers
-      await cancelMeshGeneration();
+      await cancelMeshGenerationRef.current();
 
       if (!bbox) {
         immediateProcessingRef.current = false;
@@ -1074,14 +1093,14 @@ export function useGenerateMesh(options: UseGenerateMeshOptions = {}) {
 
       // If there was an active process, use immediate processing for responsive UX
       // Otherwise use normal debouncing for initial changes
-      const delay = hadActiveProcess ? 200 : 1000; // Increased immediate delay for better reliability
+      const delay = hadActiveProcess ? 200 : 1000;
 
       // Set flag for next iteration (only if we had an active process)
       immediateProcessingRef.current = hadActiveProcess;
 
       const timer = setTimeout(async () => {
         try {
-          await startMeshGeneration();
+          await startMeshGenerationRef.current();
         } catch (error) {
           console.error("Auto-generation failed:", error);
         } finally {

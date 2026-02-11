@@ -654,9 +654,9 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
       data: { message: `Processing ${layerConfig.sourceLayer} geometry...` }
     } as WorkerResponse);
 
-    // Process geometry in WASM
+    // Process geometry in WASM — returns a JsValue object directly (no JSON string)
     const serializedInput = JSON.stringify(polygonGeometryInput);
-    const geometryJson = await wasmModule.process_polygon_geometry(serializedInput);
+    const geometryResult = await wasmModule.process_polygon_geometry(serializedInput);
 
     if (cancelFlag) {
       throw new Error('Task was cancelled');
@@ -666,16 +666,13 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
       id: currentTaskId,
       type: 'progress',
       progress: 80,
-      data: { message: `Parsing geometry data for ${layerConfig.sourceLayer}...` }
+      data: { message: `Processing geometry data for ${layerConfig.sourceLayer}...` }
     } as WorkerResponse);
 
-    // Step 3: Parse geometry JSON in worker (avoid main thread blocking)
-    let geometryDataArray;
-    try {
-      geometryDataArray = JSON.parse(geometryJson);
-    } catch (parseError) {
-      throw new Error(`Failed to parse geometry JSON: ${parseError}`);
-    }
+    // WASM now returns a JsValue directly via serde_wasm_bindgen,
+    // so no JSON.parse() needed. This avoids the massive bottleneck
+    // of parsing millions of float numbers from JSON text.
+    const geometryDataArray = Array.isArray(geometryResult) ? geometryResult : [geometryResult];
 
     if (cancelFlag) {
       throw new Error('Task was cancelled');
@@ -693,6 +690,7 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
     const totalGeometries = geometryDataArray.length;
 
     for (let i = 0; i < geometryDataArray.length; i++) {
+
       if (cancelFlag) {
         throw new Error('Task was cancelled');
       }
@@ -702,34 +700,44 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
       if (!geometryData.hasData || !geometryData.vertices || geometryData.vertices.length === 0) {
         processedGeometries.push({
           hasData: false,
-          vertices: [],
-          indices: [],
-          normals: [],
-          colors: [],
+          vertices: new Float32Array(0),
+          indices: null,
+          normals: null,
+          colors: null,
           properties: geometryData.properties || {}
         });
         continue;
       }
 
-      // Convert to TypedArrays for optimal transfer
-      const vertices = new Float32Array(geometryData.vertices);
+      // WASM now returns TypedArrays directly (Float32Array, Uint32Array),
+      // so we can use them as-is without conversion. For safety, ensure they
+      // are the expected type (they should be from the Rust TypedArray creation).
+      const vertices = geometryData.vertices instanceof Float32Array
+        ? geometryData.vertices
+        : new Float32Array(geometryData.vertices);
 
       let indices: Uint32Array | null = null;
       if (geometryData.indices && geometryData.indices.length > 0) {
-        indices = new Uint32Array(geometryData.indices);
+        indices = geometryData.indices instanceof Uint32Array
+          ? geometryData.indices
+          : new Uint32Array(geometryData.indices);
       }
 
       let normals: Float32Array | null = null;
       let needsNormals = false;
       if (geometryData.normals && geometryData.normals.length > 0) {
-        normals = new Float32Array(geometryData.normals);
+        normals = geometryData.normals instanceof Float32Array
+          ? geometryData.normals
+          : new Float32Array(geometryData.normals);
       } else {
         needsNormals = true;
       }
 
       let colors: Float32Array | null = null;
       if (geometryData.colors && geometryData.colors.length > 0) {
-        colors = new Float32Array(geometryData.colors);
+        colors = geometryData.colors instanceof Float32Array
+          ? geometryData.colors
+          : new Float32Array(geometryData.colors);
       }
 
       processedGeometries.push({
@@ -741,11 +749,6 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
         needsNormals,
         properties: geometryData.properties || {}
       });
-
-      // Yield control periodically to prevent blocking
-      if (i % 10 === 0) {
-        await new Promise(resolve => setTimeout(resolve, 0));
-      }
     }
 
     postMessage({
@@ -766,6 +769,27 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
 
     throw error;
   }
+}
+
+// ================================================================================
+// Transferable Object Collection
+// ================================================================================
+
+/**
+ * Collect all ArrayBuffer references from processed geometries for zero-copy
+ * transfer via postMessage. This avoids expensive copying of large TypedArrays.
+ */
+function collectTransferables(result: any): ArrayBuffer[] {
+  const buffers = new Set<ArrayBuffer>();
+  if (result?.geometries) {
+    for (const geom of result.geometries) {
+      if (geom.vertices?.buffer) buffers.add(geom.vertices.buffer);
+      if (geom.indices?.buffer) buffers.add(geom.indices.buffer);
+      if (geom.normals?.buffer) buffers.add(geom.normals.buffer);
+      if (geom.colors?.buffer) buffers.add(geom.colors.buffer);
+    }
+  }
+  return Array.from(buffers);
 }
 
 // ================================================================================
@@ -792,11 +816,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         const result = await processLayerInWorker(data);
 
+        // Use transferable objects to avoid copying large TypedArrays
+        const transferables = collectTransferables(result);
         postMessage({
           id,
           type: 'result',
           data: result
-        } as WorkerResponse);
+        } as WorkerResponse, { transfer: transferables });
 
         currentTaskId = null;
         break;

@@ -89,8 +89,23 @@ pub async fn create_terrain_geometry(params_js: JsValue) -> Result<JsValue, JsVa
                             Err(_e) => {
                                 if attempt < max_retries {
                                     // Exponential backoff: wait 500ms * 2^(attempt-1)
-                                    let _delay_ms = 500 * (1 << (attempt - 1));
-                                    // Simple delay - just log the delay for now
+                                    let delay_ms = 500 * (1 << (attempt - 1));
+                                    // Create a promise that resolves after delay via setTimeout.
+                                    // Works in both Window and Worker contexts.
+                                    let promise = js_sys::Promise::new(&mut |resolve, _| {
+                                        let global = js_sys::global();
+                                        let set_timeout = js_sys::Reflect::get(
+                                            &global,
+                                            &wasm_bindgen::JsValue::from_str("setTimeout"),
+                                        ).unwrap();
+                                        let set_timeout_fn: js_sys::Function = set_timeout.into();
+                                        let _ = set_timeout_fn.call2(
+                                            &global,
+                                            &resolve,
+                                            &wasm_bindgen::JsValue::from_f64(delay_ms as f64),
+                                        );
+                                    });
+                                    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
                                 }
                             }
                         }

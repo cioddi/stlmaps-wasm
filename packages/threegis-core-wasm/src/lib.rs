@@ -3,7 +3,7 @@ use crate::cache_keys::make_inner_key_from_filter;
 // use geo::Buffer;
 // use geo::prelude::*;
 use cavalier_contours::polyline::{Polyline, PlineSource, PlineSourceMut, PlineVertex};
-use js_sys::Date;
+use js_sys::{Date, Float32Array};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
@@ -649,8 +649,72 @@ pub fn process_polygon_geometry(input_json: &str) -> Result<JsValue, JsValue> {
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize input: {}", e)))?;
 
     // Call create_polygon_geometry with cached features applied
-    match polygon_geometry::create_polygon_geometry(&new_input) {
-        Ok(json_string) => Ok(JsValue::from_str(&json_string)),
-        Err(err_string) => Err(JsValue::from_str(&err_string)),
+    let json_string = polygon_geometry::create_polygon_geometry(&new_input)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    // Parse the JSON output back to Vec<BufferGeometry> in Rust (fast)
+    let geometries: Vec<polygon_geometry::BufferGeometry> = serde_json::from_str(&json_string)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse geometry output: {}", e)))?;
+
+    // Build the JS result using TypedArrays directly
+    let result_array = js_sys::Array::new_with_length(geometries.len() as u32);
+
+
+    for (i, geom) in geometries.iter().enumerate() {
+        let obj = js_sys::Object::new();
+
+        // vertices → Float32Array (zero-copy view into WASM memory)
+        let vertices = Float32Array::from(geom.vertices.as_slice());
+        js_sys::Reflect::set(&obj, &"vertices".into(), &vertices).unwrap();
+
+        // normals → Float32Array or null
+        if let Some(ref normals) = geom.normals {
+            let normals_arr = Float32Array::from(normals.as_slice());
+            js_sys::Reflect::set(&obj, &"normals".into(), &normals_arr).unwrap();
+        } else {
+            js_sys::Reflect::set(&obj, &"normals".into(), &JsValue::null()).unwrap();
+        }
+
+        // colors → Float32Array or null
+        if let Some(ref colors) = geom.colors {
+            let colors_arr = Float32Array::from(colors.as_slice());
+            js_sys::Reflect::set(&obj, &"colors".into(), &colors_arr).unwrap();
+        } else {
+            js_sys::Reflect::set(&obj, &"colors".into(), &JsValue::null()).unwrap();
+        }
+
+        // indices → Uint32Array or null
+        if let Some(ref indices) = geom.indices {
+            let indices_arr = js_sys::Uint32Array::from(indices.as_slice());
+            js_sys::Reflect::set(&obj, &"indices".into(), &indices_arr).unwrap();
+        } else {
+            js_sys::Reflect::set(&obj, &"indices".into(), &JsValue::null()).unwrap();
+        }
+
+        // hasData → boolean
+        js_sys::Reflect::set(&obj, &"hasData".into(), &JsValue::from_bool(geom.has_data)).unwrap();
+
+        // properties → object (use serde_wasm_bindgen for the small properties map)
+        if let Some(ref props) = geom.properties {
+            match serde_wasm_bindgen::to_value(props) {
+                Ok(props_js) => {
+                    js_sys::Reflect::set(&obj, &"properties".into(), &props_js).unwrap();
+                }
+                Err(_) => {
+                    js_sys::Reflect::set(&obj, &"properties".into(), &JsValue::null()).unwrap();
+                }
+            }
+        } else {
+            js_sys::Reflect::set(&obj, &"properties".into(), &JsValue::null()).unwrap();
+        }
+
+        result_array.set(i as u32, obj.into());
     }
+    let typed_time = js_sys::Date::now() - typed_start;
+    let total_time = js_sys::Date::now() - wrapper_start;
+    web_sys::console::log_1(&format!("⏱️ [wrapper] typed_array_build: {:.0}ms, total_wrapper: {:.0}ms", 
+        typed_time, total_time).into());
+
+    Ok(result_array.into())
 }
+
