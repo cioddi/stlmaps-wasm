@@ -41,7 +41,14 @@ pub fn merge_geometries_by_layer(
 
     let mut results = HashMap::new();
     for (layer_key, group) in grouped.into_iter() {
-        let merged = merge_geometry_group(group);
+        // Optimization: For buildings, use a lighter Z-alignment strategy
+        // This avoids expensive boolean ops but still levels the buildings visually
+        let merged = if layer_key.contains("building") {
+            merge_geometry_group_z_align_only(group)
+        } else {
+            merge_geometry_group(group)
+        };
+        
         if merged.has_data {
             results.insert(layer_key, merged);
         }
@@ -50,279 +57,100 @@ pub fn merge_geometries_by_layer(
     results
 }
 
-#[cfg(target_arch = "wasm32")]
-fn union_via_footprints(geometries: &[BufferGeometry]) -> Option<BufferGeometry> {
-    let mut groups: HashMap<(i64, i64), FootprintGroup> = HashMap::new();
-
-    for geometry in geometries {
-        if let Some((footprint, min_z, max_z)) = geometry_footprint(geometry) {
-            let depth = max_z - min_z;
-            if depth <= NORMAL_EPS as f64 {
-                continue;
-            }
-
-            let key = (quantize_value(min_z, 1e-3), quantize_value(depth, 1e-3));
-
-            groups
-                .entry(key)
-                .and_modify(|group| {
-                    group.footprint = union_multipolygon(&group.footprint, &footprint);
-                    group.min_z = group.min_z.min(min_z);
-                    group.max_z = group.max_z.max(max_z);
-                })
-                .or_insert(FootprintGroup {
-                    footprint,
-                    min_z,
-                    max_z,
-                });
-        }
-    }
-
-    let mut extruded_geometries = Vec::new();
-    for group in groups.values() {
-        let depth = group.max_z - group.min_z;
-        if depth <= NORMAL_EPS as f64 {
-            continue;
-        }
-
-        if let Some(extruded) = extrude_multipolygon(&group.footprint, group.min_z, depth) {
-            extruded_geometries.push(extruded);
-        }
-    }
-
-    if extruded_geometries.is_empty() {
-        return None;
-    }
-
-    Some(fallback_layer_union(extruded_geometries))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn union_via_footprints(_: &[BufferGeometry]) -> Option<BufferGeometry> {
-    None
-}
-
-#[allow(dead_code)]
-pub fn merge_geometries_with_spatial_grouping(
-    geometries: Vec<BufferGeometry>,
-    max_distance: f32,
-) -> HashMap<String, BufferGeometry> {
-    if geometries.is_empty() {
-        return HashMap::new();
-    }
-
-    let geometry_centers: Vec<(BufferGeometry, (f32, f32))> = geometries
-        .into_par_iter()
-        .filter(|geometry| geometry.has_data && geometry.vertices.len() >= 9)
-        .map(|geometry| {
-            let vertex_count = geometry.vertices.len() / 3;
-            let (center_x, center_y) = geometry
-                .vertices
-                .par_chunks_exact(3)
-                .map(|chunk| (chunk[0], chunk[1]))
-                .reduce(
-                    || (0.0, 0.0),
-                    |acc, point| (acc.0 + point.0, acc.1 + point.1),
-                );
-
-            let center = (
-                center_x / vertex_count as f32,
-                center_y / vertex_count as f32,
-            );
-            (geometry, center)
-        })
-        .collect();
-
-    let mut groups: Vec<Vec<BufferGeometry>> = Vec::new();
-
-    for (geometry, center) in geometry_centers {
-        let mut added_to_group = false;
-        for group in &mut groups {
-            if let Some(first_geom) = group.first() {
-                let group_vertex_count = first_geom.vertices.len() / 3;
-                let (group_center_x, group_center_y) = first_geom
-                    .vertices
-                    .par_chunks_exact(3)
-                    .map(|chunk| (chunk[0], chunk[1]))
-                    .reduce(
-                        || (0.0, 0.0),
-                        |acc, point| (acc.0 + point.0, acc.1 + point.1),
-                    );
-                let group_center = (
-                    group_center_x / group_vertex_count as f32,
-                    group_center_y / group_vertex_count as f32,
-                );
-
-                let distance = ((center.0 - group_center.0).powi(2)
-                    + (center.1 - group_center.1).powi(2))
-                .sqrt();
-                if distance <= max_distance {
-                    group.push(geometry.clone());
-                    added_to_group = true;
-                    break;
-                }
-            }
-        }
-
-        if !added_to_group {
-            groups.push(vec![geometry]);
-        }
-    }
-
-    groups
-        .into_par_iter()
-        .enumerate()
-        .filter_map(|(group_idx, group)| {
-            if group.is_empty() {
-                return None;
-            }
-
-            let merged = fallback_layer_union(group);
-            if merged.has_data {
-                Some((format!("group_{}", group_idx), merged))
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-pub fn rebuild_single_geometry(geometry: BufferGeometry) -> BufferGeometry {
-    let mut geometries = vec![geometry];
-    if let Some(result) = csgrs_union(&geometries) {
-        return result;
-    }
-    fallback_layer_union(std::mem::take(&mut geometries))
-}
-
-pub fn optimize_geometry(geometry: BufferGeometry, tolerance: f32) -> BufferGeometry {
-    if !geometry.has_data || geometry.vertices.len() < 9 {
-        return geometry;
-    }
-
-    let vertex_count = geometry.vertices.len() / 3;
-    let mut merged_vertices = Vec::new();
-    let mut merged_normals = Vec::new();
-    let mut merged_colors = Vec::new();
-    let mut vertex_map: HashMap<usize, usize> = HashMap::new();
-
-    for i in 0..vertex_count {
-        let v1_idx = i * 3;
-        let v1 = [
-            geometry.vertices[v1_idx],
-            geometry.vertices[v1_idx + 1],
-            geometry.vertices[v1_idx + 2],
-        ];
-
-        let mut found_match = false;
-        for (existing_idx, &merged_idx) in &vertex_map {
-            if *existing_idx >= i {
-                continue;
-            }
-
-            let existing_v_idx = existing_idx * 3;
-            let existing_v = [
-                geometry.vertices[existing_v_idx],
-                geometry.vertices[existing_v_idx + 1],
-                geometry.vertices[existing_v_idx + 2],
-            ];
-
-            let distance_sq = (v1[0] - existing_v[0]).powi(2)
-                + (v1[1] - existing_v[1]).powi(2)
-                + (v1[2] - existing_v[2]).powi(2);
-
-            if distance_sq <= tolerance * tolerance {
-                vertex_map.insert(i, merged_idx);
-                found_match = true;
-                break;
-            }
-        }
-
-        if !found_match {
-            let new_merged_idx = merged_vertices.len() / 3;
-            vertex_map.insert(i, new_merged_idx);
-
-            merged_vertices.extend_from_slice(&v1);
-
-            if let Some(ref normals) = geometry.normals {
-                if normals.len() > v1_idx + 2 {
-                    merged_normals.extend_from_slice(&normals[v1_idx..v1_idx + 3]);
-                }
-            }
-
-            if let Some(ref colors) = geometry.colors {
-                if colors.len() > v1_idx + 2 {
-                    merged_colors.extend_from_slice(&colors[v1_idx..v1_idx + 3]);
-                }
-            }
-        }
-    }
-
-    let new_indices: Vec<u32> = if let Some(ref indices) = geometry.indices {
-        indices
-            .iter()
-            .map(|&idx| vertex_map.get(&(idx as usize)).copied().unwrap_or(0) as u32)
-            .collect()
-    } else {
-        (0..merged_vertices.len() as u32 / 3).collect()
-    };
-
-    let has_data = !merged_vertices.is_empty();
-    BufferGeometry {
-        vertices: merged_vertices,
-        normals: if merged_normals.is_empty() {
-            None
-        } else {
-            Some(merged_normals)
-        },
-        colors: if merged_colors.is_empty() {
-            None
-        } else {
-            Some(merged_colors)
-        },
-        indices: if new_indices.is_empty() {
-            None
-        } else {
-            Some(new_indices)
-        },
-        uvs: None,
-        has_data,
-        properties: geometry.properties,
-    }
-}
-
-fn csgrs_union(geometries: &[BufferGeometry]) -> Option<BufferGeometry> {
-    let solids: Vec<CSG<()>> = geometries
-        .iter()
-        .filter_map(buffer_geometry_to_csg)
-        .collect();
-
-    if solids.is_empty() {
-        return None;
-    }
-
-    let reduced = pairwise_union(solids)?;
-    csg_to_buffer_geometry(&reduced)
-}
-
-fn merge_geometry_group(group: Vec<BufferGeometry>) -> BufferGeometry {
+fn merge_geometry_group_z_align_only(mut group: Vec<BufferGeometry>) -> BufferGeometry {
     if group.is_empty() {
-        return fallback_layer_union(group);
+        // Handle empty input gracefully
+        let empty_geom = BufferGeometry {
+            vertices: Vec::new(),
+            normals: None,
+            colors: None,
+            indices: None,
+            uvs: None,
+            has_data: false,
+            properties: None,
+        };
+        return fallback_layer_union(vec![empty_geom]);
     }
 
-    if let Some(footprint) = union_via_footprints(&group) {
-        if footprint.has_data {
-            return footprint;
+    // Parameters for grouping
+    // 0.25m quantization allows snapping terrain variations while keeping real steps
+    const Z_QUANTIZATION: f64 = 0.25; 
+
+    // Group indices by Z-level to identify connected/level clusters
+    let mut z_buckets: HashMap<i64, Vec<usize>> = HashMap::new();
+    let mut geom_bounds: Vec<(f64, f64)> = Vec::with_capacity(group.len());
+
+    for (i, geom) in group.iter().enumerate() {
+        if let Some(bounds) = get_geometry_z_bounds_fast(geom) {
+            geom_bounds.push(bounds);
+            
+            // Bucket by min_Z
+            // We use the quantized min_z as the key
+            let key = (bounds.0 / Z_QUANTIZATION).round() as i64;
+            z_buckets.entry(key).or_default().push(i);
+        } else {
+            geom_bounds.push((0.0, 0.0)); // Fallback for empty/invalid geoms
         }
     }
 
-    if let Some(csg) = csgrs_union(&group) {
-        if csg.has_data {
-            return csg;
+    // Process each bucket
+    for (_, indices) in z_buckets {
+        if indices.is_empty() { continue; }
+
+        // Find consensus Z for this bucket (use the minimum of the bucket)
+        // This ensures all parts snap down to the lowest point in the group
+        let mut min_z = f64::INFINITY;
+        for &idx in &indices {
+            min_z = min_z.min(geom_bounds[idx].0);
+        }
+
+        if min_z == f64::INFINITY { continue; }
+
+        // Apply shift to all geoms in bucket
+        for &idx in &indices {
+            let current_min_z = geom_bounds[idx].0;
+            let offset = min_z - current_min_z;
+
+            // Only apply if offset is significant
+            if offset.abs() > 1e-4 {
+                translate_geometry_z(&mut group[idx], offset);
+            }
         }
     }
 
+    // Return simple concatenation of aligned geometries
     fallback_layer_union(group)
+}
+
+fn get_geometry_z_bounds_fast(geometry: &BufferGeometry) -> Option<(f64, f64)> {
+    if !geometry.has_data || geometry.vertices.is_empty() {
+        return None;
+    }
+
+    let mut min_z = f64::INFINITY;
+    let mut max_z = f64::NEG_INFINITY;
+
+    // Vertex layout is [x, y, z, x, y, z, ...]
+    for chunk in geometry.vertices.chunks_exact(3) {
+        let z = chunk[2] as f64;
+        min_z = min_z.min(z);
+        max_z = max_z.max(z);
+    }
+
+    if min_z.is_finite() && max_z.is_finite() {
+        Some((min_z, max_z))
+    } else {
+        None
+    }
+}
+
+fn translate_geometry_z(geometry: &mut BufferGeometry, z_offset: f64) {
+    if z_offset == 0.0 { return; }
+    
+    // Apply offset to all Z coordinates
+    for i in (2..geometry.vertices.len()).step_by(3) {
+        geometry.vertices[i] += z_offset as f32;
+    }
 }
 
 fn pairwise_union(mut solids: Vec<CSG<()>>) -> Option<CSG<()>> {
@@ -973,6 +801,190 @@ fn fallback_layer_union(geometries: Vec<BufferGeometry>) -> BufferGeometry {
         has_data: true,
         properties: None,
     }
+}
+
+pub fn optimize_geometry(geometry: BufferGeometry, tolerance: f32) -> BufferGeometry {
+    if !geometry.has_data || geometry.vertices.len() < 9 {
+        return geometry;
+    }
+
+    let vertex_count = geometry.vertices.len() / 3;
+    let mut merged_vertices = Vec::new();
+    let mut merged_normals = Vec::new();
+    let mut merged_colors = Vec::new();
+    let mut vertex_map: HashMap<usize, usize> = HashMap::new();
+
+    for i in 0..vertex_count {
+        let v1_idx = i * 3;
+        let v1 = [
+            geometry.vertices[v1_idx],
+            geometry.vertices[v1_idx + 1],
+            geometry.vertices[v1_idx + 2],
+        ];
+
+        let mut found_match = false;
+        for (existing_idx, &merged_idx) in &vertex_map {
+            if *existing_idx >= i {
+                continue;
+            }
+
+            let existing_v_idx = existing_idx * 3;
+            let existing_v = [
+                geometry.vertices[existing_v_idx],
+                geometry.vertices[existing_v_idx + 1],
+                geometry.vertices[existing_v_idx + 2],
+            ];
+
+            let distance_sq = (v1[0] - existing_v[0]).powi(2)
+                + (v1[1] - existing_v[1]).powi(2)
+                + (v1[2] - existing_v[2]).powi(2);
+
+            if distance_sq <= tolerance * tolerance {
+                vertex_map.insert(i, merged_idx);
+                found_match = true;
+                break;
+            }
+        }
+
+        if !found_match {
+            let new_merged_idx = merged_vertices.len() / 3;
+            vertex_map.insert(i, new_merged_idx);
+
+            merged_vertices.extend_from_slice(&v1);
+
+            if let Some(ref normals) = geometry.normals {
+                if normals.len() > v1_idx + 2 {
+                    merged_normals.extend_from_slice(&normals[v1_idx..v1_idx + 3]);
+                }
+            }
+
+            if let Some(ref colors) = geometry.colors {
+                if colors.len() > v1_idx + 2 {
+                    merged_colors.extend_from_slice(&colors[v1_idx..v1_idx + 3]);
+                }
+            }
+        }
+    }
+
+    let new_indices: Vec<u32> = if let Some(ref indices) = geometry.indices {
+        indices
+            .iter()
+            .map(|&idx| vertex_map.get(&(idx as usize)).copied().unwrap_or(0) as u32)
+            .collect()
+    } else {
+        (0..merged_vertices.len() as u32 / 3).collect()
+    };
+
+    let has_data = !merged_vertices.is_empty();
+    BufferGeometry {
+        vertices: merged_vertices,
+        normals: if merged_normals.is_empty() {
+            None
+        } else {
+            Some(merged_normals)
+        },
+        colors: if merged_colors.is_empty() {
+            None
+        } else {
+            Some(merged_colors)
+        },
+        indices: if new_indices.is_empty() {
+            None
+        } else {
+            Some(new_indices)
+        },
+        uvs: None,
+        has_data,
+        properties: geometry.properties,
+    }
+}
+
+// RESTORED: csgrs_union was missing
+fn csgrs_union(geometries: &[BufferGeometry]) -> Option<BufferGeometry> {
+    let solids: Vec<CSG<()>> = geometries
+        .iter()
+        .filter_map(buffer_geometry_to_csg)
+        .collect();
+
+    if solids.is_empty() {
+        return None;
+    }
+
+    let reduced = pairwise_union(solids)?;
+    csg_to_buffer_geometry(&reduced)
+}
+
+// RESTORED: union_via_footprints was missing
+#[cfg(target_arch = "wasm32")]
+fn union_via_footprints(geometries: &[BufferGeometry]) -> Option<BufferGeometry> {
+    let mut groups: HashMap<(i64, i64), FootprintGroup> = HashMap::new();
+
+    for geometry in geometries {
+        if let Some((footprint, min_z, max_z)) = geometry_footprint(geometry) {
+            let depth = max_z - min_z;
+            if depth <= NORMAL_EPS as f64 {
+                continue;
+            }
+
+            let key = (quantize_value(min_z, 1e-3), quantize_value(depth, 1e-3));
+
+            groups
+                .entry(key)
+                .and_modify(|group| {
+                    group.footprint = union_multipolygon(&group.footprint, &footprint);
+                    group.min_z = group.min_z.min(min_z);
+                    group.max_z = group.max_z.max(max_z);
+                })
+                .or_insert(FootprintGroup {
+                    footprint,
+                    min_z,
+                    max_z,
+                });
+        }
+    }
+
+    let mut extruded_geometries = Vec::new();
+    for group in groups.values() {
+        let depth = group.max_z - group.min_z;
+        if depth <= NORMAL_EPS as f64 {
+            continue;
+        }
+
+        if let Some(extruded) = extrude_multipolygon(&group.footprint, group.min_z, depth) {
+            extruded_geometries.push(extruded);
+        }
+    }
+
+    if extruded_geometries.is_empty() {
+        return None;
+    }
+
+    Some(fallback_layer_union(extruded_geometries))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn union_via_footprints(_: &[BufferGeometry]) -> Option<BufferGeometry> {
+    None
+}
+
+fn merge_geometry_group(group: Vec<BufferGeometry>) -> BufferGeometry {
+    if group.is_empty() {
+        return fallback_layer_union(group);
+    }
+
+    if let Some(footprint) = union_via_footprints(&group) {
+        if footprint.has_data {
+            return footprint;
+        }
+    }
+
+    if let Some(csg) = csgrs_union(&group) {
+        if csg.has_data {
+            return csg;
+        }
+    }
+
+    fallback_layer_union(group)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

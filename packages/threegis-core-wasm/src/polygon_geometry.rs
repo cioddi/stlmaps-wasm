@@ -2634,15 +2634,12 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // because disjoint water bodies (Hudson River, East River) can incorrectly
     // merge into a single rectangle when their tile-clipped edges are unioned
     let is_water_layer = input.vt_data_set.source_layer == "water";
-    // Building layer should also skip expensive CSG merge (O(N^2))
-    let is_building_layer = input.vt_data_set.source_layer == "building";
 
-    // IMPORTANT: Skip geometry merging for terrain-aligned layers, water, and buildings!
+    // IMPORTANT: Skip geometry merging for terrain-aligned layers and water!
     // - Terrain-aligned: merge_geometries_by_layer uses union_via_footprints which re-extrudes
     //   geometries with uniform Z values, destroying the per-vertex terrain alignment.
     // - Water: union of tile-edge-clipped polygons creates rectangles covering land areas
-    // - Buildings: CSG merge is extremely expensive (O(N^2)) for dense urban areas causing stalls
-    if uses_terrain_alignment || is_water_layer || is_building_layer {
+    if uses_terrain_alignment || is_water_layer {
         // Return geometries as-is without merging
         match serde_json::to_string(&all_geometries) {
             Ok(json) => return Ok(json),
