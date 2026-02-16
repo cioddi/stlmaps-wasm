@@ -2055,8 +2055,10 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         let buffer_distance = if input.vt_data_set.fixed_buffer_size.unwrap_or(false) {
                              config_buffer_size * 0.00001
                         } else {
-                            // "scaling must be a bit stronger" (user meant smaller/thinner) -> multiplied by 0.3
-                            let factor = (bbox_lng_span / TERRAIN_SIZE) * 0.3;
+                            // Dynamic scaling: 0.5 for small bboxes (zoomed in), 0.3 for large bboxes (zoomed out)
+                            // Formula: starts at 0.5, decays to 0.3 as span increases to 1.0
+                            let strength = (0.5 - (bbox_lng_span * 0.2)).clamp(0.3, 0.5);
+                            let factor = (bbox_lng_span / TERRAIN_SIZE) * strength;
                             let scaled_config = config_buffer_size * factor;
                             if config_buffer_size < 0.001 {
                                 scaled_config
@@ -2183,8 +2185,9 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             let buffer_distance = if input.vt_data_set.fixed_buffer_size.unwrap_or(false) {
                                  config_buffer_size * 0.00001
                             } else {
-                                // "scaling must be a bit stronger" (user meant smaller/thinner) -> multiplied by 0.3
-                                let factor = (bbox_lng_span / TERRAIN_SIZE) * 0.3;
+                                // Dynamic scaling: 0.5 for small bboxes (zoomed in), 0.3 for large bboxes (zoomed out)
+                                let strength = (0.5 - (bbox_lng_span * 0.2)).clamp(0.3, 0.5);
+                                let factor = (bbox_lng_span / TERRAIN_SIZE) * strength;
                                 let scaled_config = config_buffer_size * factor;
                                 if config_buffer_size < 0.001 {
                                     scaled_config
