@@ -10,6 +10,7 @@ export interface VtDataSet {
   enabled: boolean;
   color: string; // Hex color string
   bufferSize: number;
+  fixedBufferSize?: boolean;
   filter?: FilterExpression; // MapLibre filter expression with proper types
   extrusionDepth?: number;
   minExtrusionDepth?: number;
@@ -18,7 +19,7 @@ export interface VtDataSet {
   applyMedianHeight: boolean;
   useCsgClipping: boolean; // Renamed for consistency
   geometryDebugMode?: boolean; // Skip processing like linestring buffering and polygon extrusion
-  
+
   // Additional properties for better type safety
   url?: string; // Vector tile URL template
   minZoom?: number;

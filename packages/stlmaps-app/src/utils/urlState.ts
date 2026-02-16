@@ -27,6 +27,7 @@ interface ShareableState {
     extrusionDepth?: number;
     zOffset?: number;
     bufferSize?: number;
+    fixedBufferSize?: boolean;
   }[];
 }
 
@@ -113,6 +114,7 @@ export function serializeStateToUrl(
     extrusionDepth: layer.extrusionDepth,
     zOffset: layer.zOffset,
     bufferSize: layer.bufferSize,
+    fixedBufferSize: layer.fixedBufferSize,
   }));
 
   const jsonStr = JSON.stringify(state);

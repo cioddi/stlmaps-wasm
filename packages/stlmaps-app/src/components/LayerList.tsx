@@ -43,8 +43,8 @@ const StyledPaper = styled(Paper)(({ theme }) => ({
 const LayerHeader = styled(ListItem, {
   shouldForwardProp: (prop) => prop !== 'active'
 })<{ active?: boolean }>(({ theme, active }) => ({
-  backgroundColor: active 
-    ? `${theme.palette.primary.main}10` 
+  backgroundColor: active
+    ? `${theme.palette.primary.main}10`
     : theme.palette.background.paper,
   borderLeft: `3px solid ${active ? theme.palette.primary.main : 'transparent'}`,
   transition: 'all 0.2s ease-in-out',
@@ -79,6 +79,7 @@ const LayerList: React.FC = () => {
     setLayerMinExtrusionDepth,
     setLayerZOffset,
     setLayerBufferSize,
+    toggleLayerFixedBufferSize,
     toggleLayerUseAdaptiveScaleFactor,
     toggleLayerAlignVerticesToTerrain,
     toggleLayerApplyMedianHeight,
@@ -106,11 +107,11 @@ const LayerList: React.FC = () => {
   const handleLayerToggle = (index: number) => {
     toggleLayerEnabled(index);
   };
-  
+
   const handleLayerColorChange = (index: number, hexColor: string) => {
     setLayerColor(index, hexColor);
   };
-  
+
   const handleExtrusionChange = (index: number, value: number) => {
     setLayerExtrusionDepth(index, value);
   };
@@ -122,19 +123,19 @@ const LayerList: React.FC = () => {
       setLayerExtrusionDepth(index, undefined);
     }
   };
-  
+
   const handleZOffsetChange = (index: number, value: number) => {
     setLayerZOffset(index, value);
   };
-  
+
   const handleBufferSizeChange = (index: number, value: number) => {
     setLayerBufferSize(index, value);
   };
-  
+
   const handleAdaptiveScaleFactorToggle = (index: number) => {
     toggleLayerUseAdaptiveScaleFactor(index);
   };
-  
+
   const handleHeightScaleFactorChange = (index: number, value: number) => {
     setLayerHeightScaleFactor(index, value);
   };
@@ -146,7 +147,7 @@ const LayerList: React.FC = () => {
       setLayerMinExtrusionDepth(index, undefined);
     }
   };
-  
+
   const handleMinExtrusionChange = (index: number, value: number) => {
     setLayerMinExtrusionDepth(index, value);
   };
@@ -177,19 +178,19 @@ const LayerList: React.FC = () => {
     // Find the layer mesh and terrain mesh in the scene
     let layerMesh: THREE.Mesh | null = null;
     let terrainMesh: THREE.Mesh | null = null;
-    const meshes: Array<{name: string; userData: any}> = [];
+    const meshes: Array<{ name: string; userData: any }> = [];
 
     scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        meshes.push({name: child.name, userData: child.userData});
+        meshes.push({ name: child.name, userData: child.userData });
 
         // Check if this is the layer mesh by matching userData properties
         const meshLabel = child.userData?.label;
         const meshSourceLayer = child.userData?.sourceLayer;
 
         if ((meshLabel && meshLabel === layer.label) ||
-            (meshSourceLayer && meshSourceLayer === layer.sourceLayer) ||
-            (meshLabel && meshLabel === layer.sourceLayer)) {
+          (meshSourceLayer && meshSourceLayer === layer.sourceLayer) ||
+          (meshLabel && meshLabel === layer.sourceLayer)) {
           layerMesh = child;
         }
 
@@ -249,7 +250,7 @@ const LayerList: React.FC = () => {
   return (
     <Box sx={{ width: '100%', maxHeight: '100%', overflowY: 'auto', px: 1 }}>
       {/* Terrain Layer */}
-      <StyledPaper sx={{marginTop: 2}}>
+      <StyledPaper sx={{ marginTop: 2 }}>
         <LayerHeader active={terrainSettings.enabled} onClick={() => toggleExpand('terrain')}>
           <ListItemIcon>
             <TerrainIcon color={terrainSettings.enabled ? "primary" : "disabled"} />
@@ -257,7 +258,7 @@ const LayerList: React.FC = () => {
           <ListItemText primary="Terrain" />
           <FormControlLabel
             control={
-              <Switch 
+              <Switch
                 checked={terrainSettings.enabled}
                 onChange={() => setTerrainSettings({
                   enabled: !terrainSettings.enabled
@@ -269,7 +270,7 @@ const LayerList: React.FC = () => {
           />
           {expandedLayers.terrain ? <ExpandLessIcon /> : <ExpandMoreIcon />}
         </LayerHeader>
-        
+
         <Collapse in={expandedLayers.terrain} timeout="auto" unmountOnExit>
           <Box sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -292,7 +293,7 @@ const LayerList: React.FC = () => {
                 size="small"
               />
             </Box>
-            
+
             <Typography gutterBottom sx={{ mt: 2 }}>
               Vertical Exaggeration: {terrainSettings.verticalExaggeration.toFixed(2)}
             </Typography>
@@ -310,7 +311,7 @@ const LayerList: React.FC = () => {
                 { value: 10, label: "10" },
               ]}
             />
-            
+
             <Typography gutterBottom sx={{ mt: 2 }}>
               Base Height: {terrainSettings.baseHeight}
             </Typography>
@@ -344,16 +345,16 @@ const LayerList: React.FC = () => {
           </Box>
         </Collapse>
       </StyledPaper>
-      
+
       {/* Vector Tile Layers */}
       {vtLayers.map((layer, index) => {
         const layerId = `layer-${index}-${layer.sourceLayer}`;
         const isExpanded = expandedLayers[layerId] || false;
-        
+
         return (
           <StyledPaper key={layerId}>
-            <LayerHeader 
-              active={layer.enabled} 
+            <LayerHeader
+              active={layer.enabled}
               onClick={() => toggleExpand(layerId)}
             >
               <ListItemIcon>
@@ -364,8 +365,8 @@ const LayerList: React.FC = () => {
               />
               <FormControlLabel
                 control={
-                  <Switch 
-                    checked={layer.enabled !== false} 
+                  <Switch
+                    checked={layer.enabled !== false}
                     onChange={() => handleLayerToggle(index)}
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -374,7 +375,7 @@ const LayerList: React.FC = () => {
               />
               {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
             </LayerHeader>
-            
+
             <Collapse in={isExpanded} timeout="auto" unmountOnExit>
               <Box sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -395,7 +396,7 @@ const LayerList: React.FC = () => {
                     size="small"
                   />
                 </Box>
-                
+
                 {/* Extrusion Depth with enable/disable checkbox */}
                 <Box sx={{ mt: 2 }}>
                   <FormControlLabel
@@ -408,7 +409,7 @@ const LayerList: React.FC = () => {
                     }
                     label="Enable Extrusion Depth"
                   />
-                  
+
                   {layer.extrusionDepth !== undefined && (
                     <>
                       <Typography gutterBottom>
@@ -429,7 +430,7 @@ const LayerList: React.FC = () => {
                     </>
                   )}
                 </Box>
-                
+
                 {/* Min Extrusion Depth with enable/disable checkbox */}
                 <Box sx={{ mt: 2 }}>
                   <FormControlLabel
@@ -442,7 +443,7 @@ const LayerList: React.FC = () => {
                     }
                     label="Enable Min Extrusion Depth"
                   />
-                  
+
                   {layer.minExtrusionDepth !== undefined && (
                     <>
                       <Typography gutterBottom>
@@ -463,7 +464,7 @@ const LayerList: React.FC = () => {
                     </>
                   )}
                 </Box>
-                
+
                 {layer.zOffset !== undefined && (
                   <Box sx={{ mt: 2 }}>
                     <Typography gutterBottom>
@@ -483,12 +484,24 @@ const LayerList: React.FC = () => {
                     />
                   </Box>
                 )}
-                
+
                 {layer.bufferSize !== undefined && (
                   <Box sx={{ mt: 2 }}>
-                    <Typography gutterBottom>
-                      Buffer Size: {layer.bufferSize.toFixed(1)}
-                    </Typography>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography gutterBottom>
+                        Buffer Size: {layer.bufferSize.toFixed(1)}
+                      </Typography>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={layer.fixedBufferSize === true}
+                            onChange={() => toggleLayerFixedBufferSize(index)}
+                            size="small"
+                          />
+                        }
+                        label="Fixed (Exact)"
+                      />
+                    </Box>
                     <Slider
                       value={layer.bufferSize}
                       onChange={(_, newValue) => handleBufferSizeChange(index, newValue as number)}
@@ -503,7 +516,7 @@ const LayerList: React.FC = () => {
                     />
                   </Box>
                 )}
-                
+
                 {/* Adaptive Scale Factor */}
                 <Box sx={{ mt: 2 }}>
                   <FormControlLabel
@@ -517,7 +530,7 @@ const LayerList: React.FC = () => {
                     label="Use Adaptive Scale Factor"
                   />
                 </Box>
-                
+
                 {/* Height Scale Factor */}
                 <Box sx={{ mt: 2 }}>
                   <Typography gutterBottom>
@@ -537,7 +550,7 @@ const LayerList: React.FC = () => {
                     ]}
                   />
                 </Box>
-                
+
                 {/* Align Vertices to Terrain */}
                 <Box sx={{ mt: 2 }}>
                   <FormControlLabel

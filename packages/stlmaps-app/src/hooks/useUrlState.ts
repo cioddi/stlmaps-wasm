@@ -86,6 +86,7 @@ export function useUrlState() {
                             extrusionDepth: urlLayer.extrusionDepth ?? existingLayer.extrusionDepth,
                             zOffset: urlLayer.zOffset ?? existingLayer.zOffset,
                             bufferSize: urlLayer.bufferSize ?? existingLayer.bufferSize,
+                            fixedBufferSize: urlLayer.fixedBufferSize ?? existingLayer.fixedBufferSize,
                         };
                     }
                     return existingLayer;

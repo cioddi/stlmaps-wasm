@@ -38,6 +38,7 @@ export function hashVtLayerConfig(vtLayer: VtDataSet): string {
     extrusionDepth: vtLayer.extrusionDepth,
     // zOffset excluded - can be updated in real-time
     bufferSize: vtLayer.bufferSize,
+    fixedBufferSize: vtLayer.fixedBufferSize,
     filter: vtLayer.filter,
     useAdaptiveScaleFactor: vtLayer.useAdaptiveScaleFactor,
     // heightScaleFactor excluded - can be updated in real-time
@@ -54,10 +55,10 @@ export function hashVtLayerVisuals(vtLayer: VtDataSet): string {
   return JSON.stringify({
     sourceLayer: vtLayer.sourceLayer,
     label: vtLayer.label, // Include label to differentiate layers with same sourceLayer
-    color: vtLayer.color ? { 
-      r: vtLayer.color.r, 
-      g: vtLayer.color.g, 
-      b: vtLayer.color.b 
+    color: vtLayer.color ? {
+      r: vtLayer.color.r,
+      g: vtLayer.color.g,
+      b: vtLayer.color.b
     } : undefined,
   });
 }
@@ -74,7 +75,7 @@ export function hashBbox(bbox: GeoJSON.Feature | undefined): string {
  * Creates a hash from all relevant configurations that affect geometry generation
  */
 export function createConfigHash(
-  bbox: GeoJSON.Feature | undefined, 
+  bbox: GeoJSON.Feature | undefined,
   terrainSettings: TerrainSettings,
   vtLayers: VtDataSet[]
 ): string {
@@ -94,7 +95,7 @@ export function createComponentHashes(
   vtLayers: VtDataSet[]
 ) {
   const terrainHash = `${hashBbox(bbox)}:${hashTerrainConfig(terrainSettings)}`; // Always process terrain, visibility controlled in 3D preview
-  
+
   const layerHashes = vtLayers.map((layer, index) => ({
     index,
     hash: `${hashBbox(bbox)}:${hashVtLayerConfig(layer)}` // Always calculate hash since all layers are processed

@@ -134,6 +134,8 @@ pub struct VtDataSet {
     #[serde(rename = "addTerrainDifferenceToHeight")]
     pub add_terrain_difference_to_height: Option<bool>,
     pub filter: Option<serde_json::Value>,
+    #[serde(rename = "fixedBufferSize")]
+    pub fixed_buffer_size: Option<bool>,
 }
 
 // Helper function to get display label for a VtDataSet
@@ -2048,7 +2050,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                             .vt_data_set
                             .buffer_size
                             .unwrap_or(if is_major_road { 2.0 } else { 1.5 });
-                        let buffer_distance = config_buffer_size * 0.00001;
+                        let bbox_lng_span = (input.bbox[2] - input.bbox[0]).abs().max(1e-10);
+                        // When fixedBufferSize is set, use fixed geographic scale; otherwise scale by bbox (visual width)
+                        let buffer_distance = if input.vt_data_set.fixed_buffer_size.unwrap_or(false) {
+                             config_buffer_size * 0.00001
+                        } else {
+                            // "scaling must be a bit stronger" (user meant smaller/thinner) -> multiplied by 0.3
+                            let factor = (bbox_lng_span / TERRAIN_SIZE) * 0.3;
+                            let scaled_config = config_buffer_size * factor;
+                            if config_buffer_size < 0.001 {
+                                scaled_config
+                            } else {
+                                let min_scaled = 0.4 * factor;
+                                scaled_config.clamp(min_scaled, scaled_config.max(min_scaled))
+                            }
+                        };
 
                         // Create quad-strip mesh for this linestring
                         if let Some(quad_mesh) = create_linestring_quad_strip(
@@ -2162,8 +2178,21 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                                 .vt_data_set
                                 .buffer_size
                                 .unwrap_or(if is_major_road { 2.0 } else { 1.5 });
-                            // Convert buffer size to appropriate coordinate scale (assuming meter-like units)
-                            let buffer_distance = config_buffer_size * 0.00001; // Scale factor for coordinate space
+                            let bbox_lng_span = (input.bbox[2] - input.bbox[0]).abs().max(1e-10);
+                            // When fixedBufferSize is set, use fixed geographic scale; otherwise scale by bbox (visual width)
+                            let buffer_distance = if input.vt_data_set.fixed_buffer_size.unwrap_or(false) {
+                                 config_buffer_size * 0.00001
+                            } else {
+                                // "scaling must be a bit stronger" (user meant smaller/thinner) -> multiplied by 0.3
+                                let factor = (bbox_lng_span / TERRAIN_SIZE) * 0.3;
+                                let scaled_config = config_buffer_size * factor;
+                                if config_buffer_size < 0.001 {
+                                    scaled_config
+                                } else {
+                                    let min_scaled = 0.4 * factor;
+                                    scaled_config.clamp(min_scaled, scaled_config.max(min_scaled))
+                                }
+                            };
 
                             // Use robust linestring buffering algorithm with bbox for subdivision
                             buffered_points =
@@ -2557,17 +2586,24 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         }
                     };
 
-                    // Calculate scaling factor from meters to terrain units
-                    let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
 
-                    // Scale height for extrusion (building heights need scaling)
-                    height *= meters_to_units;
+
+                    if is_building {
+                        // Buildings: use proportional scaling based on bbox size
+                        // This keeps building heights accurate in meters relative to the map
+                        let meters_to_units = calculate_meters_to_terrain_units(&input.bbox);
+                        height *= meters_to_units;
+                    } else {
+                        // Non-building polygon layers: use FIXED scaling (same as linestrings)
+                        // This maintains constant visual extrusion height regardless of map size
+                        // TERRAIN_SIZE (200.0) / 1000.0 meters = 0.2 units per meter
+                        let fixed_meters_to_units = 0.2;
+                        height = height * fixed_meters_to_units;
+                    }
                     
-                    // ALWAYS add per-polygon terrain Z difference to height for buildings on slopes
+                    // Add per-polygon terrain Z difference for buildings on slopes
                     // This ensures buildings extend from the lowest terrain point up past the highest
                     // terrain point UNDER THIS SPECIFIC BUILDING (not the entire dataset)
-                    // This is required to prevent floating or submerged buildings on sloped terrain
-                    let is_building = !input.vt_data_set.align_vertices_to_terrain.unwrap_or(false);
                     if is_building && polygon_terrain_z_difference > 0.01 {
                         // polygon_terrain_z_difference is the terrain slope under this building only
                         height += polygon_terrain_z_difference;

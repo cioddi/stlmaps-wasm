@@ -32,6 +32,7 @@ export interface VtDataSet {
   enabled: boolean;
   color: string;
   bufferSize: number;
+  fixedBufferSize?: boolean;
   filter?: any; // MapLibre filter expression
   extrusionDepth?: number;
   minExtrusionDepth?: number;
@@ -154,6 +155,7 @@ interface AppState {
   setLayerMinExtrusionDepth: (index: number, depth: number) => void;
   setLayerZOffset: (index: number, offset: number) => void;
   setLayerBufferSize: (index: number, size: number) => void;
+  toggleLayerFixedBufferSize: (index: number) => void;
   toggleLayerUseAdaptiveScaleFactor: (index: number) => void;
   toggleLayerAlignVerticesToTerrain: (index: number) => void;
   toggleLayerApplyMedianHeight: (index: number) => void;
@@ -249,7 +251,7 @@ const defaultLayers: VtDataSet[] = [
     label: "Footways",
     enabled: true,
     color: "#8a8a8a",
-    bufferSize: 2.3,
+    bufferSize: .8,
     extrusionDepth: 2,
     zOffset: -0.02,
     alignVerticesToTerrain: true,
@@ -266,7 +268,7 @@ const defaultLayers: VtDataSet[] = [
     label: "Roads & Streets",
     enabled: true,
     color: "#808080",
-    bufferSize: 2,
+    bufferSize: .9,
     extrusionDepth: 2.8,
     zOffset: -0.01,
     alignVerticesToTerrain: true,
@@ -445,6 +447,11 @@ export const useAppStore = create<AppState>()(
     setLayerBufferSize: (index, size) => set(state => ({
       vtLayers: state.vtLayers.map((layer, i) =>
         i === index ? { ...layer, bufferSize: size } : layer
+      )
+    })),
+    toggleLayerFixedBufferSize: (index) => set(state => ({
+      vtLayers: state.vtLayers.map((layer, i) =>
+        i === index ? { ...layer, fixedBufferSize: !layer.fixedBufferSize } : layer
       )
     })),
     toggleLayerUseAdaptiveScaleFactor: (index) => set(state => ({
