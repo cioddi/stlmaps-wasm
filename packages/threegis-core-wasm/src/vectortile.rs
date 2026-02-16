@@ -834,14 +834,17 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
 
             match geometry_type_str {
                 "Polygon" => {
-                    // feature.geometry structure: Vec<Vec<Vec<f64>>> where outer is polygon, next is rings, inner is points [px, py]
-                    // First ring is exterior, subsequent rings are holes
-                    // We need to group them together into a single polygon with holes
+                    // MVT type 3 covers BOTH single Polygons AND MultiPolygons.
+                    // feature.geometry: Vec<Vec<Vec<f64>>> — each element is a ring.
+                    // We use the shoelace formula (signed area) to determine winding order:
+                    //   - Positive area (CW in tile coords) = exterior ring
+                    //   - Negative area (CCW in tile coords) = hole ring
+                    // Each new exterior ring starts a new polygon; subsequent holes attach to it.
                     
-                    let mut exterior_ring: Option<Vec<Vec<f64>>> = None;
-                    let mut hole_rings: Vec<Vec<Vec<f64>>> = Vec::new();
+                    let mut current_exterior: Option<Vec<Vec<f64>>> = None;
+                    let mut current_holes: Vec<Vec<Vec<f64>>> = Vec::new();
                     
-                    for (ring_idx, ring_tile_coords) in feature.geometry.iter().enumerate() {
+                    for ring_tile_coords in &feature.geometry {
                         let mut transformed_ring: Vec<Vec<f64>> =
                             Vec::with_capacity(ring_tile_coords.len());
                         for point_tile_coords in ring_tile_coords {
@@ -858,36 +861,75 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                             }
                         }
 
-                        if !transformed_ring.is_empty() {
-                            if ring_idx == 0 {
-                                // First ring is the exterior
-                                exterior_ring = Some(transformed_ring);
-                            } else {
-                                // Subsequent rings are holes
-                                hole_rings.push(transformed_ring);
+                        if transformed_ring.len() < 3 {
+                            continue;
+                        }
+
+                        // Compute signed area using shoelace formula
+                        // In lat/lng space after conversion:
+                        //   positive = counter-clockwise = exterior (GeoJSON convention)
+                        //   negative = clockwise = hole
+                        // But MVT tile coords use a Y-down system which flips the sign,
+                        // so we check the sign on the already-transformed coords.
+                        let signed_area = {
+                            let mut area = 0.0_f64;
+                            let n = transformed_ring.len();
+                            for i in 0..n {
+                                let j = (i + 1) % n;
+                                area += transformed_ring[i][0] * transformed_ring[j][1];
+                                area -= transformed_ring[j][0] * transformed_ring[i][1];
                             }
+                            area / 2.0
+                        };
+
+                        // MVT exterior rings are CW in tile coords (Y-down).
+                        // After converting to lat/lng (Y-up), CW stays CW → negative shoelace area.
+                        // So: negative area = exterior ring, positive area = hole.
+                        let is_exterior = signed_area.abs() > 1e-20 && signed_area < 0.0;
+                        // If signed_area is ~0, it's degenerate — skip it
+                        if signed_area.abs() < 1e-20 {
+                            continue;
+                        }
+
+                        if is_exterior {
+                            // Save previous polygon if we have one
+                            if let Some(exterior) = current_exterior.take() {
+                                let holes = if current_holes.is_empty() {
+                                    None
+                                } else {
+                                    Some(std::mem::take(&mut current_holes))
+                                };
+                                
+                                transformed_geometry_parts.push(GeometryData {
+                                    geometry: exterior,
+                                    holes,
+                                    r#type: Some("Polygon".to_string()),
+                                    height: Some(height_value),
+                                    layer: Some(vt_dataset.source_layer.clone()),
+                                    label: vt_dataset.label.clone(),
+                                    tags: None,
+                                    properties: Some(
+                                        serde_json::to_value(&feature.properties)
+                                            .unwrap_or(serde_json::Value::Null),
+                                    ),
+        
+                                });
+                            }
+                            current_exterior = Some(transformed_ring);
+                        } else {
+                            // It's a hole — attach to current exterior
+                            current_holes.push(transformed_ring);
                         }
                     }
                     
-                    // Create the polygon with holes if we have an exterior ring
-                    if let Some(exterior) = exterior_ring {
-                        let _base_elevation = calculate_base_elevation(
-                            &exterior,
-                            &elevation_grid,
-                            grid_size.0 as usize,
-                            grid_size.1 as usize,
-                            elev_min_lng,
-                            elev_min_lat,
-                            elev_max_lng,
-                            elev_max_lat,
-                        );
-
-                        let holes = if hole_rings.is_empty() {
+                    // Don't forget the last polygon
+                    if let Some(exterior) = current_exterior {
+                        let holes = if current_holes.is_empty() {
                             None
                         } else {
-                            Some(hole_rings)
+                            Some(current_holes)
                         };
-
+                        
                         transformed_geometry_parts.push(GeometryData {
                             geometry: exterior,
                             holes,
@@ -1117,15 +1159,13 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
             let pre_bbox_count = transformed_geometry_parts.len();
             geometry_created += pre_bbox_count;
 
-            // Apply smart bbox filtering with buffers for LineStrings
+            // Apply bbox filtering with buffer for LineStrings
             let bbox_buffer = 0.001; // ~100m buffer for roads that cross boundaries
             let filtered_parts: Vec<GeometryData> = transformed_geometry_parts
                 .into_iter()
                 .filter(|geom| {
-                    // Determine effective bbox based on geometry type
-                    // LineStrings get a buffer to handle thickness/continuity
                     let is_line = geom.r#type.as_ref().map_or(false, |t| t == "LineString");
-                    let bbox_buffer = 0.001; // ~100m buffer
+                    let bbox_buffer = 0.001;
 
                     let check_bbox = if is_line {
                         [
@@ -1138,12 +1178,6 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
                         [min_lng, min_lat, max_lng, max_lat]
                     };
 
-                    // Use robust intersection check for both Polygons and LineStrings
-                    // This correctly handles:
-                    // 1. Points inside bbox
-                    // 2. Edges crossing bbox
-                    // 3. Polygon completely containing bbox (no points inside)
-                    // 4. Bbox completely containing polygon
                     crate::bbox_filter::polygon_intersects_bbox(&geom.geometry, &check_bbox)
                 })
                 .collect();
@@ -1163,6 +1197,8 @@ pub async fn extract_features_from_vector_tiles(input_js: JsValue) -> Result<JsV
     if vt_dataset.source_layer == "building" && vt_dataset.apply_median_height.unwrap_or(false) {
         apply_median_height_fallback(&mut geometry_data_list);
     }
+
+
 
     // Cache the extracted feature data for later use
     {
