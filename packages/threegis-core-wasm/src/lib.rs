@@ -44,6 +44,7 @@ mod csg_union;
 mod cancellation;
 // Import 3MF export functionality
 mod export_3mf;
+mod repro_test;
 
 use models::{CacheStats, RustResponse};
 use module_state::{create_tile_key, ModuleState, TileData};

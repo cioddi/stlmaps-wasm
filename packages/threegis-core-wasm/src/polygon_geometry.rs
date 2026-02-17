@@ -104,7 +104,7 @@ impl GeometryData {
 }
 
 // Struct to match GridSize from TypeScript
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct GridSize {
     pub width: u32,
     pub height: u32,
@@ -164,7 +164,7 @@ fn default_color() -> String {
 }
 
 // Input for the polygon geometry processing function
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PolygonGeometryInput {
     pub bbox: Vec<f64>, // [minLng, minLat, maxLng, maxLat]
     pub polygons: Vec<GeometryData>,
@@ -2608,6 +2608,7 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     // This ensures buildings extend from the lowest terrain point up past the highest
                     // terrain point UNDER THIS SPECIFIC BUILDING (not the entire dataset)
                     if is_building && polygon_terrain_z_difference > 0.01 {
+                    web_sys::console::log_1(&JsValue::from_str(&format!("polygon_terrain_z_difference: {}", polygon_terrain_z_difference)));
                         // polygon_terrain_z_difference is the terrain slope under this building only
                         height += polygon_terrain_z_difference;
                     }

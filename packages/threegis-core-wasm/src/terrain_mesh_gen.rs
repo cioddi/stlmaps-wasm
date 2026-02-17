@@ -287,15 +287,16 @@ fn create_manifold_terrain_mesh(
 /// Test function to verify terrain mesh is manifold using csgrs
 #[cfg(test)]
 pub fn test_manifold_terrain_mesh() -> Result<bool, String> {
-    use csgrs::{CSG, Vertex};
+    use csgrs::mesh::Mesh as CSG;
+    use csgrs::mesh::vertex::Vertex;
     use nalgebra::Point3;
-    use csgrs::polygon::Polygon;
+    use csgrs::mesh::polygon::Polygon;
 
     // Create a simple 3x3 terrain mesh for testing
     let (positions, indices) = create_manifold_terrain_mesh(3, 3, 10.0);
 
     // Convert to csgrs format - create triangular polygons
-    let mut polygons = Vec::new();
+    let mut polygons: Vec<Polygon<()>> = Vec::new();
 
     for triangle_chunk in indices.chunks_exact(3) {
         let i0 = triangle_chunk[0] as usize;
@@ -324,16 +325,17 @@ pub fn test_manifold_terrain_mesh() -> Result<bool, String> {
     }
 
     // Create CSG and check if manifold
-    let csg: CSG<()> = CSG::from_polygons(&polygons);
+    let csg = CSG::from_polygons(&polygons, None);
     Ok(csg.is_manifold())
 }
 
 /// Test function to verify the full terrain generation pipeline produces manifold mesh
 #[cfg(test)]
 pub fn test_full_terrain_generation_manifold() -> Result<bool, String> {
-    use csgrs::{CSG, Vertex};
+    use csgrs::mesh::Mesh as CSG;
+    use csgrs::mesh::vertex::Vertex;
     use nalgebra::Point3;
-    use csgrs::polygon::Polygon;
+    use csgrs::mesh::polygon::Polygon;
 
     // Create fake DEM data - a simple 8x8 grid with realistic elevation values
     let grid_size = 8;
@@ -378,6 +380,7 @@ pub fn test_full_terrain_generation_manifold() -> Result<bool, String> {
         vertical_exaggeration: 2.0,
         terrain_base_height: 1.0,
         process_id: "test".to_string(),
+        use_simple_mesh: false,
     };
 
     // Generate terrain using the full pipeline
@@ -385,7 +388,7 @@ pub fn test_full_terrain_generation_manifold() -> Result<bool, String> {
         .map_err(|e| format!("Terrain generation failed: {}", e))?;
 
     // Convert to csgrs format - create triangular polygons
-    let mut polygons = Vec::new();
+    let mut polygons: Vec<Polygon<()>> = Vec::new();
 
     for triangle_chunk in terrain_result.indices.chunks_exact(3) {
         let i0 = triangle_chunk[0] as usize;
@@ -423,7 +426,7 @@ pub fn test_full_terrain_generation_manifold() -> Result<bool, String> {
     // Terrain polygons generated
 
     // Create CSG and check if manifold
-    let csg: CSG<()> = CSG::from_polygons(&polygons);
+    let csg = CSG::from_polygons(&polygons, None);
     Ok(csg.is_manifold())
 }
 
