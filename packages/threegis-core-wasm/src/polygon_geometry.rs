@@ -2,9 +2,23 @@ use crate::bbox_filter::polygon_intersects_bbox;
 use crate::extrude;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::cell::RefCell;
 use js_sys::{Array, Float32Array};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::JsValue;
+
+// Thread-local cache for the parsed terrain mesh vertices and grid dimensions.
+// Populated once at the start of `create_polygon_geometry` and cleared when done.
+// Stores the flat [x,y,z, x,y,z, …] array from the actual rendered terrain mesh.
+thread_local! {
+    static TERRAIN_MESH_VERTS: RefCell<Vec<f32>> = RefCell::new(Vec::new());
+    /// Width (columns) of the vertex grid. For CPU layout W = gridSize.width; for GPU W ≤ 64.
+    static TERRAIN_GRID_W: RefCell<usize> = RefCell::new(0);
+    /// Height (rows) of the vertex grid. For CPU layout H = gridSize.height; for GPU H ≤ 64.
+    static TERRAIN_GRID_H: RefCell<usize> = RefCell::new(0);
+    /// True when the vertex array uses the GPU interleaved layout (even = top, odd = bottom).
+    static TERRAIN_IS_GPU_LAYOUT: RefCell<bool> = RefCell::new(false);
+}
 
 
 
@@ -187,6 +201,19 @@ pub struct PolygonGeometryInput {
     pub terrain_vertices_base64: String,
     #[serde(rename = "terrainIndicesBase64", default)]
     pub terrain_indices_base64: String,
+    /// Vertex-grid width (W): number of vertex columns in the terrain mesh.
+    /// For the CPU path this equals `gridSize.width`; for the GPU path it is
+    /// `gridSize.width.min(64)`.  Set to 0 if unknown (triggers auto-detection).
+    #[serde(rename = "terrainGridWidth", default)]
+    pub terrain_grid_width: u32,
+    /// Vertex-grid height (H): number of vertex rows in the terrain mesh.
+    #[serde(rename = "terrainGridHeight", default)]
+    pub terrain_grid_height: u32,
+    /// True when the terrain vertex array uses the GPU interleaved layout produced
+    /// by `gpu_terrain.rs` (even vertex index = top, odd = bottom).
+    /// False (default) means the CPU layered layout from `terrain_mesh_gen.rs`.
+    #[serde(rename = "terrainIsGpuLayout", default)]
+    pub terrain_is_gpu_layout: bool,
     #[serde(rename = "vtDataSet")]
     pub vt_data_set: VtDataSet,
     #[serde(default, rename = "useSameZOffset")]
@@ -213,44 +240,112 @@ pub struct BufferGeometry {
     pub properties: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
-// Sample terrain elevation using the EXACT same method as terrain mesh generation
-// This ensures perfect alignment with the terrain mesh vertices by replicating terrain_mesh_gen.rs algorithm
+/// Sample the terrain surface Z at a mesh-space (x, y) point by querying the **actual
+/// terrain mesh vertices** that were produced by `terrain_mesh_gen.rs` / `gpu_terrain.rs`
+/// and sent from TypeScript as a flat `[x0,y0,z0, x1,y1,z1, …]` CSV in
+/// `terrain_vertices_base64`.
+///
+/// Supports both vertex layouts produced by the two terrain backends:
+///
+/// **CPU layout** (`terrain_mesh_gen.rs`):
+///   Vertices `0 … W*H-1` = bottom layer (z ≈ 0), `W*H … 2*W*H-1` = top layer (z = terrain).
+///
+/// **GPU layout** (`gpu_terrain.rs`):
+///   For each grid cell `i`, vertex `i*2` = top, `i*2+1` = bottom (interleaved pairs).
+///
+/// Both layouts produce `2 * W * H` total vertices.  The caller supplies the grid
+/// dimensions (`w`, `h`) and layout flag explicitly so this function never needs to
+/// guess — avoiding bugs caused by low-elevation terrain or non-square grids.
+fn sample_terrain_height_from_mesh(
+    mesh_x: f64,
+    mesh_y: f64,
+    terrain_vertices: &[f32], // flat [x,y,z …] from the actual rendered mesh
+    w: usize,
+    h: usize,
+    is_gpu_layout: bool,
+) -> Option<f64> {
+    // Need at least a 2×2 grid: 4 pairs = 8 vertices = 24 floats
+    if terrain_vertices.len() < 24 || w < 2 || h < 2 {
+        return None;
+    }
+
+    let layer_size = w * h;
+    let expected_floats = layer_size * 2 * 3; // 2 layers, 3 components each
+    if terrain_vertices.len() < expected_floats {
+        return None;
+    }
+
+    // Helper: get the top-layer Z value for grid cell (xi, yi)
+    let top_z = |xi: usize, yi: usize| -> f64 {
+        let cell = yi * w + xi;
+        let float_idx = if is_gpu_layout {
+            // GPU: top vertex = cell * 2, z is at offset +2
+            cell * 2 * 3 + 2
+        } else {
+            // CPU: top layer starts at layer_size vertices
+            (layer_size + cell) * 3 + 2
+        };
+        terrain_vertices[float_idx] as f64
+    };
+
+    // ── Bilinear interpolation ────────────────────────────────────────────────
+    let half = TERRAIN_SIZE / 2.0;
+    let nx = ((mesh_x + half) / TERRAIN_SIZE).clamp(0.0, 1.0);
+    let ny = ((mesh_y + half) / TERRAIN_SIZE).clamp(0.0, 1.0);
+
+    let fx = nx * (w - 1) as f64;
+    let fy = ny * (h - 1) as f64;
+
+    let x0 = fx.floor() as usize;
+    let y0 = fy.floor() as usize;
+    let x1 = (x0 + 1).min(w - 1);
+    let y1 = (y0 + 1).min(h - 1);
+
+    let dx = fx - x0 as f64;
+    let dy = fy - y0 as f64;
+
+    let z00 = top_z(x0, y0);
+    let z10 = top_z(x1, y0);
+    let z01 = top_z(x0, y1);
+    let z11 = top_z(x1, y1);
+
+    let z0 = z00 * (1.0 - dx) + z10 * dx;
+    let z1 = z01 * (1.0 - dx) + z11 * dx;
+
+    Some(z0 * (1.0 - dy) + z1 * dy)
+}
+
+/// Sample the terrain surface Z at a mesh-space (x, y) point by bilinear
+/// interpolation of the actual rendered terrain mesh vertices stored in the
+/// thread-local `TERRAIN_MESH_VERTS` (and companion dimension/layout thread-locals).
 fn sample_terrain_mesh_height_at_point(
     mesh_x: f64,
     mesh_y: f64,
-    elevation_grid: &[Vec<f64>],
-    grid_size: &GridSize,
+    _elevation_grid: &[Vec<f64>],
+    _grid_size: &GridSize,
     _bbox: &[f64],
-    min_elevation: f64,
-    max_elevation: f64,
-    vertical_exaggeration: f64,
-    terrain_base_height: f64,
+    _min_elevation: f64,
+    _max_elevation: f64,
+    _vertical_exaggeration: f64,
+    _terrain_base_height: f64,
 ) -> f64 {
-    // Replicate the EXACT same algorithm used in terrain_mesh_gen.rs
-    // Convert mesh coordinates to normalized terrain grid coordinates (0.0 to 1.0)
-    // Mesh coordinates range from -100 to +100 (TERRAIN_SIZE = 200)
-    let half_size = TERRAIN_SIZE / 2.0;
-    let normalized_x = ((mesh_x + half_size) / TERRAIN_SIZE).clamp(0.0, 1.0);
-    let normalized_y = ((mesh_y + half_size) / TERRAIN_SIZE).clamp(0.0, 1.0);
-
-    // Sample elevation using bilinear interpolation from the grid
-    let elevation = sample_elevation_from_grid(normalized_x, normalized_y, elevation_grid, grid_size);
-
-    // Apply the EXACT same scaling as terrain_mesh_gen.rs
-    let elevation_range = f64::max(1.0, max_elevation - min_elevation);
-    let normalized_elevation = ((elevation - min_elevation) / elevation_range).clamp(0.0, 1.0);
-    let scaled_exaggeration = vertical_exaggeration * EXAGGERATION_SCALE_FACTOR;
-    let elevation_variation = normalized_elevation * scaled_exaggeration;
-
-    // Calculate final terrain height: base + elevation variation
-    let new_z = terrain_base_height + elevation_variation;
-
-    // Apply the same minimum constraint as terrain mesh generation
-    const MIN_TERRAIN_THICKNESS: f64 = 0.3;
-    new_z.max(MIN_TERRAIN_THICKNESS)
+    TERRAIN_MESH_VERTS.with(|verts| {
+        let borrowed = verts.borrow();
+        let w = TERRAIN_GRID_W.with(|c| *c.borrow());
+        let h = TERRAIN_GRID_H.with(|c| *c.borrow());
+        let is_gpu = TERRAIN_IS_GPU_LAYOUT.with(|c| *c.borrow());
+        match sample_terrain_height_from_mesh(mesh_x, mesh_y, &borrowed, w, h, is_gpu) {
+            Some(z) => z,
+            None => {
+                0.0
+            }
+        }
+    })
 }
 
-// Helper function to sample elevation from grid (same logic as terrain mesh generation)
+// Used only by the removed DEM-formula path; kept so other modules can reference
+// it if needed in the future.
+#[allow(dead_code)]
 fn sample_elevation_from_grid(
     normalized_x: f64,
     normalized_y: f64,
@@ -728,7 +823,9 @@ fn clip_mesh_to_bbox_3d(
     (new_vertices, new_indices)
 }
 
-// Sample a terrain elevation at a specific geographic point with proper scaling
+// Sample a terrain elevation at a specific geographic point with proper scaling.
+// Kept for reference / debugging but superseded by sample_terrain_mesh_height_at_point.
+#[allow(dead_code)]
 fn sample_terrain_elevation_at_point(
     lng: f64,
     lat: f64,
@@ -775,22 +872,19 @@ fn sample_terrain_elevation_at_point(
 
     let elevation = v0 * (1.0 - dy) + v1 * dy;
 
-    // Apply the same scaling as terrain generation (must match terrain_mesh_gen.rs exactly)
+    // Apply the EXACT same scaling as terrain_mesh_gen.rs (must match exactly)
     let elevation_range = f64::max(1.0, max_elevation - min_elevation);
-    let normalized_elevation = (elevation - min_elevation) / elevation_range;
-    let base_box_height = terrain_base_height; // Use terrain base height as box height (no magic numbers)
+    // CRITICAL: clamp normalized_elevation to [0,1] exactly as terrain_mesh_gen.rs does
+    let normalized_elevation = ((elevation - min_elevation) / elevation_range).clamp(0.0, 1.0);
     let scaled_exaggeration = vertical_exaggeration * EXAGGERATION_SCALE_FACTOR;
-    let elevation_variation = normalized_elevation * scaled_exaggeration; // Apply scale factor like terrain.rs
+    let elevation_variation = normalized_elevation * scaled_exaggeration;
 
+    // Calculate final terrain height: base + elevation variation
+    let new_z = terrain_base_height + elevation_variation;
 
-    // Calculate final terrain height
-    let final_height = base_box_height + elevation_variation;
-
-    // SAFETY: Ensure terrain height never goes below base height
-    let safe_height = final_height.max(base_box_height);
-
-
-    safe_height
+    // Apply the SAME minimum constraint as terrain_mesh_gen.rs (MIN_TERRAIN_THICKNESS = 0.3)
+    const MIN_TERRAIN_THICKNESS_LOCAL: f64 = 0.3;
+    new_z.max(MIN_TERRAIN_THICKNESS_LOCAL)
 }
 
 /// Sample raw elevation (in meters) at a geographic point WITHOUT vertical exaggeration.
@@ -1844,7 +1938,8 @@ fn create_extruded_shape(
             let vert_exag = vertical_exaggeration.unwrap();
             let base_height = terrain_base_height.unwrap();
 
-            // Find the original geometry's min and max Z to determine the extrusion height
+            // Find the original geometry's min and max Z to determine the extrusion height.
+            // The extrude function produces Z=0 for bottom and Z=height for top vertices.
             let mut original_min_z = f32::INFINITY;
             let mut original_max_z = f32::NEG_INFINITY;
             for i in (0..vertices.len()).step_by(3) {
@@ -1854,12 +1949,12 @@ fn create_extruded_shape(
             }
             let extrusion_height = (original_max_z - original_min_z) as f64;
 
-            // Process EVERY vertex individually - sample terrain at each vertex's X,Y position
+            // Process EVERY vertex individually - sample terrain at each vertex's X,Y position.
             let vertex_count = vertices.len() / 3;
-            
+
             for vertex_idx in 0..vertex_count {
                 let base_idx = vertex_idx * 3;
-                
+
                 // Get this vertex's X, Y position in mesh coordinates
                 let mesh_x = vertices[base_idx] as f64;
                 let mesh_y = vertices[base_idx + 1] as f64;
@@ -1878,19 +1973,25 @@ fn create_extruded_shape(
                     base_height,
                 );
 
-                // Determine if this is a bottom or top vertex based on original Z
-                // Bottom vertices are at original_min_z (typically 0 from extrusion)
-                // Top vertices are at original_max_z (extrusion height)
-                let is_bottom_vertex = (current_z - original_min_z).abs() < 0.1;
-                
-                // Set the new Z for this vertex based on terrain at THIS position
-                if is_bottom_vertex {
-                    // Bottom vertex: align to terrain surface at this X,Y + small clearance
-                    vertices[base_idx + 2] = (terrain_height_at_this_point + MIN_CLEARANCE) as f32;
+                // Compute a normalized height fraction [0..1] relative to the original
+                // extrusion range. This correctly handles side-wall midpoint vertices
+                // introduced by subdivide_triangular_mesh_3d (whose Z lies between 0 and
+                // extrusion_height), instead of using a fixed absolute threshold of 0.1
+                // which misclassifies vertices when extrusion_height is large.
+                let t = if extrusion_height > 1e-6 {
+                    ((current_z - original_min_z) as f64 / extrusion_height).clamp(0.0, 1.0)
                 } else {
-                    // Top vertex: terrain height at this X,Y + clearance + extrusion height
-                    vertices[base_idx + 2] = (terrain_height_at_this_point + MIN_CLEARANCE + extrusion_height) as f32;
-                }
+                    0.0
+                };
+
+                // Interpolate: bottom (t=0) sits at terrain + base_clearance; top (t=1)
+                // adds the full extrusion height.  Side-wall midpoints are interpolated,
+                // which keeps the geometry continuous across extreme exaggeration values.
+                // base_clearance:
+                //   buildings  → -BUILDING_SUBMERGE_OFFSET  (embeds slightly into terrain)
+                //   other layers → user_z_offset + MIN_CLEARANCE (floats above terrain)
+                vertices[base_idx + 2] =
+                    (terrain_height_at_this_point + MIN_CLEARANCE + t * extrusion_height) as f32;
             }
         }
     }
@@ -1931,19 +2032,92 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
         Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
     };
 
+    // ── Load actual terrain mesh vertices into thread-local for sampling ──────
+    // This is the Float32Array produced by terrain_mesh_gen / gpu_terrain and
+    // sent back as a comma-separated CSV in `terrain_vertices_base64`.
+    // All height sampling will query these real mesh Z values instead of
+    // re-running the DEM formula, which may differ from the GPU terrain path.
+    if !input.terrain_vertices_base64.is_empty() {
+        match decode_base64_to_f32_vec(&input.terrain_vertices_base64) {
+            Ok(verts) if !verts.is_empty() => {
+                // Determine and cache grid dimensions.
+                // TypeScript sends explicit terrainGridWidth / terrainGridHeight when known.
+                // Fall back to deriving from vertex count (assumes square grid) only when 0.
+                let (w, h) = if input.terrain_grid_width > 0 && input.terrain_grid_height > 0 {
+                    (input.terrain_grid_width as usize, input.terrain_grid_height as usize)
+                } else {
+                    // Auto-detect: total_verts = 2 * W * H (both layouts)
+                    let total_verts = verts.len() / 3;
+                    let layer = total_verts / 2;
+                    let w_auto = (layer as f64).sqrt().round() as usize;
+                    (w_auto, w_auto)
+                };
+
+                // Detect layout: if TypeScript sent the flag, trust it.
+                // Otherwise fall back to structural check: for GPU layout vertex 0
+                // (top vertex) has z == terrain_base_height + elevation_variation > 0.
+                // For CPU layout vertex 0 is a bottom vertex with z == 0.
+                // We compare x,y of vertex 0 and vertex 1: GPU interleaving means
+                // the bottom vertex (v1) shares the same x,y as the top vertex (v0).
+                let is_gpu = if input.terrain_grid_width > 0 {
+                    // Explicit flag sent from TypeScript
+                    input.terrain_is_gpu_layout
+                } else if verts.len() >= 6 {
+                    // Structural heuristic: GPU layout pairs top+bottom at same (x,y).
+                    // So vertices 0 and 1 have identical x and y.
+                    let x0 = verts[0];
+                    let y0 = verts[1];
+                    let x1 = verts[3];
+                    let y1 = verts[4];
+                    (x0 - x1).abs() < 1e-4 && (y0 - y1).abs() < 1e-4
+                } else {
+                    false
+                };
+
+                // Log what we detected so it's visible in the browser console.
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+                    "[terrain-sample] verts={} floats, w={}, h={}, gpu_layout={}, \
+                     v0=({:.2},{:.2},{:.2}), v1=({:.2},{:.2},{:.2})",
+                    verts.len(), w, h, is_gpu,
+                    verts[0], verts[1], verts[2],
+                    verts.get(3).copied().unwrap_or(0.0),
+                    verts.get(4).copied().unwrap_or(0.0),
+                    verts.get(5).copied().unwrap_or(0.0),
+                )));
+                TERRAIN_GRID_W.with(|c| *c.borrow_mut() = w);
+                TERRAIN_GRID_H.with(|c| *c.borrow_mut() = h);
+                TERRAIN_IS_GPU_LAYOUT.with(|c| *c.borrow_mut() = is_gpu);
+                TERRAIN_MESH_VERTS.with(|cell| {
+                    *cell.borrow_mut() = verts;
+                });
+            }
+            _ => {
+                // Parsing failed or empty – clear any stale data so fallback is used
+                TERRAIN_MESH_VERTS.with(|cell| cell.borrow_mut().clear());
+                TERRAIN_GRID_W.with(|c| *c.borrow_mut() = 0);
+                TERRAIN_GRID_H.with(|c| *c.borrow_mut() = 0);
+            }
+        }
+    } else {
+        TERRAIN_MESH_VERTS.with(|cell| cell.borrow_mut().clear());
+        TERRAIN_GRID_W.with(|c| *c.borrow_mut() = 0);
+        TERRAIN_GRID_H.with(|c| *c.borrow_mut() = 0);
+    }
+
     // Compute dataset terrain extremes by sampling the elevation grid
     const SAMPLE_COUNT: usize = 10;
     let mut dataset_lowest_z = f64::INFINITY;
     let mut dataset_highest_z = f64::NEG_INFINITY;
     for i in 0..SAMPLE_COUNT {
         let t_i = i as f64 / ((SAMPLE_COUNT - 1) as f64);
-        let sample_lng = input.bbox[0] + (input.bbox[2] - input.bbox[0]) * t_i;
+        // Sample in mesh coordinates (−100 … +100) so the thread-local mesh path is used
+        let sample_mesh_x = (t_i * TERRAIN_SIZE) - TERRAIN_SIZE / 2.0;
         for j in 0..SAMPLE_COUNT {
             let t_j = j as f64 / ((SAMPLE_COUNT - 1) as f64);
-            let sample_lat = input.bbox[1] + (input.bbox[3] - input.bbox[1]) * t_j;
-            let elev = sample_terrain_elevation_at_point(
-                sample_lng,
-                sample_lat,
+            let sample_mesh_y = (t_j * TERRAIN_SIZE) - TERRAIN_SIZE / 2.0;
+            let elev = sample_terrain_mesh_height_at_point(
+                sample_mesh_x,
+                sample_mesh_y,
                 &input.elevation_grid,
                 &input.grid_size,
                 &input.bbox,
@@ -1956,10 +2130,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             dataset_highest_z = dataset_highest_z.max(elev);
         }
     }
-    let _dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
-
-    // Use the correctly calculated dataset terrain extremes (don't overwrite with raw elevation)
-    // dataset_lowest_z and dataset_highest_z are already correctly calculated above
     let _dataset_range = dataset_highest_z - dataset_lowest_z + 0.1;
 
     if input.polygons.is_empty() {
@@ -1997,8 +2167,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
     // Process polygons in chunks to prevent timeouts
 
     for (chunk_index, chunk) in input.polygons.chunks(MAX_CHUNK_SIZE).enumerate() {
-        let chunk_perf_start = js_sys::Date::now();
-
         let chunk_start = chunk_index * MAX_CHUNK_SIZE;
         let geometries_result: Result<Vec<_>, String> = chunk
             .iter()
@@ -2535,12 +2703,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     // For terrain-aligned layers, add clearance to prevent z-fighting
                     let is_building = !input.vt_data_set.align_vertices_to_terrain.unwrap_or(false);
                     let z_offset = if is_building {
-                        // Buildings: position at lowest terrain point, applying user offset and submerge
-                        // user_z_offset is typically negative (e.g., -0.01) to push buildings down
-                        // We ADD user_z_offset (which adds a negative, i.e., subtracts) and subtract submerge
                         lowest_terrain_z + user_z_offset - BUILDING_SUBMERGE_OFFSET
                     } else {
-                        // Other layers: add clearance above terrain
                         lowest_terrain_z + user_z_offset + MIN_CLEARANCE
                     };
 
@@ -2608,7 +2772,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     // This ensures buildings extend from the lowest terrain point up past the highest
                     // terrain point UNDER THIS SPECIFIC BUILDING (not the entire dataset)
                     if is_building && polygon_terrain_z_difference > 0.01 {
-                    web_sys::console::log_1(&JsValue::from_str(&format!("polygon_terrain_z_difference: {}", polygon_terrain_z_difference)));
                         // polygon_terrain_z_difference is the terrain slope under this building only
                         height += polygon_terrain_z_difference;
                     }
@@ -2616,9 +2779,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                     // Final clamp in terrain units
                     height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
 
-                    // For terrain alignment, pass RAW (unscaled) vertical_exaggeration and terrain_base_height
-                    // The sample_terrain_mesh_height_at_point function will apply EXAGGERATION_SCALE_FACTOR
-                    // to match exactly what terrain_mesh_gen.rs does
                     let geometry = create_extruded_shape(
                         &cleaned_points,
                         transformed_holes.as_ref(),
@@ -2631,8 +2791,8 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
                         Some(&input.bbox),
                         Some(input.min_elevation),
                         Some(input.max_elevation),
-                        Some(input.vertical_exaggeration),  // RAW value, not scaled by meters_to_units
-                        Some(input.terrain_base_height),    // RAW value, not scaled by meters_to_units
+                        Some(input.vertical_exaggeration),
+                        Some(input.terrain_base_height),
                         Some(&input.vt_data_set.source_layer),
                         Some(&input.terrain_vertices_base64),
                         Some(&input.terrain_indices_base64),
@@ -2652,10 +2812,6 @@ pub fn create_polygon_geometry(input_json: &str) -> Result<String, String> {
             .map_err(|e| format!("Chunk {} processing error: {}", chunk_index + 1, e))?;
         let chunk_valid_geometries: Vec<BufferGeometry> =
             chunk_geometries.into_iter().filter_map(|opt| opt).collect();
-
-        let chunk_time = js_sys::Date::now() - chunk_perf_start;
-        web_sys::console::log_1(&format!("⏱️ [{}] Chunk {}/{}: {:.0}ms, {} valid geometries", 
-            input.vt_data_set.source_layer, chunk_index + 1, chunk_count, chunk_time, chunk_valid_geometries.len()).into());
 
         // Add chunk geometries to the overall collection
         all_geometries.extend(chunk_valid_geometries);

@@ -852,10 +852,17 @@ const ModelPreview = () => {
               layer => layer.label === layerKey2 || layer.sourceLayer === layerKey2
             );
             const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
+            // hasBakedTerrainZ: WASM baked per-polygon terrain Z into the geometry (e.g. buildings)
+            const hasBakedTerrainZ = currentLayerConfig?.hasBakedTerrainZ === true;
 
             if (hasTerrainAlignment) {
-              // Terrain-aligned layers: only use zOffset (vertices already positioned on terrain)
+              // Terrain-aligned: vertices already positioned on terrain, only apply zOffset
               child.position.z = zOffset;
+            } else if (hasBakedTerrainZ) {
+              // Baked-Z (buildings): position.z = per-mesh bakedBottomZ + zOffset.
+              // bakedBottomZ was stored in userData at build time.
+              const bakedBottomZ = (child.userData?.bakedBottomZ as number) ?? 0;
+              child.position.z = bakedBottomZ + zOffset;
             } else {
               // Non-terrain-aligned layers: position at base height + zOffset
               child.position.z = terrainSettings.baseHeight + zOffset;
@@ -999,6 +1006,10 @@ const ModelPreview = () => {
 
                 // Check if this layer has per-vertex terrain alignment
                 const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
+                // hasBakedTerrainZ: WASM baked per-polygon terrain Z into vertices (e.g. buildings).
+                // We translate each geometry so its base sits at local Z=0, then reposition the
+                // mesh to the baked base — this lets scale.z grow height upward from the base.
+                const hasBakedTerrainZ = currentLayerConfig?.hasBakedTerrainZ === true;
 
                 // Create mesh
                 const polygonMesh = new THREE.Mesh(splitGeom, polygonMaterial);
@@ -1011,14 +1022,30 @@ const ModelPreview = () => {
                 polygonMesh.scale.z = layerHeightScaleFactor;
 
                 if (hasTerrainAlignment) {
-                  // Per-vertex terrain alignment: vertices already have correct Z positions
-                  // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
+                  // Per-vertex terrain alignment: vertices already have correct Z positions.
+                  // Only apply a small zOffset to prevent z-fighting.
                   polygonMesh.position.z = layerZOffset;
 
-                  // Debug: log actual vertex Z range to verify alignment
                   if (!splitGeom.boundingBox) {
                     splitGeom.computeBoundingBox();
                   }
+                } else if (hasBakedTerrainZ) {
+                  // Baked-Z (buildings): each polygon has its terrain base baked into vertices.
+                  // Translate so the building base sits at local Z=0, then position the mesh
+                  // at that baked base. scale.z then correctly scales height from the base up.
+                  if (!splitGeom.boundingBox) {
+                    splitGeom.computeBoundingBox();
+                  }
+                  const bakedBottomZ = splitGeom.boundingBox?.min.z ?? 0;
+                  splitGeom.translate(0, 0, -bakedBottomZ);
+                  polygonMesh.position.z = bakedBottomZ + layerZOffset;
+
+                  // Store bakedBottomZ so live-update can recompute position when scale changes
+                  polygonMesh.userData = {
+                    sourceLayer: vtDataset.sourceLayer,
+                    label: vtDataset.label || vtDataset.sourceLayer,
+                    bakedBottomZ
+                  };
                 } else {
                   // Non-terrain-aligned: adjust geometry origin and position at base height
                   let originalBottomZ = 0;
@@ -1031,7 +1058,7 @@ const ModelPreview = () => {
                     splitGeom.translate(0, 0, -originalBottomZ);
                   }
 
-                  // Position mesh using the layer's configured zOffset value
+                  // Position mesh at configured base height
                   polygonMesh.position.z = terrainSettings.baseHeight + layerZOffset;
                 }
                 polygonMesh.castShadow = renderingMode === 'quality';
@@ -1042,11 +1069,12 @@ const ModelPreview = () => {
                 polygonMesh.visible = isCurrentlyEnabled;
 
 
-                // Set minimal userData needed for layer identification in live updates
-                polygonMesh.userData = {
+                // Set minimal userData needed for layer identification in live updates.
+                // Use Object.assign to preserve any branch-specific data (e.g. bakedBottomZ).
+                polygonMesh.userData = Object.assign(polygonMesh.userData ?? {}, {
                   sourceLayer: vtDataset.sourceLayer,
                   label: vtDataset.label || vtDataset.sourceLayer
-                };
+                });
 
                 modelGroup.add(polygonMesh);
               }); // End of splitGeoms.forEach
@@ -1071,6 +1099,8 @@ const ModelPreview = () => {
 
           // Check if this layer has per-vertex terrain alignment
           const hasTerrainAlignment = currentLayerConfig?.alignVerticesToTerrain === true;
+          // hasBakedTerrainZ: WASM baked per-polygon terrain Z into vertices (e.g. buildings).
+          const hasBakedTerrainZ = currentLayerConfig?.hasBakedTerrainZ === true;
 
           // Create mesh
           const polygonMesh = new THREE.Mesh(geometry, polygonMaterial);
@@ -1082,6 +1112,20 @@ const ModelPreview = () => {
             // Per-vertex terrain alignment: vertices already have correct Z positions
             // Only apply a small zOffset to prevent z-fighting, don't reposition the mesh
             polygonMesh.position.z = layerZOffset;
+          } else if (hasBakedTerrainZ) {
+            // Baked-Z (buildings): translate base to local Z=0, position mesh at baked base.
+            // scale.z then scales height upward from the base correctly.
+            if (!geometry.boundingBox) {
+              geometry.computeBoundingBox();
+            }
+            const bakedBottomZ = geometry.boundingBox?.min.z ?? 0;
+            geometry.translate(0, 0, -bakedBottomZ);
+            polygonMesh.position.z = bakedBottomZ + layerZOffset;
+            polygonMesh.userData = {
+              sourceLayer: vtDataset.sourceLayer,
+              label: vtDataset.label || vtDataset.sourceLayer,
+              bakedBottomZ
+            };
           } else {
             // Non-terrain-aligned: adjust geometry origin and position at base height
             let originalBottomZ = 0;
@@ -1104,11 +1148,12 @@ const ModelPreview = () => {
           polygonMesh.visible = isCurrentlyEnabled;
 
 
-          // Set minimal userData needed for layer identification in live updates
-          polygonMesh.userData = {
+          // Set minimal userData needed for layer identification in live updates.
+          // Use Object.assign to preserve any branch-specific data (e.g. bakedBottomZ).
+          polygonMesh.userData = Object.assign(polygonMesh.userData ?? {}, {
             sourceLayer: vtDataset.sourceLayer,
             label: vtDataset.label || vtDataset.sourceLayer
-          };
+          });
 
           modelGroup.add(polygonMesh);
         });

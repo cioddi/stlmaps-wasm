@@ -38,6 +38,9 @@ export interface VtDataSet {
   minExtrusionDepth?: number;
   zOffset: number;
   alignVerticesToTerrain: boolean;
+  /** When true, the WASM layer has already baked per-polygon terrain Z into the geometry.
+   *  ModelPreview must NOT translate/reposition this geometry. */
+  hasBakedTerrainZ?: boolean;
   applyMedianHeight?: boolean;
   addTerrainDifferenceToHeight?: boolean; // Add terrain slope difference to building height
   useCsgClipping: boolean;
@@ -297,6 +300,7 @@ const defaultLayers: VtDataSet[] = [
     bufferSize: 0,
     zOffset: -0.01,
     alignVerticesToTerrain: false,
+    hasBakedTerrainZ: true, // WASM samples terrain per-polygon and bakes Z into geometry vertices
     applyMedianHeight: false,
     addTerrainDifferenceToHeight: true, // Add terrain slope to building height for consistent roofs
     useCsgClipping: false,

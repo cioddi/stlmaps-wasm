@@ -195,6 +195,10 @@ interface LayerProcessingInput {
     originalMaxElevation: number;
     processedMinElevation: number;
     processedMaxElevation: number;
+    /** Flat [x,y,z, x,y,z, …] position array of the actual rendered terrain mesh. */
+    terrainVertices?: Float32Array | ArrayLike<number>;
+    /** Index array of the actual rendered terrain mesh. */
+    terrainIndices?: Uint32Array | ArrayLike<number>;
   };
   terrainSettings: any;
   debugMode: boolean;
@@ -622,6 +626,25 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
     } as WorkerResponse);
 
     // Step 2: Create polygon geometry
+    // Compute terrain vertex-grid dimensions so Rust never has to guess.
+    // Both CPU and GPU terrain encode exactly 2*W*H vertices in the positions array.
+    const terrainVerts = terrainData.terrainVertices;
+    const totalTerrainVerts = terrainVerts ? terrainVerts.length / 3 : 0;
+    // Both layouts produce an even number of vertices (top + bottom layer).
+    const terrainLayerSize = totalTerrainVerts / 2; // W * H
+    // Compute W and H: both terrain backends produce square grids.
+    const terrainGridW = terrainLayerSize > 0 ? Math.round(Math.sqrt(terrainLayerSize)) : 0;
+    const terrainGridH = terrainGridW;
+    // GPU layout detection: in the GPU interleaved layout vertex 0 (top) and vertex 1
+    // (bottom) share the same (x, y).  In the CPU layered layout vertex 1 is the next
+    // grid column so its x differs.
+    let terrainIsGpuLayout = false;
+    if (terrainVerts && terrainVerts.length >= 6) {
+      const x0 = terrainVerts[0], y0 = terrainVerts[1];
+      const x1 = terrainVerts[3], y1 = terrainVerts[4];
+      terrainIsGpuLayout = Math.abs(x0 - x1) < 1e-4 && Math.abs(y0 - y1) < 1e-4;
+    }
+
     const polygonGeometryInput = {
       terrainBaseHeight: terrainSettings.baseHeight,
       verticalExaggeration: terrainSettings.verticalExaggeration,
@@ -631,8 +654,12 @@ async function processLayerInWorker(input: LayerProcessingInput): Promise<any> {
       minElevation: terrainData.originalMinElevation,
       maxElevation: terrainData.originalMaxElevation,
       // Add terrain mesh data as CSV strings for easy serialization
-      terrainVerticesBase64: terrainData.terrainVertices ? Array.from(terrainData.terrainVertices).join(',') : '',
+      terrainVerticesBase64: terrainVerts ? Array.from(terrainVerts).join(',') : '',
       terrainIndicesBase64: terrainData.terrainIndices ? Array.from(terrainData.terrainIndices).join(',') : '',
+      // Explicit grid dimensions so the Rust sampler never has to guess
+      terrainGridWidth: terrainGridW,
+      terrainGridHeight: terrainGridH,
+      terrainIsGpuLayout,
       vtDataSet: {
         ...layerConfig,
         geometryDebugMode: debugMode

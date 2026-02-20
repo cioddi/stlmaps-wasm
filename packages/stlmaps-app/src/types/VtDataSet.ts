@@ -16,6 +16,9 @@ export interface VtDataSet {
   minExtrusionDepth?: number;
   zOffset: number;
   alignVerticesToTerrain: boolean;
+  /** When true, the WASM layer has already baked per-polygon terrain Z into the geometry.
+   *  ModelPreview must NOT translate/reposition this geometry — treat like terrain-aligned. */
+  hasBakedTerrainZ?: boolean;
   applyMedianHeight: boolean;
   useCsgClipping: boolean; // Renamed for consistency
   geometryDebugMode?: boolean; // Skip processing like linestring buffering and polygon extrusion
