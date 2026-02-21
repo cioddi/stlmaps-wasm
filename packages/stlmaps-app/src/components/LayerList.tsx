@@ -248,7 +248,7 @@ const LayerList: React.FC = () => {
   };
 
   return (
-    <Box sx={{ width: '100%', maxHeight: '100%', overflowY: 'auto', px: 1 }}>
+    <Box sx={{ width: '100%', overflowY: 'auto', px: 1 }}>
       {/* Terrain Layer */}
       <StyledPaper sx={{ marginTop: 2 }}>
         <LayerHeader active={terrainSettings.enabled} onClick={() => toggleExpand('terrain')}>
